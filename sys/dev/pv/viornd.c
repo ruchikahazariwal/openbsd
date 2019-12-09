@@ -83,6 +83,7 @@ int viornd_match(struct device *parent, void *match, void *aux)
 void
 viornd_attach(struct device *parent, struct device *self, void *aux)
 {
+	printf("%s - attaching rnd cmpe\n",__func__);
 	struct viornd_softc *sc = (struct viornd_softc *)self;
 	struct virtio_softc *vsc = (struct virtio_softc *)parent;
 	unsigned int shift;
