@@ -134,7 +134,7 @@ viomb_match(struct device *parent, void *match, void *aux)
 void
 viomb_attach(struct device *parent, struct device *self, void *aux)
 {
-	printf("%s\n",_func_);
+	printf("%s\n",__func__);
 	struct viomb_softc *sc = (struct viomb_softc *)self;
 	struct virtio_softc *vsc = (struct virtio_softc *)parent;
 	int i;
