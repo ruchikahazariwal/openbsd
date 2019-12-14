@@ -41,7 +41,7 @@
 #define	VIORND_ONESHOT			0x1000
 #define	VIORND_BUFSIZE			16
 
-#define VIORND_DEBUG 0
+#define VIORND_DEBUG 1
 
 struct viornd_softc {
 	struct device		 sc_dev;
@@ -155,6 +155,10 @@ err:
 int
 viornd_vq_done(struct virtqueue *vq)
 {
+	#if VIORND_DEBUG
+		printf("%s - CMPE_RND\n", __func__);
+	#endif
+
 	struct virtio_softc *vsc = vq->vq_owner;
 	struct viornd_softc *sc = (struct viornd_softc *)vsc->sc_child;
 	int slot, len, i;
@@ -186,6 +190,10 @@ out:
 void
 viornd_tick(void *arg)
 {
+	#if VIORND_DEBUG
+		printf("%s - CMPE_RND\n", __func__);
+	#endif
+
 	struct viornd_softc *sc = arg;
 	struct virtio_softc *vsc = sc->sc_virtio;
 	struct virtqueue *vq = &sc->sc_vq;
