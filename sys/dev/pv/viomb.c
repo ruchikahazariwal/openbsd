@@ -53,6 +53,8 @@
 #define VIOMBDEBUG(...)
 #endif
 
+#define CMPE_VIOMB_DEBUG 1
+
 /* flags used to specify kind of operation,
  * actually should be moved to virtiovar.h
  */
@@ -125,6 +127,10 @@ struct cfdriver viomb_cd = {
 int
 viomb_match(struct device *parent, void *match, void *aux)
 {
+	#if CMPE_VIOMB_DEBUG
+		printf("%s - CMPE", __func__);
+	#endif
+
 	struct virtio_softc *va = aux;
 	if (va->sc_childdevid == PCI_PRODUCT_VIRTIO_BALLOON)
 		return (1);
@@ -134,7 +140,11 @@ viomb_match(struct device *parent, void *match, void *aux)
 void
 viomb_attach(struct device *parent, struct device *self, void *aux)
 {
-	printf("%s - attaching viomb cmpe\n",__func__);
+	#if CMPE_VIOMB_DEBUG
+		printf("%s - CMPE", __func__);
+	#endif
+
+
 	struct viomb_softc *sc = (struct viomb_softc *)self;
 	struct virtio_softc *vsc = (struct virtio_softc *)parent;
 	int i;
@@ -240,6 +250,10 @@ err:
 int
 viomb_config_change(struct virtio_softc *vsc)
 {
+	#if CMPE_VIOMB_DEBUG
+		printf("%s - CMPE", __func__);
+	#endif
+
 	struct viomb_softc *sc = (struct viomb_softc *)vsc->sc_child;
 
 	task_add(sc->sc_taskq, &sc->sc_task);
@@ -250,6 +264,10 @@ viomb_config_change(struct virtio_softc *vsc)
 void
 viomb_worker(void *arg1)
 {
+	#if CMPE_VIOMB_DEBUG
+		printf("%s - CMPE", __func__);
+	#endif
+
 	struct viomb_softc *sc = (struct viomb_softc *)arg1;
 	int s;
 
@@ -275,6 +293,10 @@ viomb_worker(void *arg1)
 void
 viomb_inflate(struct viomb_softc *sc)
 {
+	#if CMPE_VIOMB_DEBUG
+		printf("%s - CMPE", __func__);
+	#endif
+
 	struct virtio_softc *vsc = (struct virtio_softc *)sc->sc_virtio;
 	struct balloon_req *b;
 	struct vm_page *p;
@@ -326,6 +348,10 @@ err:
 void
 viomb_deflate(struct viomb_softc *sc)
 {
+	#if CMPE_VIOMB_DEBUG
+		printf("%s - CMPE", __func__);
+	#endif
+
 	struct virtio_softc *vsc = (struct virtio_softc *)sc->sc_virtio;
 	struct balloon_req *b;
 	struct vm_page *p;
@@ -382,6 +408,10 @@ err:
 void
 viomb_read_config(struct viomb_softc *sc)
 {
+	#if CMPE_VIOMB_DEBUG
+		printf("%s - CMPE", __func__);
+	#endif
+
 	struct virtio_softc *vsc = (struct virtio_softc *)sc->sc_virtio;
 	u_int32_t reg;
 
@@ -397,6 +427,10 @@ viomb_read_config(struct viomb_softc *sc)
 int
 viomb_vq_dequeue(struct virtqueue *vq)
 {
+	#if CMPE_VIOMB_DEBUG
+		printf("%s - CMPE", __func__);
+	#endif
+
 	struct virtio_softc *vsc = vq->vq_owner;
 	struct viomb_softc *sc = (struct viomb_softc *)vsc->sc_child;
 	int r, slot;
@@ -416,6 +450,10 @@ viomb_vq_dequeue(struct virtqueue *vq)
 int
 viomb_inflate_intr(struct virtqueue *vq)
 {
+	#if CMPE_VIOMB_DEBUG
+		printf("%s - CMPE", __func__);
+	#endif
+
 	struct virtio_softc *vsc = vq->vq_owner;
 	struct viomb_softc *sc = (struct viomb_softc *)vsc->sc_child;
 	struct balloon_req *b;
@@ -451,6 +489,10 @@ viomb_inflate_intr(struct virtqueue *vq)
 int
 viomb_deflate_intr(struct virtqueue *vq)
 {
+	#if CMPE_VIOMB_DEBUG
+		printf("%s - CMPE", __func__);
+	#endif
+
 	struct virtio_softc *vsc = vq->vq_owner;
 	struct viomb_softc *sc = (struct viomb_softc *)vsc->sc_child;
 	struct balloon_req *b;
