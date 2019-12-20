@@ -27,6 +27,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/syslog.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
@@ -71,6 +72,18 @@
 #define VIRTIO_BALLOON_F_MUST_TELL_HOST (1ULL<<0)
 #define VIRTIO_BALLOON_F_STATS_VQ	(1ULL<<1)
 
+#define VIRTIO_BALLOON_S_SWAP_IN  0   /* Amount of memory swapped in */
+#define VIRTIO_BALLOON_S_SWAP_OUT 1   /* Amount of memory swapped out */
+#define VIRTIO_BALLOON_S_MAJFLT   2   /* Number of major faults */
+#define VIRTIO_BALLOON_S_MINFLT   3   /* Number of minor faults */
+#define VIRTIO_BALLOON_S_MEMFREE  4   /* Total amount of free memory */
+#define VIRTIO_BALLOON_S_MEMTOT   5   /* Total amount of memory */
+#define VIRTIO_BALLOON_S_AVAIL    6   /* */
+#define VIRTIO_BALLOON_S_NR       7   /* */
+
+/* CMPE */
+#define VIOMB_BUFSIZE   16
+
 static const struct virtio_feature_name viomb_feature_names[] = {
 #if VIRTIO_DEBUG
 	{VIRTIO_BALLOON_F_MUST_TELL_HOST, "TellHost"},
@@ -81,38 +94,82 @@ static const struct virtio_feature_name viomb_feature_names[] = {
 #define PGS_PER_REQ		256	/* 1MB, 4KB/page */
 #define VQ_INFLATE	0
 #define VQ_DEFLATE	1
-
+#define VQ_STATS    2
+ 
+/*
+ * This struct will be viewed by host and driver
+ *
+ */
 struct balloon_req {
-	bus_dmamap_t	 bl_dmamap;
+	bus_dmamap_t	 bl_dmamap; //not needed for statsq, dynamic memory allocation
 	struct pglist	 bl_pglist;
-	int		 bl_nentries;
+	int		 bl_nentries;		// (sc_npages) # pages that driver will give in the current go
 	u_int32_t	*bl_pages;
 };
 
+// CMPE-H new stats queue structure
+struct virtio_balloon_stat {
+	uint16_t tag;
+	uint64_t val;
+} __attribute__((packed));
+
+/*
+ * This struct will be viewed by host and driver
+ *
+ */
+struct stats_req {
+	struct virtio_balloon_stat swap_in;
+	struct virtio_balloon_stat swap_out;
+	struct virtio_balloon_stat majflt;
+	struct virtio_balloon_stat minflt;
+	struct virtio_balloon_stat memfree;
+	struct virtio_balloon_stat memtot;
+	struct virtio_balloon_stat avail;
+	//struct virtio_balloon_stat nr;
+};
+
+
+
+
+/*
+ * Holds the global state of the viomb driver
+ * Just for driver
+ */
 struct viomb_softc {
 	struct device		sc_dev;
 	struct virtio_softc	*sc_virtio;
-	struct virtqueue	sc_vq[2];
-	u_int32_t		sc_npages; /* desired pages */
-	u_int32_t		sc_actual; /* current pages */
+	/* CMPE */
+	struct virtqueue	sc_vq[3];
+	u_int32_t		sc_npages; 			/* original Host's # desired pages */
+	u_int32_t		sc_actual; 			/* # of pages actually given by driver */
 	struct balloon_req	sc_req;
 	struct taskq		*sc_taskq;
 	struct task		sc_task;
 	struct pglist		sc_balloon_pages;
 	struct ksensor		sc_sens[2];
 	struct ksensordev	sc_sensdev;
+	struct stats_req sc_stats;         /* added the   */
 };
 
 int	viomb_match(struct device *, void *, void *);
 void	viomb_attach(struct device *, struct device *, void *);
 void	viomb_worker(void *);
+// CMPE TODO void viomb_worker_stats(void *);
 void	viomb_inflate(struct viomb_softc *);
 void	viomb_deflate(struct viomb_softc *);
-int	viomb_config_change(struct virtio_softc *);
+
+/* CMPE */
+void    viomb_stats(struct viomb_softc *);
+
+int		viomb_config_change(struct virtio_softc *);
 void	viomb_read_config(struct viomb_softc *);
 int	viomb_vq_dequeue(struct virtqueue *);
 int	viomb_inflate_intr(struct virtqueue *);
 int	viomb_deflate_intr(struct virtqueue *);
+
+/* CMPE */
+int viomb_stats_intr(struct virtqueue *);
+
 
 struct cfattach viomb_ca = {
 	sizeof(struct viomb_softc), viomb_match, viomb_attach
@@ -152,6 +209,7 @@ viomb_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
+	// vsc is global
 	sc->sc_virtio = vsc;
 	vsc->sc_vqs = &sc->sc_vq[VQ_INFLATE];
 	vsc->sc_nvqs = 0;
@@ -172,10 +230,18 @@ viomb_attach(struct device *parent, struct device *self, void *aux)
 		goto err;
 	vsc->sc_nvqs++;
 
-	sc->sc_vq[VQ_INFLATE].vq_done = viomb_inflate_intr;
+    /* CMPE */
+    if ((virtio_alloc_vq(vsc, &sc->sc_vq[VQ_STATS], VQ_STATS,
+	     sizeof(u_int32_t) * PGS_PER_REQ, 1, "stats") != 0))
+		goto err;
+	vsc->sc_nvqs++;
+
+	sc->sc_vq[VQ_INFLATE].vq_done = viomb_inflate_intr; //record the status of inflation interrupt
 	sc->sc_vq[VQ_DEFLATE].vq_done = viomb_deflate_intr;
+	sc->sc_vq[VQ_STATS].vq_done = viomb_stats_intr; /* CMPE */
 	virtio_start_vq_intr(vsc, &sc->sc_vq[VQ_INFLATE]);
 	virtio_start_vq_intr(vsc, &sc->sc_vq[VQ_DEFLATE]);
+	virtio_start_vq_intr(vsc, &sc->sc_vq[VQ_STATS]); /* CMPE */
 
 	viomb_read_config(sc);
 	TAILQ_INIT(&sc->sc_balloon_pages);
@@ -247,6 +313,12 @@ viomb_config_change(struct virtio_softc *vsc)
 	return (1);
 }
 
+/*
+ * CMPE
+ *
+ *
+ */
+
 void
 viomb_worker(void *arg1)
 {
@@ -265,6 +337,11 @@ viomb_worker(void *arg1)
 			   sc->sc_actual, sc->sc_npages);
 		viomb_deflate(sc);
 	}
+	else //not inflating or deflating so stats CMPE
+	{
+        printf("WORKER VIOMB STATS");
+        viomb_stats(sc);
+	}
 
 	sc->sc_sens[0].value = sc->sc_npages << PAGE_SHIFT;
 	sc->sc_sens[1].value = sc->sc_actual << PAGE_SHIFT;
@@ -272,21 +349,34 @@ viomb_worker(void *arg1)
 	splx(s);
 }
 
+
+/*
+ *
+  * viomb_softc defined in viomb.c
+  *
+  * Parameter: sc is a global reference to the viomb driver state
+  */
 void
 viomb_inflate(struct viomb_softc *sc)
 {
-	struct virtio_softc *vsc = (struct virtio_softc *)sc->sc_virtio;
-	struct balloon_req *b;
+	struct virtio_softc *vsc = (struct virtio_softc *)sc->sc_virtio;// casting sc to vsc
+	struct balloon_req *b;											// defined in viomb.c
 	struct vm_page *p;
 	struct virtqueue *vq = &sc->sc_vq[VQ_INFLATE];
-	u_int32_t nvpages;
+	u_int32_t nvpages;			// # pages that driver will give in this go
 	int slot, error, i = 0;
 
-	nvpages = sc->sc_npages - sc->sc_actual;
-	if (nvpages > PGS_PER_REQ)
+	nvpages = sc->sc_npages - sc->sc_actual; //calculate the total remaining pages host still needs
+	if (nvpages > PGS_PER_REQ)	//caps the next amount
 		nvpages = PGS_PER_REQ;
 	b = &sc->sc_req;
 
+	/*  API call for allocating pages
+	 *
+	 *  - creates bl_pglist of size nvpages
+	 *  - allocates memory for the entire bl_pglist
+	 *  - bl_pglist will be the list of free pages to give to host
+	 */
 	if ((error = uvm_pglistalloc(nvpages * PAGE_SIZE, 0,
 				     dma_constraint.ucr_high,
 				     0, 0, &b->bl_pglist, nvpages,
@@ -297,11 +387,20 @@ viomb_inflate(struct viomb_softc *sc)
 	}
 
 	b->bl_nentries = nvpages;
+
+	/*
+	 * (var) p: vm_page struct
+	 * (head) &b->bl_pglist:
+	 * (field)
+	 *
+	 * foreach page in bl_pglist, convert the physical address to an index and store in bl_pages
+	 */
 	TAILQ_FOREACH(p, &b->bl_pglist, pageq)
 		b->bl_pages[i++] = p->phys_addr / VIRTIO_PAGE_SIZE;
 
 	KASSERT(i == nvpages);
 
+	// checks to see if slot available and gets the slot
 	if ((virtio_enqueue_prep(vq, &slot)) > 0) {
 		printf("%s:virtio_enqueue_prep() vq_num %d\n",
 		       DEVNAME(sc), vq->vq_num);
@@ -312,10 +411,15 @@ viomb_inflate(struct viomb_softc *sc)
 		       DEVNAME(sc), vq->vq_num);
 		goto err;
 	}
+
+	// memory barrier
 	bus_dmamap_sync(vsc->sc_dmat, b->bl_dmamap, 0,
 			sizeof(u_int32_t) * nvpages, BUS_DMASYNC_PREWRITE);
+	// updates descriptor table
 	virtio_enqueue_p(vq, slot, b->bl_dmamap, 0,
 			 sizeof(u_int32_t) * nvpages, VRING_READ);
+	
+	// notifies device
 	virtio_enqueue_commit(vsc, vq, slot, VRING_NOTIFY);
 	return;
 err:
@@ -379,6 +483,57 @@ err:
 	return;
 }
 
+
+ /* CMPE
+  *
+  * viomb_softc defined in viomb.c
+  *
+  * Parameter: sc is a global reference to the viomb driver state
+  */
+void
+viomb_stats(struct viomb_softc *sc)
+{
+	struct virtio_softc *vsc = (struct virtio_softc *)sc->sc_virtio; // casting sc to vsc
+	//struct balloon_req *b;  
+	//struct stats_req *s;                                         // defined in viomb.c
+	//struct vm_page *p;
+	struct virtqueue *vq = &sc->sc_vq[VQ_STATS];
+	int slot;
+
+
+	bus_dmamap_t	 bl_dmamap;
+
+	// if that slot is occupied,
+	//
+	if ((virtio_enqueue_prep(vq, &slot)) > 0) {
+		printf("%s:virtio_enqueue_prep() vq_num %d\n",
+		       DEVNAME(sc), vq->vq_num);
+		goto err;
+	}
+	if (virtio_enqueue_reserve(vq, slot, 1)) {
+		printf("%s:virtio_enqueue_reserve vq_num %d\n",
+		       DEVNAME(sc), vq->vq_num);
+		goto err;
+	}
+
+	//from viornd "tick" function
+	// bus_dmamap_sync(vsc->sc_dmat, s, 0, VIOMB_BUFSIZE,
+	//     BUS_DMASYNC_PREREAD);
+
+	//from our "inflate" function
+	//bus_dmamap_sync(vsc->sc_dmat, b->bl_dmamap, 0,
+	//		sizeof(u_int32_t) * nvpages, BUS_DMASYNC_PREWRITE);
+
+	virtio_enqueue_p(vq, slot,  bl_dmamap, 0,
+			 sizeof(bl_dmamap) , VRING_READ);
+	virtio_enqueue_commit(vsc, vq, slot, VRING_NOTIFY);
+	return;
+err:
+	printf("Error");
+	return;
+
+}
+
 void
 viomb_read_config(struct viomb_softc *sc)
 {
@@ -411,7 +566,7 @@ viomb_vq_dequeue(struct virtqueue *vq)
 }
 
 /*
- * interrupt handling for vq's
+ * Device calls this interrupt
  */
 int
 viomb_inflate_intr(struct virtqueue *vq)
@@ -422,23 +577,30 @@ viomb_inflate_intr(struct virtqueue *vq)
 	struct vm_page *p;
 	u_int64_t nvpages;
 
+	// removes request vq from the virtqueue
 	if (viomb_vq_dequeue(vq))
 		return(1);
 
 	b = &sc->sc_req;
 	nvpages = b->bl_nentries;
+	// Sync memory barrier
 	bus_dmamap_sync(vsc->sc_dmat, b->bl_dmamap, 0,
 			sizeof(u_int32_t) * nvpages,
 			BUS_DMASYNC_POSTWRITE);
-	while (!TAILQ_EMPTY(&b->bl_pglist)) {
-		p = TAILQ_FIRST(&b->bl_pglist);
-		TAILQ_REMOVE(&b->bl_pglist, p, pageq);
-		TAILQ_INSERT_TAIL(&sc->sc_balloon_pages, p, pageq);
-	}
+	/*
+	 * copy contents from bl_pglist to sc_balloon_pages
+	 */
+	while (!TAILQ_EMPTY(&b->bl_pglist)) { //while the queue is not empty
+		p = TAILQ_FIRST(&b->bl_pglist);  // get first page "p" from bl_pglist
+		TAILQ_REMOVE(&b->bl_pglist, p, pageq); //remove "p" from queue "bl_pglist" and
+		TAILQ_INSERT_TAIL(&sc->sc_balloon_pages, p, pageq); //add "p" to local Linked List "sc_balloon_pages"
+ 	}
 	VIOMBDEBUG(sc, "updating sc->sc_actual from %u to %llu\n",
 		   sc->sc_actual, sc->sc_actual + nvpages);
+	// write to a register what the current tally of returned pages is
 	virtio_write_device_config_4(vsc, VIRTIO_BALLOON_CONFIG_ACTUAL,
 				     sc->sc_actual + nvpages);
+	// clears the interrupt ?
 	viomb_read_config(sc);
 
 	/* if we have more work to do, add it to the task list */
@@ -477,6 +639,37 @@ viomb_deflate_intr(struct virtqueue *vq)
 	/* if we have more work to do, add it to tasks list */
 	if (sc->sc_npages < sc->sc_actual)
 		task_add(sc->sc_taskq, &sc->sc_task);
+
+	return(1);
+}
+
+
+
+/*
+ * CMPE
+ * Was just copied from "viomb_deflate_intr" so need to modify
+ */
+
+int
+viomb_stats_intr(struct virtqueue *vq)
+{
+	struct virtio_softc *vsc = vq->vq_owner;
+	struct viomb_softc *sc = (struct viomb_softc *)vsc->sc_child;
+	//struct balloon_req *b;
+	struct stats_req *s;
+	//u_int64_t nvpages;
+
+	if (viomb_vq_dequeue(vq))
+		return(1);
+
+
+	s = &sc->sc_stats;
+	viomb_read_config(sc);
+
+	/* if we have more work to do, add it to tasks list */
+	
+	// if (sc->sc_npages < sc->sc_actual)
+	// 	task_add(sc->sc_taskq, &sc->sc_task);
 
 	return(1);
 }
