@@ -2554,6 +2554,20 @@ viornd_dump(int fd)
 	return (0);
 }
 
+//CMPE
+int
+viombh_dump(int fd)
+{
+	log_debug("%s: sending viombh", __func__);
+	if (atomicio(vwrite, fd, &viombh, sizeof(viombh)) != sizeof(viombh)) {
+		log_warnx("%s: error writing viombh to fd", __func__);
+		return (-1);
+	}
+	return (0);
+}
+//CMPE ends
+
+
 int
 vmmci_dump(int fd)
 {
@@ -2625,6 +2639,11 @@ virtio_dump(int fd)
 
 	if ((ret = vmmci_dump(fd)) == -1)
 		return ret;
+
+	//CMPE
+	if ((ret = viombh_dump(fd)) == -1)
+		return ret;
+	//CMPE Ends
 
 	return (0);
 }
