@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004-2006  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1999-2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,21 +14,21 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: compress.c,v 1.52.18.5 2006/03/02 00:37:21 marka Exp $ */
+/* $Id: compress.c,v 1.8 2020/01/22 13:02:09 florian Exp $ */
 
 /*! \file */
 
 #define DNS_NAME_USEINLINE 1
 
-#include <config.h>
 
-#include <isc/mem.h>
-#include <isc/string.h>
+#include <stdlib.h>
+
+#include <string.h>
 #include <isc/util.h>
 
 #include <dns/compress.h>
 #include <dns/fixedname.h>
-#include <dns/rbt.h>
+
 #include <dns/result.h>
 
 #define CCTX_MAGIC	ISC_MAGIC('C', 'C', 'T', 'X')
@@ -43,17 +42,15 @@
  ***/
 
 isc_result_t
-dns_compress_init(dns_compress_t *cctx, int edns, isc_mem_t *mctx) {
+dns_compress_init(dns_compress_t *cctx, int edns) {
 	unsigned int i;
 
 	REQUIRE(cctx != NULL);
-	REQUIRE(mctx != NULL);	/* See: rdataset.c:towiresorted(). */
 
 	cctx->allowed = 0;
 	cctx->edns = edns;
 	for (i = 0; i < DNS_COMPRESS_TABLESIZE; i++)
 		cctx->table[i] = NULL;
-	cctx->mctx = mctx;
 	cctx->count = 0;
 	cctx->magic = CCTX_MAGIC;
 	return (ISC_R_SUCCESS);
@@ -73,7 +70,7 @@ dns_compress_invalidate(dns_compress_t *cctx) {
 			cctx->table[i] = cctx->table[i]->next;
 			if (node->count < DNS_COMPRESS_INITIALNODES)
 				continue;
-			isc_mem_put(cctx->mctx, node, sizeof(*node));
+			free(node);
 		}
 	}
 	cctx->allowed = 0;
@@ -132,7 +129,7 @@ do { \
  */
 isc_boolean_t
 dns_compress_findglobal(dns_compress_t *cctx, const dns_name_t *name,
-			dns_name_t *prefix, isc_uint16_t *offset)
+			dns_name_t *prefix, uint16_t *offset)
 {
 	dns_name_t tname, nname;
 	dns_compressnode_t *node = NULL;
@@ -194,7 +191,7 @@ name_length(const dns_name_t *name) {
 
 void
 dns_compress_add(dns_compress_t *cctx, const dns_name_t *name,
-		 const dns_name_t *prefix, isc_uint16_t offset)
+		 const dns_name_t *prefix, uint16_t offset)
 {
 	dns_name_t tname;
 	unsigned int start;
@@ -204,7 +201,7 @@ dns_compress_add(dns_compress_t *cctx, const dns_name_t *name,
 	dns_compressnode_t *node;
 	unsigned int length;
 	unsigned int tlength;
-	isc_uint16_t toffset;
+	uint16_t toffset;
 
 	REQUIRE(VALID_CCTX(cctx));
 	REQUIRE(dns_name_isabsolute(name));
@@ -224,22 +221,21 @@ dns_compress_add(dns_compress_t *cctx, const dns_name_t *name,
 		hash = dns_name_hash(&tname, ISC_FALSE) %
 		       DNS_COMPRESS_TABLESIZE;
 		tlength = name_length(&tname);
-		toffset = (isc_uint16_t)(offset + (length - tlength));
+		toffset = (uint16_t)(offset + (length - tlength));
 		/*
 		 * Create a new node and add it.
 		 */
 		if (cctx->count < DNS_COMPRESS_INITIALNODES)
 			node = &cctx->initialnodes[cctx->count];
 		else {
-			node = isc_mem_get(cctx->mctx,
-					   sizeof(dns_compressnode_t));
+			node = malloc(sizeof(dns_compressnode_t));
 			if (node == NULL)
 				return;
 		}
 		node->count = cctx->count++;
 		node->offset = toffset;
 		dns_name_toregion(&tname, &node->r);
-		node->labels = (isc_uint8_t)dns_name_countlabels(&tname);
+		node->labels = (uint8_t)dns_name_countlabels(&tname);
 		node->next = cctx->table[hash];
 		cctx->table[hash] = node;
 		start++;
@@ -249,7 +245,7 @@ dns_compress_add(dns_compress_t *cctx, const dns_name_t *name,
 }
 
 void
-dns_compress_rollback(dns_compress_t *cctx, isc_uint16_t offset) {
+dns_compress_rollback(dns_compress_t *cctx, uint16_t offset) {
 	unsigned int i;
 	dns_compressnode_t *node;
 
@@ -260,13 +256,13 @@ dns_compress_rollback(dns_compress_t *cctx, isc_uint16_t offset) {
 		/*
 		 * This relies on nodes with greater offsets being
 		 * closer to the beginning of the list, and the
-		 * items with the greatest offsets being at the end 
+		 * items with the greatest offsets being at the end
 		 * of the initialnodes[] array.
 		 */
 		while (node != NULL && node->offset >= offset) {
 			cctx->table[i] = node->next;
 			if (node->count >= DNS_COMPRESS_INITIALNODES)
-				isc_mem_put(cctx->mctx, node, sizeof(*node));
+				free(node);
 			cctx->count--;
 			node = cctx->table[i];
 		}

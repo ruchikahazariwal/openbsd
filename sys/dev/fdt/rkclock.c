@@ -1,4 +1,4 @@
-/*	$OpenBSD: rkclock.c,v 1.46 2019/09/20 20:45:28 kettenis Exp $	*/
+/*	$OpenBSD: rkclock.c,v 1.49 2020/01/22 07:52:37 deraadt Exp $	*/
 /*
  * Copyright (c) 2017, 2018 Mark Kettenis <kettenis@openbsd.org>
  *
@@ -678,7 +678,7 @@ rk3288_get_frequency(void *cookie, uint32_t *cells)
 	case RK3288_CLK_MAC:
 		reg = HREAD4(sc, RK3288_CRU_CLKSEL_CON(21));
 		if (reg & 0x10)
-			return 125000000;;
+			return 125000000;
 		mux = (reg >> 0) & 0x3;
 		div_con = (reg >> 8) & 0x1f;
 		switch (mux) {
@@ -1549,6 +1549,12 @@ struct rkclock rk3399_clocks[] = {
 		  RK3399_XIN24M }
 	},
 	{
+		RK3399_CLK_EMMC, RK3399_CRU_CLKSEL_CON(22),
+		SEL(10, 8), DIV(6, 0),
+		{ RK3399_PLL_CPLL, RK3399_PLL_GPLL, RK3399_PLL_NPLL,
+		  /* RK3399_USB_480M */ 0, RK3399_XIN24M }
+	},
+	{
 		RK3399_CLK_TSADC, RK3399_CRU_CLKSEL_CON(27),
 		SEL(15, 15), DIV(9, 0),
 		{ RK3399_XIN24M, RK3399_CLK_32K }
@@ -2001,6 +2007,11 @@ struct rkclock rk3399_pmu_clocks[] = {
 		{ RK3399_PLL_PPLL }
 	},
 	{
+		RK3399_PCLK_RKPWM, RK3399_PMUCRU_CLKSEL_CON(0),
+		0, DIV(6, 0),
+		{ RK3399_PLL_PPLL }
+	},
+	{
 		/* Sentinel */
 	}
 };
@@ -2057,6 +2068,7 @@ rk3399_pmu_enable(void *cookie, uint32_t *cells, int on)
 	case RK3399_PCLK_I2C0:
 	case RK3399_PCLK_I2C4:
 	case RK3399_PCLK_I2C8:
+	case RK3399_PCLK_RKPWM:
 		/* Enabled by default. */
 		break;
 	default:

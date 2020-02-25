@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.214 2019/10/15 10:05:43 mpi Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.222 2020/01/30 08:51:27 mpi Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -64,8 +64,6 @@
 
 #include <uvm/uvm.h>
 #include <machine/tcb.h>
-
-#include "kcov.h"
 
 int	nprocesses = 1;		/* process 0 */
 int	nthreads = 1;		/* proc 0 */
@@ -150,8 +148,8 @@ thread_new(struct proc *parent, vaddr_t uaddr)
 
 	p = pool_get(&proc_pool, PR_WAITOK);
 	p->p_stat = SIDL;			/* protect against others */
+	p->p_runpri = 0;
 	p->p_flag = 0;
-	p->p_limit = NULL;
 
 	/*
 	 * Make a proc table entry for the new process.
@@ -169,21 +167,6 @@ thread_new(struct proc *parent, vaddr_t uaddr)
 	 * Initialize the timeouts.
 	 */
 	timeout_set(&p->p_sleep_to, endtsleep, p);
-
-	/*
-	 * set priority of child to be that of parent
-	 * XXX should move p_estcpu into the region of struct proc which gets
-	 * copied.
-	 */
-	scheduler_fork_hook(parent, p);
-
-#ifdef WITNESS
-	p->p_sleeplocks = NULL;
-#endif
-
-#if NKCOV > 0
-	p->p_kd = NULL;
-#endif
 
 	return p;
 }
@@ -208,9 +191,10 @@ process_initialize(struct process *pr, struct proc *p)
 
 	LIST_INIT(&pr->ps_children);
 	LIST_INIT(&pr->ps_ftlist);
-	LIST_INIT(&pr->ps_kqlist);
 	LIST_INIT(&pr->ps_sigiolst);
+	TAILQ_INIT(&pr->ps_tslpqueue);
 
+	rw_init(&pr->ps_lock, "pslock");
 	mtx_init(&pr->ps_mtx, IPL_MPFLOOR);
 
 	timeout_set(&pr->ps_realit_to, realitexpire, pr);
@@ -331,7 +315,7 @@ fork_thread_start(struct proc *p, struct proc *parent, int flags)
 
 	SCHED_LOCK(s);
 	ci = sched_choosecpu_fork(parent, flags);
-	setrunqueue(ci, p, p->p_priority);
+	setrunqueue(ci, p, p->p_usrpri);
 	SCHED_UNLOCK(s);
 }
 
@@ -469,7 +453,7 @@ fork1(struct proc *curp, int flags, void (*func)(void *), void *arg,
 	/*
 	 * For new processes, set accounting bits and mark as complete.
 	 */
-	getnanotime(&pr->ps_start);
+	nanouptime(&pr->ps_start);
 	pr->ps_acflag = AFORK;
 	atomic_clearbits_int(&pr->ps_flags, PS_EMBRYO);
 
@@ -509,7 +493,7 @@ fork1(struct proc *curp, int flags, void (*func)(void *), void *arg,
 	 */
 	if (flags & FORK_PPWAIT)
 		while (curpr->ps_flags & PS_ISPWAIT)
-			tsleep(curpr, PWAIT, "ppwait", 0);
+			tsleep_nsec(curpr, PWAIT, "ppwait", INFSLP);
 
 	/*
 	 * If we're tracing the child, alert the parent too.

@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1999-2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -18,16 +17,15 @@
 #ifndef IN_1_NSAP_22_H
 #define IN_1_NSAP_22_H 1
 
-/* $ISC: nsap_22.h,v 1.14.18.2 2005/04/29 00:16:43 marka Exp $ */
+/* $Id: nsap_22.h,v 1.5 2020/01/20 18:51:53 florian Exp $ */
 
-/*! 
+/*!
  *  \brief Per RFC1706 */
 
 typedef struct dns_rdata_in_nsap {
 	dns_rdatacommon_t	common;
-	isc_mem_t		*mctx;
 	unsigned char		*nsap;
-	isc_uint16_t		nsap_len;
+	uint16_t		nsap_len;
 } dns_rdata_in_nsap_t;
 
 #endif /* IN_1_NSAP_22_H */

@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004-2006  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 2002  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -19,31 +18,27 @@
 
 #if defined(LIBC_SCCS) && !defined(lint)
 static char rcsid[] =
-	"$ISC: netscope.c,v 1.7.18.4 2006/08/25 05:25:51 marka Exp $";
+	"$Id: netscope.c,v 1.7 2020/01/22 13:02:10 florian Exp $";
 #endif /* LIBC_SCCS and not lint */
 
-#include <config.h>
 
-#include <isc/string.h>
+#include <stdlib.h>
+#include <string.h>
 #include <isc/net.h>
 #include <isc/netscope.h>
 #include <isc/result.h>
 
 isc_result_t
-isc_netscope_pton(int af, char *scopename, void *addr, isc_uint32_t *zoneid) {
+isc_netscope_pton(int af, char *scopename, void *addr, uint32_t *zoneid) {
 	char *ep;
-#ifdef ISC_PLATFORM_HAVEIFNAMETOINDEX
 	unsigned int ifid;
-#endif
 	struct in6_addr *in6;
-	isc_uint32_t zone;
-	isc_uint64_t llz;
+	uint32_t zone;
+	uint64_t llz;
 
 	/* at this moment, we only support AF_INET6 */
 	if (af != AF_INET6)
 		return (ISC_R_FAILURE);
-
-	in6 = (struct in6_addr *)addr;
 
 	/*
 	 * Basically, "names" are more stable than numeric IDs in terms of
@@ -53,23 +48,20 @@ isc_netscope_pton(int af, char *scopename, void *addr, isc_uint32_t *zoneid) {
 	 * interface names as link names, assuming one to one mapping between
 	 * interfaces and links.
 	 */
-#ifdef ISC_PLATFORM_HAVEIFNAMETOINDEX
+	in6 = (struct in6_addr *)addr;
 	if (IN6_IS_ADDR_LINKLOCAL(in6) &&
 	    (ifid = if_nametoindex((const char *)scopename)) != 0)
-		zone = (isc_uint32_t)ifid;
+		zone = (uint32_t)ifid;
 	else {
-#endif
-		llz = isc_string_touint64(scopename, &ep, 10);
+		llz = strtoull(scopename, &ep, 10);
 		if (ep == scopename)
 			return (ISC_R_FAILURE);
 
 		/* check overflow */
-		zone = (isc_uint32_t)(llz & 0xffffffffUL);
+		zone = (uint32_t)(llz & 0xffffffffUL);
 		if (zone != llz)
 			return (ISC_R_FAILURE);
-#ifdef ISC_PLATFORM_HAVEIFNAMETOINDEX
 	}
-#endif
 
 	*zoneid = zone;
 	return (ISC_R_SUCCESS);

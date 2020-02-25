@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1999-2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -18,15 +17,14 @@
 #ifndef IN_1_KX_36_H
 #define IN_1_KX_36_H 1
 
-/* $ISC: kx_36.h,v 1.16.18.2 2005/04/29 00:16:42 marka Exp $ */
+/* $Id: kx_36.h,v 1.5 2020/01/20 18:51:53 florian Exp $ */
 
-/*! 
+/*!
  *  \brief Per RFC2230 */
 
 typedef struct dns_rdata_in_kx {
 	dns_rdatacommon_t	common;
-	isc_mem_t		*mctx;
-	isc_uint16_t		preference;
+	uint16_t		preference;
 	dns_name_t		exchange;
 } dns_rdata_in_kx_t;
 

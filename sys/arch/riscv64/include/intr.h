@@ -112,12 +112,8 @@ struct cpu_info;
  */
 void splassert_fail(int, int, const char *);
 extern int splassert_ctl;
-void arm_splassert_check(int, const char *);
-#define splassert(__wantipl) do {				\
-	if (splassert_ctl > 0) {				\
-		arm_splassert_check(__wantipl, __func__);	\
-	}							\
-} while (0)
+// XXX Interrupt Diagnostics (splassert)
+#define splassert(__wantipl)	do { /* nothing */ } while (0)
 #define	splsoftassert(wantipl)	splassert(wantipl)
 #else
 #define	splassert(wantipl)	do { /* nothing */ } while (0)

@@ -45,6 +45,8 @@ struct riscv_bootparams {
 	vaddr_t		dtbp_phys;	/* Device tree blob physical addr */
 };
 
+extern char *boot_file;
+
 // XXX ???
 extern paddr_t physmap[];
 extern u_int physmap_idx;

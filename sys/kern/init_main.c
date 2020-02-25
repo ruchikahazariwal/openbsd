@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.290 2019/06/21 09:39:48 visa Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.295 2020/01/01 07:06:35 jsg Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -98,7 +98,6 @@
 
 #if defined(KUBSAN)
 extern void kubsan_init(void);
-extern void kubsan_start(void);
 #endif
 
 #if defined(NFSSERVER) || defined(NFSCLIENT)
@@ -112,7 +111,7 @@ extern void nfs_init(void);
 const char	copyright[] =
 "Copyright (c) 1982, 1986, 1989, 1991, 1993\n"
 "\tThe Regents of the University of California.  All rights reserved.\n"
-"Copyright (c) 1995-2019 OpenBSD. All rights reserved.  https://www.OpenBSD.org\n";
+"Copyright (c) 1995-2020 OpenBSD. All rights reserved.  https://www.OpenBSD.org\n";
 
 /* Components of the first process -- never freed. */
 struct	session session0;
@@ -353,11 +352,6 @@ main(void *framep)
 	/* Initialize task queues */
 	taskq_init();
 
-#ifdef KUBSAN
-	/* Start reporting kubsan findings. */
-	kubsan_start();
-#endif
-
 	/* Initialize the interface/address trees */
 	ifinit();
 
@@ -470,7 +464,7 @@ main(void *framep)
 	 * secondary processors, yet.
 	 */
 	while (config_pending)
-		(void) tsleep((void *)&config_pending, PWAIT, "cfpend", 0);
+		tsleep_nsec(&config_pending, PWAIT, "cfpend", INFSLP);
 
 	dostartuphooks();
 
@@ -517,7 +511,7 @@ main(void *framep)
 	 * munched in mi_switch() after the time got set.
 	 */
 	LIST_FOREACH(pr, &allprocess, ps_list) {
-		getnanotime(&pr->ps_start);
+		nanouptime(&pr->ps_start);
 		TAILQ_FOREACH(p, &pr->ps_threads, p_thr_link) {
 			nanouptime(&p->p_cpu->ci_schedstate.spc_runtime);
 			timespecclear(&p->p_rtime);
@@ -578,7 +572,7 @@ main(void *framep)
          * proc0: nothing to do, back to sleep
          */
         while (1)
-                tsleep(&proc0, PVM, "scheduler", 0);
+                tsleep_nsec(&proc0, PVM, "scheduler", INFSLP);
 	/* NOTREACHED */
 }
 
@@ -637,7 +631,7 @@ start_init(void *arg)
 	 * Wait for main() to tell us that it's safe to exec.
 	 */
 	while (start_init_exec == 0)
-		(void) tsleep((void *)&start_init_exec, PWAIT, "initexec", 0);
+		tsleep_nsec(&start_init_exec, PWAIT, "initexec", INFSLP);
 
 	check_console(p);
 
@@ -657,7 +651,8 @@ start_init(void *arg)
 	if (uvm_map(&p->p_vmspace->vm_map, &addr, PAGE_SIZE, 
 	    NULL, UVM_UNKNOWN_OFFSET, 0,
 	    UVM_MAPFLAG(PROT_READ | PROT_WRITE, PROT_MASK, MAP_INHERIT_COPY,
-	    MADV_NORMAL, UVM_FLAG_FIXED|UVM_FLAG_OVERLAY|UVM_FLAG_COPYONW|UVM_FLAG_STACK)))
+	    MADV_NORMAL,
+	    UVM_FLAG_FIXED|UVM_FLAG_OVERLAY|UVM_FLAG_COPYONW|UVM_FLAG_STACK|UVM_FLAG_SYSCALL)))
 		panic("init: couldn't allocate argument space");
 
 	for (pathp = &initpaths[0]; (path = *pathp) != NULL; pathp++) {

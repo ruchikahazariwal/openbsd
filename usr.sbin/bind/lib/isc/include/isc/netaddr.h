@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1998-2002  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,53 +14,54 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: netaddr.h,v 1.25.18.5 2005/07/28 04:58:47 marka Exp $ */
+/* $Id: netaddr.h,v 1.5 2020/01/09 18:17:19 florian Exp $ */
 
 #ifndef ISC_NETADDR_H
 #define ISC_NETADDR_H 1
 
-/*! \file */
+/*! \file isc/netaddr.h */
 
 #include <isc/lang.h>
 #include <isc/net.h>
 #include <isc/types.h>
 
-#ifdef ISC_PLATFORM_HAVESYSUNH
 #include <sys/types.h>
 #include <sys/un.h>
-#endif
 
 ISC_LANG_BEGINDECLS
 
 struct isc_netaddr {
 	unsigned int family;
 	union {
-    		struct in_addr in;
+		struct in_addr in;
 		struct in6_addr in6;
-#ifdef ISC_PLATFORM_HAVESYSUNH
 		char un[sizeof(((struct sockaddr_un *)0)->sun_path)];
-#endif
 	} type;
-	isc_uint32_t zone;
+	uint32_t zone;
 };
 
 isc_boolean_t
 isc_netaddr_equal(const isc_netaddr_t *a, const isc_netaddr_t *b);
+
+/*%<
+ * Compare network addresses 'a' and 'b'.  Return #ISC_TRUE if
+ * they are equal, #ISC_FALSE if not.
+ */
 
 isc_boolean_t
 isc_netaddr_eqprefix(const isc_netaddr_t *a, const isc_netaddr_t *b,
 		     unsigned int prefixlen);
 /*%<
  * Compare the 'prefixlen' most significant bits of the network
- * addresses 'a' and 'b'.  Return #ISC_TRUE if they are equal,
- * #ISC_FALSE if not.
+ * addresses 'a' and 'b'.  If 'b''s scope is zero then 'a''s scope is
+ * ignored.  Return #ISC_TRUE if they are equal, #ISC_FALSE if not.
  */
 
 isc_result_t
 isc_netaddr_masktoprefixlen(const isc_netaddr_t *s, unsigned int *lenp);
 /*%<
  * Convert a netmask in 's' into a prefix length in '*lenp'.
- * The mask should consist of zero or more '1' bits in the most
+ * The mask should consist of zero or more '1' bits in the
  * most significant part of the address, followed by '0' bits.
  * If this is not the case, #ISC_R_MASKNONCONTIG is returned.
  *
@@ -109,9 +109,9 @@ isc_result_t
 isc_netaddr_frompath(isc_netaddr_t *netaddr, const char *path);
 
 void
-isc_netaddr_setzone(isc_netaddr_t *netaddr, isc_uint32_t zone);
+isc_netaddr_setzone(isc_netaddr_t *netaddr, uint32_t zone);
 
-isc_uint32_t
+uint32_t
 isc_netaddr_getzone(const isc_netaddr_t *netaddr);
 
 void
@@ -150,6 +150,12 @@ isc_netaddr_issitelocal(isc_netaddr_t *na);
  * Returns #ISC_TRUE if the address is a site local address.
  */
 
+isc_boolean_t
+isc_netaddr_isnetzero(isc_netaddr_t *na);
+/*%<
+ * Returns #ISC_TRUE if the address is in net zero.
+ */
+
 void
 isc_netaddr_fromv4mapped(isc_netaddr_t *t, const isc_netaddr_t *s);
 /*%<
@@ -166,10 +172,16 @@ isc_netaddr_prefixok(const isc_netaddr_t *na, unsigned int prefixlen);
  * Returns:
  *	ISC_R_SUCCESS
  *	ISC_R_RANGE		prefixlen out of range
- *	ISC_R_NOTIMPLENTED	unsupported family
+ *	ISC_R_NOTIMPLEMENTED	unsupported family
  *	ISC_R_FAILURE		extra bits.
  */
 
+isc_boolean_t
+isc_netaddr_isloopback(const isc_netaddr_t *na);
+/*
+ * Test whether the netaddr 'na' is a loopback IPv4 or IPv6 address (in
+ * 127.0.0.0/8 or ::1).
+ */
 ISC_LANG_ENDDECLS
 
 #endif /* ISC_NETADDR_H */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_ioctl.c,v 1.344 2019/05/09 14:59:30 claudio Exp $ */
+/*	$OpenBSD: pf_ioctl.c,v 1.348 2020/01/08 21:48:59 bluhm Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -1195,7 +1195,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		struct pf_rule		*rule, *tail;
 
 		PF_LOCK();
-		pr->anchor[sizeof(pr->anchor) - 1] = 0;
+		pr->anchor[sizeof(pr->anchor) - 1] = '\0';
 		ruleset = pf_find_ruleset(pr->anchor);
 		if (ruleset == NULL) {
 			error = EINVAL;
@@ -1292,7 +1292,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		struct pf_rule		*tail;
 
 		PF_LOCK();
-		pr->anchor[sizeof(pr->anchor) - 1] = 0;
+		pr->anchor[sizeof(pr->anchor) - 1] = '\0';
 		ruleset = pf_find_ruleset(pr->anchor);
 		if (ruleset == NULL) {
 			error = EINVAL;
@@ -1316,7 +1316,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		int			 i;
 
 		PF_LOCK();
-		pr->anchor[sizeof(pr->anchor) - 1] = 0;
+		pr->anchor[sizeof(pr->anchor) - 1] = '\0';
 		ruleset = pf_find_ruleset(pr->anchor);
 		if (ruleset == NULL) {
 			error = EINVAL;
@@ -1807,6 +1807,18 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		int			 m = 0, direction = pnl->direction;
 		int			 sidx, didx;
 
+		switch (pnl->af) {
+		case AF_INET:
+			break;
+#ifdef INET6
+		case AF_INET6:
+			break;
+#endif /* INET6 */
+		default:
+			error = EAFNOSUPPORT;
+			goto fail;
+		}
+
 		/* NATLOOK src and dst are reversed, so reverse sidx/didx */
 		sidx = (direction == PF_IN) ? 1 : 0;
 		didx = (direction == PF_IN) ? 0 : 1;
@@ -1939,7 +1951,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		struct pf_anchor	*anchor;
 
 		PF_LOCK();
-		pr->path[sizeof(pr->path) - 1] = 0;
+		pr->path[sizeof(pr->path) - 1] = '\0';
 		if ((ruleset = pf_find_ruleset(pr->path)) == NULL) {
 			error = EINVAL;
 			PF_UNLOCK();
@@ -1967,20 +1979,19 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		u_int32_t		 nr = 0;
 
 		PF_LOCK();
-		pr->path[sizeof(pr->path) - 1] = 0;
+		pr->path[sizeof(pr->path) - 1] = '\0';
 		if ((ruleset = pf_find_ruleset(pr->path)) == NULL) {
 			error = EINVAL;
 			PF_UNLOCK();
 			break;
 		}
-		pr->name[0] = 0;
+		pr->name[0] = '\0';
 		if (ruleset == &pf_main_ruleset) {
 			/* XXX kludge for pf_main_ruleset */
 			RB_FOREACH(anchor, pf_anchor_global, &pf_anchors)
 				if (anchor->parent == NULL && nr++ == pr->nr) {
 					strlcpy(pr->name, anchor->name,
 					    sizeof(pr->name));
-					PF_UNLOCK();
 					break;
 				}
 		} else {
@@ -1989,13 +2000,12 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 				if (nr++ == pr->nr) {
 					strlcpy(pr->name, anchor->name,
 					    sizeof(pr->name));
-					PF_UNLOCK();
 					break;
 				}
 		}
+		PF_UNLOCK();
 		if (!pr->name[0])
 			error = EBUSY;
-		PF_UNLOCK();
 		break;
 	}
 
@@ -2863,6 +2873,7 @@ pf_rule_copyin(struct pf_rule *from, struct pf_rule *to,
 		if ((to->match_tag = pf_tagname2tag(to->match_tagname, 1)) == 0)
 			return (EBUSY);
 	to->scrub_flags = from->scrub_flags;
+	to->delay = from->delay;
 	to->uid = from->uid;
 	to->gid = from->gid;
 	to->rule_flag = from->rule_flag;

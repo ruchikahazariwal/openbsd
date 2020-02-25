@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1997-2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,11 +14,11 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: assertions.c,v 1.17.18.2 2005/04/29 00:16:44 marka Exp $ */
+/* $Id: assertions.c,v 1.7 2020/01/22 13:02:09 florian Exp $ */
 
 /*! \file */
 
-#include <config.h>
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,26 +26,38 @@
 #include <isc/assertions.h>
 #include <isc/msgs.h>
 
+#include <isc/result.h>
+
 /*%
  * Forward.
  */
 static void
 default_callback(const char *, int, isc_assertiontype_t, const char *);
 
+static isc_assertioncallback_t isc_assertion_failed_cb = default_callback;
+
 /*%
  * Public.
  */
 
-LIBISC_EXTERNAL_DATA isc_assertioncallback_t isc_assertion_failed =
-					     default_callback;
+/*% assertion failed handler */
+/* coverity[+kill] */
+void
+isc_assertion_failed(const char *file, int line, isc_assertiontype_t type,
+		     const char *cond)
+{
+	isc_assertion_failed_cb(file, line, type, cond);
+	abort();
+	/* NOTREACHED */
+}
 
 /*% Set callback. */
 void
 isc_assertion_setcallback(isc_assertioncallback_t cb) {
 	if (cb == NULL)
-		isc_assertion_failed = default_callback;
+		isc_assertion_failed_cb = default_callback;
 	else
-		isc_assertion_failed = cb;
+		isc_assertion_failed_cb = cb;
 }
 
 /*% Type to Text */
@@ -86,11 +97,7 @@ static void
 default_callback(const char *file, int line, isc_assertiontype_t type,
 		 const char *cond)
 {
-	fprintf(stderr, "%s:%d: %s(%s) %s.\n",
-		file, line, isc_assertion_typetotext(type), cond,
-		isc_msgcat_get(isc_msgcat, ISC_MSGSET_GENERAL,
-			       ISC_MSG_FAILED, "failed"));
+	fprintf(stderr, "%s:%d: %s(%s) %s\n",
+		file, line, isc_assertion_typetotext(type), cond, "failed");
 	fflush(stderr);
-	abort();
-	/* NOTREACHED */
 }

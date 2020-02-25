@@ -1,4 +1,4 @@
-/*	$OpenBSD: client.c,v 1.110 2019/07/07 07:14:57 otto Exp $ */
+/*	$OpenBSD: client.c,v 1.113 2020/01/30 15:55:41 otto Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -30,7 +30,7 @@
 
 int	client_update(struct ntp_peer *);
 int	auto_cmp(const void *, const void *);
-void	handle_auto(double);
+void	handle_auto(u_int8_t, double);
 void	set_deadline(struct ntp_peer *, time_t);
 
 void
@@ -233,16 +233,16 @@ auto_cmp(const void *a, const void *b)
 }
 
 void
-handle_auto(double offset)
+handle_auto(uint8_t trusted, double offset)
 {
 	static int count;
 	static double v[AUTO_REPLIES];
 
 	/*
 	 * It happens the (constraint) resolves initially fail, don't give up
-	 * but see if we get validatd replies later.
+	 * but see if we get validated replies later.
 	 */
-	if (conf->constraint_median == 0)
+	if (!trusted && conf->constraint_median == 0)
 		return;
 
 	if (offset < AUTO_THRESHOLD) {
@@ -324,12 +324,6 @@ client_dispatch(struct ntp_peer *p, u_int8_t settime, u_int8_t automatic)
 		}
 	}
 
-	if (T4 < JAN_1970) {
-		client_log_error(p, "recvmsg control format", EBADF);
-		set_next(p, error_interval());
-		return (0);
-	}
-
 	ntp_getmsg((struct sockaddr *)&p->addr->ss, buf, size, &msg);
 
 	if (msg.orgtime.int_partl != p->query->msg.xmttime.int_partl ||
@@ -375,18 +369,8 @@ client_dispatch(struct ntp_peer *p, u_int8_t settime, u_int8_t automatic)
 	T2 = lfp_to_d(msg.rectime);
 	T3 = lfp_to_d(msg.xmttime);
 
-	/*
-	 * XXX workaround: time_t / tv_sec must never wrap.
-	 * around 2020 we will need a solution (64bit time_t / tv_sec).
-	 * consider every answer with a timestamp beyond january 2030 bogus.
-	 */
-	if (T2 > JAN_2030 || T3 > JAN_2030) {
-		set_next(p, error_interval());
-		return (0);
-	}
-
 	/* Detect liars */
-	if (conf->constraint_median != 0 &&
+	if (!p->trusted && conf->constraint_median != 0 &&
 	    (constraint_check(T2) != 0 || constraint_check(T3) != 0)) {
 		log_info("reply from %s: constraint check failed",
 		    log_sockaddr((struct sockaddr *)&p->addr->ss));
@@ -464,7 +448,7 @@ client_dispatch(struct ntp_peer *p, u_int8_t settime, u_int8_t automatic)
 	client_update(p);
 	if (settime) {
 		if (automatic)
-			handle_auto(p->reply[p->shift].offset);
+			handle_auto(p->trusted, p->reply[p->shift].offset);
 		else
 			priv_settime(p->reply[p->shift].offset, "");
 	}

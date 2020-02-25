@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1999-2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,7 +14,7 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: dir.h,v 1.17.18.2 2005/04/29 00:17:09 marka Exp $ */
+/* $Id: dir.h,v 1.4 2020/01/25 10:42:50 deraadt Exp $ */
 
 /* Principal Authors: DCL */
 
@@ -76,9 +75,6 @@ isc_dir_close(isc_dir_t *dir);
 
 isc_result_t
 isc_dir_chdir(const char *dirname);
-
-isc_result_t
-isc_dir_chroot(const char *dirname);
 
 isc_result_t
 isc_dir_createunique(char *templet);

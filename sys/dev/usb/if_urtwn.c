@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urtwn.c,v 1.84 2019/09/12 12:55:07 stsp Exp $	*/
+/*	$OpenBSD: if_urtwn.c,v 1.88 2020/01/27 15:44:55 stsp Exp $	*/
 
 /*-
  * Copyright (c) 2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -255,7 +255,6 @@ static const struct urtwn_type {
 	URTWN_DEV_8192CU(BELKIN,	RTL8188CUS),
 	URTWN_DEV_8192CU(BELKIN,	RTL8192CU),
 	URTWN_DEV_8192CU(BELKIN,	RTL8192CU_1),
-	URTWN_DEV_8192CU(BELKIN,	RTL8192CU_2),
 	URTWN_DEV_8192CU(CHICONY,	RTL8188CUS_1),
 	URTWN_DEV_8192CU(CHICONY,	RTL8188CUS_2),
 	URTWN_DEV_8192CU(CHICONY,	RTL8188CUS_3),
@@ -283,7 +282,7 @@ static const struct urtwn_type {
 	URTWN_DEV_8192CU(IODATA,	RTL8192CU),
 	URTWN_DEV_8192CU(NETGEAR,	N300MA),
 	URTWN_DEV_8192CU(NETGEAR,	WNA1000M),
-	URTWN_DEV_8192CU(NETGEAR,	WNA1000Mv2),
+	URTWN_DEV_8192CU(NETGEAR,	WNA1000MV2),
 	URTWN_DEV_8192CU(NETGEAR,	RTL8192CU),
 	URTWN_DEV_8192CU(NETGEAR4,	RTL8188CU),
 	URTWN_DEV_8192CU(NETWEEN,	RTL8192CU),
@@ -332,7 +331,8 @@ static const struct urtwn_type {
 	/* URTWN_RTL8192EU */
 	URTWN_DEV_8192EU(DLINK,		DWA131E1),
 	URTWN_DEV_8192EU(REALTEK,	RTL8192EU),
-	URTWN_DEV_8192EU(TPLINK,	RTL8192EU)
+	URTWN_DEV_8192EU(TPLINK,	RTL8192EU),
+	URTWN_DEV_8192EU(TPLINK,	RTL8192EU_2)
 };
 
 #define urtwn_lookup(v, p)	\
@@ -1703,21 +1703,6 @@ urtwn_r92c_power_on(struct urtwn_softc *sc)
 	/* Release RF digital isolation. */
 	urtwn_write_2(sc, R92C_SYS_ISO_CTRL,
 	    urtwn_read_2(sc, R92C_SYS_ISO_CTRL) & ~R92C_SYS_ISO_CTRL_DIOR);
-
-	/* Initialize MAC. */
-	urtwn_write_1(sc, R92C_APSD_CTRL,
-	    urtwn_read_1(sc, R92C_APSD_CTRL) & ~R92C_APSD_CTRL_OFF);
-	for (ntries = 0; ntries < 200; ntries++) {
-		if (!(urtwn_read_1(sc, R92C_APSD_CTRL) &
-		    R92C_APSD_CTRL_OFF_STATUS))
-			break;
-		DELAY(5);
-	}
-	if (ntries == 200) {
-		printf("%s: timeout waiting for MAC initialization\n",
-		    sc->sc_dev.dv_xname);
-		return (ETIMEDOUT);
-	}
 
 	/* Enable MAC DMA/WMAC/SCHEDULE/SEC blocks. */
 	reg = urtwn_read_2(sc, R92C_CR);

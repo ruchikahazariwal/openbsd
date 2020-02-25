@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.12 2019/08/05 19:27:47 kettenis Exp $	*/
+/*	$OpenBSD: parse.y,v 1.15 2020/01/09 22:06:23 kn Exp $	*/
 
 /*
  * Copyright (c) 2012 Mark Kettenis <kettenis@openbsd.org>
@@ -37,9 +37,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <util.h>
 
 #include "ldomctl.h"
-#include "util.h"
+#include "ldom_util.h"
 
 TAILQ_HEAD(files, file)		 files = TAILQ_HEAD_INITIALIZER(files);
 static struct file {
@@ -109,6 +110,12 @@ grammar		: /* empty */
 		;
 
 domain		: DOMAIN STRING optnl '{' optnl	{
+			struct domain *odomain;
+			SIMPLEQ_FOREACH(odomain, &conf->domain_list, entry)
+				if (strcmp(odomain->name, $2) == 0) {
+					yyerror("duplicate domain name: %s", $2);
+					YYERROR;
+				}
 			domain = xzalloc(sizeof(struct domain));
 			domain->name = $2;
 			SIMPLEQ_INIT(&domain->vdisk_list);
@@ -117,13 +124,25 @@ domain		: DOMAIN STRING optnl '{' optnl	{
 			SIMPLEQ_INIT(&domain->iodev_list);
 		}
 		    domainopts_l '}' {
-			/* domain names need to be unique. */
-			struct domain *odomain;
-			SIMPLEQ_FOREACH(odomain, &conf->domain_list, entry)
-				if (strcmp(odomain->name, $2) == 0) {
-					yyerror("duplicate domain name: %s", $2);
+			if (strcmp(domain->name, "primary") != 0) {
+				if (domain->vcpu == 0) {
+					yyerror("vcpu is required: %s",
+					    domain->name);
 					YYERROR;
 				}
+				if ( domain->memory == 0) {
+					yyerror("memory is required: %s",
+					    domain->name);
+					YYERROR;
+				}
+				if (SIMPLEQ_EMPTY(&domain->vdisk_list) &&
+				    SIMPLEQ_EMPTY(&domain->vnet_list) &&
+				    SIMPLEQ_EMPTY(&domain->iodev_list)) {
+					yyerror("at least one bootable device"
+					    " is required: %s", domain->name);
+					YYERROR;
+				}
+			}
 			SIMPLEQ_INSERT_TAIL(&conf->domain_list, domain, entry);
 			domain = NULL;
 		}
@@ -236,23 +255,10 @@ memory		: NUMBER {
 			$$ = $1;
 		}
 		| STRING {
-			uint64_t size;
-			char *cp;
-
-			size = strtoll($1, &cp, 10);
-			if (cp != NULL) {
-				if (strcmp(cp, "K") == 0)
-					size *= 1024;
-				else if (strcmp(cp, "M") == 0)
-					size *= 1024 * 1024;
-				else if (strcmp(cp, "G") == 0)
-					size *= 1024 * 1024 * 1024;
-				else {
-                                        yyerror("unknown unit %s", cp);
-                                        YYERROR;
-				}
+			if (scan_scaled($1, &$$) == -1) {
+				yyerror("invalid size: %s", $1);
+				YYERROR;
 			}
-			$$ = size;
 		}
 		;
 

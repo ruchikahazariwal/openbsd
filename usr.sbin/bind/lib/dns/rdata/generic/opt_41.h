@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1998-2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -18,24 +17,23 @@
 #ifndef GENERIC_OPT_41_H
 #define GENERIC_OPT_41_H 1
 
-/* $ISC: opt_41.h,v 1.14.18.2 2005/04/29 00:16:38 marka Exp $ */
+/* $Id: opt_41.h,v 1.5 2020/01/20 18:51:53 florian Exp $ */
 
 /*!
  *  \brief Per RFC2671 */
 
 typedef struct dns_rdata_opt_opcode {
-		isc_uint16_t	opcode;
-		isc_uint16_t	length;
+		uint16_t	opcode;
+		uint16_t	length;
 		unsigned char	*data;
 } dns_rdata_opt_opcode_t;
 
 typedef struct dns_rdata_opt {
 	dns_rdatacommon_t	common;
-	isc_mem_t		*mctx;
 	unsigned char		*options;
-	isc_uint16_t		length;
+	uint16_t		length;
 	/* private */
-	isc_uint16_t		offset;
+	uint16_t		offset;
 } dns_rdata_opt_t;
 
 /*

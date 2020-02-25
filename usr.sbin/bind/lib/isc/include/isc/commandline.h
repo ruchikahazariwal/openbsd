@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1999-2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,29 +14,29 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: commandline.h,v 1.10.18.2 2005/04/29 00:16:53 marka Exp $ */
+/* $Id: commandline.h,v 1.5 2020/01/22 13:02:10 florian Exp $ */
 
 #ifndef ISC_COMMANDLINE_H
 #define ISC_COMMANDLINE_H 1
 
-/*! \file */
+/*! \file isc/commandline.h */
 
 #include <isc/boolean.h>
 #include <isc/lang.h>
-#include <isc/platform.h>
+
 
 /*% Index into parent argv vector. */
-LIBISC_EXTERNAL_DATA extern int isc_commandline_index;
+extern int isc_commandline_index;
 /*% Character checked for validity. */
-LIBISC_EXTERNAL_DATA extern int isc_commandline_option;
+extern int isc_commandline_option;
 /*% Argument associated with option. */
-LIBISC_EXTERNAL_DATA extern char *isc_commandline_argument;
+extern char *isc_commandline_argument;
 /*% For printing error messages. */
-LIBISC_EXTERNAL_DATA extern char *isc_commandline_progname;
+extern char *isc_commandline_progname;
 /*% Print error message. */
-LIBISC_EXTERNAL_DATA extern isc_boolean_t isc_commandline_errprint;
+extern isc_boolean_t isc_commandline_errprint;
 /*% Reset getopt. */
-LIBISC_EXTERNAL_DATA extern isc_boolean_t isc_commandline_reset;
+extern isc_boolean_t isc_commandline_reset;
 
 ISC_LANG_BEGINDECLS
 

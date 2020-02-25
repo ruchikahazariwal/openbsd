@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.55 2019/09/30 21:48:32 kettenis Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.57 2020/01/12 16:55:00 kettenis Exp $	*/
 /*	$NetBSD: cpu.h,v 1.34 2003/06/23 11:01:08 martin Exp $	*/
 
 /*
@@ -185,6 +185,12 @@ struct cpu_info {
 
 #ifdef MULTIPROCESSOR
 	struct srp_hazard	ci_srp_hazards[SRP_HAZARD_NUM];
+	volatile int		ci_flags;
+	uint32_t		ci_ttbr0;
+	vaddr_t			ci_pl1_stkend;
+	vaddr_t			ci_irq_stkend;
+	vaddr_t			ci_abt_stkend;
+	vaddr_t			ci_und_stkend;
 #endif
 
 #ifdef GPROF
@@ -219,6 +225,7 @@ extern struct cpu_info *cpu_info_list;
 	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
 #define CPU_INFO_UNIT(ci)	0
 #define MAXCPUS	1
+#define cpu_kick(ci)
 #define cpu_unidle(ci)
 #else
 #define cpu_number()		(curcpu()->ci_cpuid)
@@ -228,7 +235,8 @@ extern struct cpu_info *cpu_info_list;
 					    ci != NULL; ci = ci->ci_next)
 #define CPU_INFO_UNIT(ci)	((ci)->ci_dev ? (ci)->ci_dev->dv_unit : 0)
 #define MAXCPUS	4
-#define cpu_unidle(ci)
+void cpu_kick(struct cpu_info *);
+void cpu_unidle(struct cpu_info *ci);
 
 extern struct cpu_info *cpu_info[MAXCPUS];
 
@@ -310,6 +318,8 @@ intr_restore(u_long cpsr)
 {
 	__asm volatile ("msr cpsr_c, %0" :: "r"(cpsr));
 }
+
+void	cpu_startclock(void);
 
 #endif /* _KERNEL */
 

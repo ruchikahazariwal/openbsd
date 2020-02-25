@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_pledge.c,v 1.255 2019/08/25 18:46:40 pamela Exp $	*/
+/*	$OpenBSD: kern_pledge.c,v 1.257 2020/01/23 01:02:34 dlg Exp $	*/
 
 /*
  * Copyright (c) 2015 Nicholas Marriott <nicm@openbsd.org>
@@ -111,6 +111,7 @@ const uint64_t pledge_syscalls[SYS_MAXSYSCALL] = {
 	 */
 	[SYS_exit] = PLEDGE_ALWAYS,
 	[SYS_kbind] = PLEDGE_ALWAYS,
+	[SYS_msyscall] = PLEDGE_ALWAYS,
 	[SYS___get_tcb] = PLEDGE_ALWAYS,
 	[SYS___set_tcb] = PLEDGE_ALWAYS,
 	[SYS_pledge] = PLEDGE_ALWAYS,
@@ -666,7 +667,7 @@ pledge_namei(struct proc *p, struct nameidata *ni, char *origpath)
 			}
 		}
 
-		/* DNS needs /etc/{resolv.conf,hosts,services}. */
+		/* DNS needs /etc/{resolv.conf,hosts,services,protocols}. */
 		if ((ni->ni_pledge == PLEDGE_RPATH) &&
 		    (p->p_p->ps_pledge & PLEDGE_DNS)) {
 			if (strcmp(path, "/etc/resolv.conf") == 0) {
@@ -678,6 +679,10 @@ pledge_namei(struct proc *p, struct nameidata *ni, char *origpath)
 				return (0);
 			}
 			if (strcmp(path, "/etc/services") == 0) {
+				ni->ni_cnd.cn_flags |= BYPASSUNVEIL;
+				return (0);
+			}
+			if (strcmp(path, "/etc/protocols") == 0) {
 				ni->ni_cnd.cn_flags |= BYPASSUNVEIL;
 				return (0);
 			}

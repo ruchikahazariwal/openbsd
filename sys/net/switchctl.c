@@ -1,4 +1,4 @@
-/*	$OpenBSD: switchctl.c,v 1.15 2019/05/12 16:38:02 sashan Exp $	*/
+/*	$OpenBSD: switchctl.c,v 1.19 2020/01/28 16:26:09 visa Exp $	*/
 
 /*
  * Copyright (c) 2016 Kazuya GODA <goda@openbsd.org>
@@ -59,11 +59,18 @@ int	filt_switch_write(struct knote *, long);
 int	switch_dev_output(struct switch_softc *, struct mbuf *);
 void	switch_dev_wakeup(struct switch_softc *);
 
-struct filterops switch_rd_filtops = {
-	1, NULL, filt_switch_rdetach, filt_switch_read
+const struct filterops switch_rd_filtops = {
+	.f_isfd		= 1,
+	.f_attach	= NULL,
+	.f_detach	= filt_switch_rdetach,
+	.f_event	= filt_switch_read,
 };
-struct filterops switch_wr_filtops = {
-	1, NULL, filt_switch_wdetach, filt_switch_write
+
+const struct filterops switch_wr_filtops = {
+	.f_isfd		= 1,
+	.f_attach	= NULL,
+	.f_detach	= filt_switch_wdetach,
+	.f_event	= filt_switch_write,
 };
 
 struct switch_softc *
@@ -148,7 +155,8 @@ switchread(dev_t dev, struct uio *uio, int ioflag)
 			goto failed;
 		}
 		sc->sc_swdev->swdev_waiting = 1;
-		error = tsleep(sc, (PZERO + 1)|PCATCH, "switchread", 0);
+		error = tsleep_nsec(sc, (PZERO + 1)|PCATCH, "switchread",
+		    INFSLP);
 		if (error != 0)
 			goto failed;
 		/* sc might be deleted while sleeping */
@@ -360,7 +368,7 @@ switchpoll(dev_t dev, int events, struct proc *p)
 	struct switch_softc	*sc = switch_dev2sc(dev);
 
 	if (sc == NULL)
-		return (ENXIO);
+		return (POLLERR);
 
 	if (events & (POLLIN | POLLRDNORM)) {
 		if (!mq_empty(&sc->sc_swdev->swdev_outq) ||
@@ -412,9 +420,6 @@ filt_switch_rdetach(struct knote *kn)
 	struct switch_softc	*sc = (struct switch_softc *)kn->kn_hook;
 	struct klist		*klist = &sc->sc_swdev->swdev_rsel.si_note;
 
-	if (ISSET(kn->kn_status, KN_DETACHED))
-		return;
-
 	SLIST_REMOVE(klist, kn, knote, kn_selnext);
 }
 
@@ -422,11 +427,6 @@ int
 filt_switch_read(struct knote *kn, long hint)
 {
 	struct switch_softc	*sc = (struct switch_softc *)kn->kn_hook;
-
-	if (ISSET(kn->kn_status, KN_DETACHED)) {
-		kn->kn_data = 0;
-		return (1);
-	}
 
 	if (!mq_empty(&sc->sc_swdev->swdev_outq) ||
 	    sc->sc_swdev->swdev_lastm != NULL) {
@@ -443,9 +443,6 @@ filt_switch_wdetach(struct knote *kn)
 {
 	struct switch_softc	*sc = (struct switch_softc *)kn->kn_hook;
 	struct klist		*klist = &sc->sc_swdev->swdev_wsel.si_note;
-
-	if (ISSET(kn->kn_status, KN_DETACHED))
-		return;
 
 	SLIST_REMOVE(klist, kn, knote, kn_selnext);
 }

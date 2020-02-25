@@ -1,7 +1,7 @@
 /*
- * Copyright (C) 2005, 2006  Internet Systems Consortium, Inc. ("ISC")
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -14,9 +14,9 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: hmacsha.h,v 1.2.2.3 2006/08/16 03:18:14 marka Exp $ */
+/* $Id: hmacsha.h,v 1.7 2020/01/22 13:02:10 florian Exp $ */
 
-/*
+/*! \file isc/hmacsha.h
  * This is the header file for the HMAC-SHA1, HMAC-SHA224, HMAC-SHA256,
  * HMAC-SHA334 and HMAC-SHA512 hash algorithm described in RFC 2104.
  */
@@ -25,6 +25,7 @@
 #define ISC_HMACSHA_H 1
 
 #include <isc/lang.h>
+
 #include <isc/sha1.h>
 #include <isc/sha2.h>
 #include <isc/types.h>
@@ -35,30 +36,18 @@
 #define ISC_HMACSHA384_KEYLENGTH ISC_SHA384_BLOCK_LENGTH
 #define ISC_HMACSHA512_KEYLENGTH ISC_SHA512_BLOCK_LENGTH
 
-typedef struct {
-	isc_sha1_t sha1ctx;
-	unsigned char key[ISC_HMACSHA1_KEYLENGTH];
-} isc_hmacsha1_t;
+#include <openssl/opensslv.h>
+#include <openssl/hmac.h>
 
 typedef struct {
-	isc_sha224_t sha224ctx;
-	unsigned char key[ISC_HMACSHA224_KEYLENGTH];
-} isc_hmacsha224_t;
+	HMAC_CTX *ctx;
+} isc_hmacsha_t;
 
-typedef struct {
-	isc_sha256_t sha256ctx;
-	unsigned char key[ISC_HMACSHA256_KEYLENGTH];
-} isc_hmacsha256_t;
-
-typedef struct {
-	isc_sha384_t sha384ctx;
-	unsigned char key[ISC_HMACSHA384_KEYLENGTH];
-} isc_hmacsha384_t;
-
-typedef struct {
-	isc_sha512_t sha512ctx;
-	unsigned char key[ISC_HMACSHA512_KEYLENGTH];
-} isc_hmacsha512_t;
+typedef isc_hmacsha_t isc_hmacsha1_t;
+typedef isc_hmacsha_t isc_hmacsha224_t;
+typedef isc_hmacsha_t isc_hmacsha256_t;
+typedef isc_hmacsha_t isc_hmacsha384_t;
+typedef isc_hmacsha_t isc_hmacsha512_t;
 
 ISC_LANG_BEGINDECLS
 
@@ -78,6 +67,9 @@ isc_hmacsha1_sign(isc_hmacsha1_t *ctx, unsigned char *digest, size_t len);
 
 isc_boolean_t
 isc_hmacsha1_verify(isc_hmacsha1_t *ctx, unsigned char *digest, size_t len);
+
+isc_boolean_t
+isc_hmacsha1_check(int testing);
 
 
 void

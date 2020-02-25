@@ -341,6 +341,7 @@ control_dispatch_imsg(int fd, short event, void *arg)
 
 		switch (imsg.hdr.type) {
 		case IMSG_VMDOP_GET_INFO_VM_REQUEST:
+		case IMSG_VMDOP_GET_VM_STATS_REQUEST:
 		case IMSG_VMDOP_WAIT_VM_REQUEST:
 		case IMSG_VMDOP_TERMINATE_VM_REQUEST:
 		case IMSG_VMDOP_START_VM_REQUEST:
@@ -416,6 +417,15 @@ control_dispatch_imsg(int fd, short event, void *arg)
 			}
 			break;
 		case IMSG_VMDOP_GET_INFO_VM_REQUEST:
+			if (IMSG_DATA_SIZE(&imsg) != 0)
+				goto fail;
+			if (proc_compose_imsg(ps, PROC_PARENT, -1,
+			    imsg.hdr.type, fd, -1, NULL, 0) == -1) {
+				control_close(fd, cs);
+				return;
+			}
+			break;
+		case IMSG_VMDOP_GET_VM_STATS_REQUEST:
 			if (IMSG_DATA_SIZE(&imsg) != 0)
 				goto fail;
 			if (proc_compose_imsg(ps, PROC_PARENT, -1,

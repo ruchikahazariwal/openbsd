@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1998-2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -19,18 +18,17 @@
 #ifndef GENERIC_SOA_6_H
 #define GENERIC_SOA_6_H 1
 
-/* $ISC: soa_6.h,v 1.28.18.2 2005/04/29 00:16:40 marka Exp $ */
+/* $Id: soa_6.h,v 1.5 2020/01/20 18:51:53 florian Exp $ */
 
 typedef struct dns_rdata_soa {
 	dns_rdatacommon_t	common;
-	isc_mem_t		*mctx;
 	dns_name_t		origin;
 	dns_name_t		contact;
-	isc_uint32_t		serial;		/*%< host order */
-	isc_uint32_t		refresh;	/*%< host order */
-	isc_uint32_t		retry;		/*%< host order */
-	isc_uint32_t		expire;		/*%< host order */
-	isc_uint32_t		minimum;	/*%< host order */
+	uint32_t		serial;		/*%< host order */
+	uint32_t		refresh;	/*%< host order */
+	uint32_t		retry;		/*%< host order */
+	uint32_t		expire;		/*%< host order */
+	uint32_t		minimum;	/*%< host order */
 } dns_rdata_soa_t;
 
 

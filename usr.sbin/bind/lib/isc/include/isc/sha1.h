@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004-2006  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 2000, 2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -18,26 +17,28 @@
 #ifndef ISC_SHA1_H
 #define ISC_SHA1_H 1
 
-/* $ISC: sha1.h,v 1.9.18.5 2006/08/16 03:18:14 marka Exp $ */
+/* $Id: sha1.h,v 1.8 2020/01/22 13:02:10 florian Exp $ */
 
 /*	$NetBSD: sha1.h,v 1.2 1998/05/29 22:55:44 thorpej Exp $	*/
 
-/*! \file
+/*! \file isc/sha1.h
  * \brief SHA-1 in C
  * \author By Steve Reid <steve@edmweb.com>
  * \note 100% Public Domain
  */
 
 #include <isc/lang.h>
+
 #include <isc/types.h>
 
 #define ISC_SHA1_DIGESTLENGTH 20U
 #define ISC_SHA1_BLOCK_LENGTH 64U
 
+#include <openssl/opensslv.h>
+#include <openssl/evp.h>
+
 typedef struct {
-	isc_uint32_t state[5];
-	isc_uint32_t count[2];
-	unsigned char buffer[ISC_SHA1_BLOCK_LENGTH];
+	EVP_MD_CTX *ctx;
 } isc_sha1_t;
 
 ISC_LANG_BEGINDECLS
@@ -53,6 +54,9 @@ isc_sha1_update(isc_sha1_t *ctx, const unsigned char *data, unsigned int len);
 
 void
 isc_sha1_final(isc_sha1_t *ctx, unsigned char *digest);
+
+isc_boolean_t
+isc_sha1_check(isc_boolean_t testing);
 
 ISC_LANG_ENDDECLS
 

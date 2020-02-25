@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1998-2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,17 +14,18 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: error.c,v 1.17.18.2 2005/04/29 00:16:45 marka Exp $ */
+/* $Id: error.c,v 1.6 2020/01/22 13:02:09 florian Exp $ */
 
 /*! \file */
 
-#include <config.h>
+
 
 #include <stdio.h>
 #include <stdlib.h>
 
 #include <isc/error.h>
 #include <isc/msgs.h>
+
 
 /*% Default unexpected callback. */
 static void
@@ -79,8 +79,7 @@ isc_error_fatal(const char *file, int line, const char *format, ...) {
 void
 isc_error_runtimecheck(const char *file, int line, const char *expression) {
 	isc_error_fatal(file, line, "RUNTIME_CHECK(%s) %s", expression,
-			isc_msgcat_get(isc_msgcat, ISC_MSGSET_GENERAL,
-				       ISC_MSG_FAILED, "failed"));
+				       "failed");
 }
 
 static void
@@ -97,9 +96,7 @@ static void
 default_fatal_callback(const char *file, int line, const char *format,
 		       va_list args)
 {
-	fprintf(stderr, "%s:%d: %s: ", file, line,
-		isc_msgcat_get(isc_msgcat, ISC_MSGSET_GENERAL,
-			       ISC_MSG_FATALERROR, "fatal error"));
+	fprintf(stderr, "%s:%d: %s: ", file, line, "fatal error");
 	vfprintf(stderr, format, args);
 	fprintf(stderr, "\n");
 	fflush(stderr);

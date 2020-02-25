@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_rib.c,v 1.207 2019/09/27 14:50:39 claudio Exp $ */
+/*	$OpenBSD: rde_rib.c,v 1.215 2020/01/25 23:54:21 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Claudio Jeker <claudio@openbsd.org>
@@ -701,12 +701,8 @@ path_hash(struct rde_aspath *asp)
 	u_int64_t	hash;
 
 	SipHash24_Init(&ctx, &pathtablekey);
-	SipHash24_Update(&ctx, &asp->origin, sizeof(asp->origin));
-	SipHash24_Update(&ctx, &asp->med, sizeof(asp->med));
-	SipHash24_Update(&ctx, &asp->lpref, sizeof(asp->lpref));
-	SipHash24_Update(&ctx, &asp->weight, sizeof(asp->weight));
-	SipHash24_Update(&ctx, &asp->rtlabelid, sizeof(asp->rtlabelid));
-	SipHash24_Update(&ctx, &asp->pftableid, sizeof(asp->pftableid));
+	SipHash24_Update(&ctx, &asp->aspath_hashstart,
+	    (char *)&asp->aspath_hashend - (char *)&asp->aspath_hashstart);
 
 	if (asp->aspath)
 		SipHash24_Update(&ctx, asp->aspath->data, asp->aspath->len);
@@ -782,16 +778,16 @@ path_copy(struct rde_aspath *dst, const struct rde_aspath *src)
 		dst->aspath->refcnt++;
 		rdemem.aspath_refs++;
 	}
-	dst->hash = 0;
+	dst->hash = 0;		/* not linked so no hash and no refcnt */
+	dst->refcnt = 0;
+	dst->flags = src->flags & ~F_ATTR_LINKED;
+
 	dst->med = src->med;
 	dst->lpref = src->lpref;
 	dst->weight = src->weight;
-	dst->origin = src->origin;
 	dst->rtlabelid = rtlabel_ref(src->rtlabelid);
 	dst->pftableid = pftable_ref(src->pftableid);
-
-	dst->flags = src->flags & ~F_ATTR_LINKED;
-	dst->refcnt = 0;	/* not linked so no refcnt */
+	dst->origin = src->origin;
 
 	attr_copy(dst, src);
 
@@ -983,7 +979,7 @@ prefix_update(struct rib *rib, struct rde_peer *peer, struct filterstate *state,
 		    communities_equal(ncomm, prefix_communities(p)) &&
 		    path_compare(nasp, prefix_aspath(p)) == 0) {
 			/* no change, update last change */
-			p->lastchange = time(NULL);
+			p->lastchange = getmonotime();
 			p->validation_state = vstate;
 			return (0);
 		}
@@ -1058,7 +1054,7 @@ prefix_move(struct prefix *p, struct rde_peer *peer,
 	np->nhflags = nhflags;
 	np->nexthop = nexthop_ref(nexthop);
 	nexthop_link(np);
-	np->lastchange = time(NULL);
+	np->lastchange = getmonotime();
 
 	/*
 	 * no need to update the peer prefix count because we are only moving
@@ -1168,7 +1164,8 @@ prefix_adjout_update(struct rde_peer *peer, struct filterstate *state,
 			    0) {
 				/* nothing changed */
 				p->validation_state = vstate;
-				p->lastchange = time(NULL);
+				p->lastchange = getmonotime();
+				p->flags &= ~PREFIX_FLAG_STALE;
 				return 0;
 			}
 
@@ -1191,7 +1188,7 @@ prefix_adjout_update(struct rde_peer *peer, struct filterstate *state,
 
 		p->pt = pt_get(prefix, prefixlen);
 		if (p->pt == NULL)
-			fatalx("%s: update for non existing prefix", __func__);
+			p->pt = pt_add(prefix, prefixlen);
 		pt_ref(p->pt);
 		p->peer = peer;
 
@@ -1216,7 +1213,7 @@ prefix_adjout_update(struct rde_peer *peer, struct filterstate *state,
 	p->nhflags = state->nhflags;
 
 	p->validation_state = vstate;
-	p->lastchange = time(NULL);
+	p->lastchange = getmonotime();
 
 	if (p->flags & PREFIX_FLAG_MASK)
 		fatalx("%s: bad flags %x", __func__, p->flags);
@@ -1235,11 +1232,23 @@ int
 prefix_adjout_withdraw(struct rde_peer *peer, struct bgpd_addr *prefix,
     int prefixlen)
 {
-	struct prefix		*p;
+	struct prefix *p;
 
 	p = prefix_lookup(peer, prefix, prefixlen);
 	if (p == NULL)		/* Got a dummy withdrawn request. */
 		return (0);
+
+	/* already a withdraw, shortcut */
+	if (p->flags & PREFIX_FLAG_WITHDRAW) {
+		p->lastchange = getmonotime();
+		p->flags &= ~PREFIX_FLAG_STALE;
+		return (0);
+	}
+	/* pending update just got withdrawn */
+	if (p->flags & PREFIX_FLAG_UPDATE)
+		RB_REMOVE(prefix_tree, &peer->updates[p->pt->aid], p);
+	/* nothing needs to be done for PREFIX_FLAG_DEAD and STALE */
+	p->flags &= ~PREFIX_FLAG_MASK;
 
 	/* remove nexthop ref ... */
 	nexthop_unref(p->nexthop);
@@ -1258,17 +1267,8 @@ prefix_adjout_withdraw(struct rde_peer *peer, struct bgpd_addr *prefix,
 	p->aspath = NULL;
 	/* re already NULL */
 
-	p->lastchange = time(NULL);
+	p->lastchange = getmonotime();
 
-	if (p->flags & PREFIX_FLAG_MASK) {
-		struct prefix_tree *prefix_head;
-		/* p is a pending update or withdraw, remove first */
-		prefix_head = p->flags & PREFIX_FLAG_UPDATE ?
-		    &peer->updates[prefix->aid] :
-		    &peer->withdraws[prefix->aid];
-		RB_REMOVE(prefix_tree, prefix_head, p);
-		p->flags &= ~PREFIX_FLAG_MASK;
-	}
 	p->flags |= PREFIX_FLAG_WITHDRAW;
 	if (RB_INSERT(prefix_tree, &peer->withdraws[prefix->aid], p) != NULL)
 		fatalx("%s: RB tree invariant violated", __func__);
@@ -1308,7 +1308,7 @@ prefix_adjout_destroy(struct prefix *p)
 		RB_REMOVE(prefix_tree, &peer->withdraws[p->pt->aid], p);
 	else if (p->flags & PREFIX_FLAG_UPDATE)
 		RB_REMOVE(prefix_tree, &peer->updates[p->pt->aid], p);
-	/* nothing needs to be done for PREFIX_FLAG_DEAD */
+	/* nothing needs to be done for PREFIX_FLAG_DEAD and STALE */
 	p->flags &= ~PREFIX_FLAG_MASK;
 
 
@@ -1331,7 +1331,7 @@ prefix_adjout_destroy(struct prefix *p)
 	}
 
 	RB_REMOVE(prefix_index, &peer->adj_rib_out, p);
-	
+
 	prefix_unlink(p);
 	prefix_free(p);
 }
@@ -1595,7 +1595,7 @@ prefix_link(struct prefix *p, struct rib_entry *re, struct rde_peer *peer,
 	p->nhflags = nhflags;
 	p->nexthop = nexthop_ref(nexthop);
 	nexthop_link(p);
-	p->lastchange = time(NULL);
+	p->lastchange = getmonotime();
 
 	/* make route decision */
 	prefix_evaluate(p, re);
@@ -1777,13 +1777,15 @@ nexthop_update(struct kroute_nexthop *msg)
 		if (nexthop_unref(nh))
 			return;		/* nh lost last ref, no work left */
 
-	if (nh->next_prefix)
+	if (nh->next_prefix) {
 		/*
 		 * If nexthop_runner() is not finished with this nexthop
 		 * then ensure that all prefixes are updated by setting
 		 * the oldstate to NEXTHOP_FLAPPED.
 		 */
 		nh->oldstate = NEXTHOP_FLAPPED;
+		TAILQ_REMOVE(&nexthop_runners, nh, runner_l);
+	}
 
 	if (msg->connected) {
 		nh->flags |= NEXTHOP_CONNECTED;
@@ -1798,8 +1800,11 @@ nexthop_update(struct kroute_nexthop *msg)
 	nh->nexthop_netlen = msg->netlen;
 
 	nh->next_prefix = LIST_FIRST(&nh->prefix_h);
-	TAILQ_INSERT_HEAD(&nexthop_runners, nh, runner_l);
-	log_debug("nexthop %s update starting", log_addr(&nh->exit_nexthop));
+	if (nh->next_prefix != NULL) {
+		TAILQ_INSERT_HEAD(&nexthop_runners, nh, runner_l);
+		log_debug("nexthop %s update starting",
+		    log_addr(&nh->exit_nexthop));
+	}
 }
 
 void
@@ -1855,8 +1860,15 @@ nexthop_unlink(struct prefix *p)
 	if (p->nexthop == NULL || (p->flags & PREFIX_NEXTHOP_LINKED) == 0)
 		return;
 
-	if (p == p->nexthop->next_prefix)
+	if (p == p->nexthop->next_prefix) {
 		p->nexthop->next_prefix = LIST_NEXT(p, entry.list.nexthop);
+		/* remove nexthop from list if no prefixes left to update */
+		if (p->nexthop->next_prefix == NULL) {
+			TAILQ_REMOVE(&nexthop_runners, p->nexthop, runner_l);
+			log_debug("nexthop %s update finished",
+			    log_addr(&p->nexthop->exit_nexthop));
+		}
+	}
 
 	p->flags &= ~PREFIX_NEXTHOP_LINKED;
 	LIST_REMOVE(p, entry.list.nexthop);

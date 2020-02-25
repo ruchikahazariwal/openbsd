@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.675 2019/10/05 05:33:14 dlg Exp $
+#	$OpenBSD: files,v 1.684 2020/01/24 05:14:51 jsg Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -65,7 +65,6 @@ define	wlan
 
 # "Chipset" attributes.  These are the machine-independent portions
 # of device drivers.
-define	ncr5380sbc	# NCR 5380 SCSI Bus Controller
 define	dp8390nic	# 8390-family Ethernet controllers
 define	rtl80x9		# Realtek 8019/8029 NE2000-compatible
 define	dl10019		# DL10019/10022-family Ethernet controllers
@@ -138,10 +137,6 @@ file	dev/ic/aic79xx_openbsd.c	ahd
 device	aic: scsi
 file	dev/ic/aic6360.c	aic & (aic_isa | aic_pcmcia | aic_isapnp)
 
-# DPT EATA SCSI controllers
-device	dpt: scsi
-file	dev/ic/dpt.c			dpt
-
 # AdvanSys 1200A, 1200B and ULTRA SCSI controllers
 device	adv: scsi
 file	dev/ic/adv.c			adv
@@ -198,10 +193,6 @@ file	dev/ic/nvme.c			nvme needs-flag
 # LSI Logic Fusion-MPT Message Passing Interface
 device	mpi: scsi
 file	dev/ic/mpi.c			mpi
-
-# Emulex Light Pulse Fibre Channel (Service Level Interface)
-device	sli: scsi
-file	dev/ic/sli.c			sli
 
 # Silicon Image 3124/3132/3531 SATALink
 device	sili: scsi, atascsi
@@ -554,7 +545,6 @@ pseudo-device carp: ifnet, ether
 pseudo-device sppp: ifnet
 pseudo-device gif: ifnet
 pseudo-device gre: ifnet
-pseudo-device mobileip: ifnet
 pseudo-device crypto: ifnet
 pseudo-device trunk: ifnet, ether, ifmedia
 pseudo-device aggr: ifnet, ether, ifmedia
@@ -612,6 +602,12 @@ file 	net/if_pppoe.c			pppoe	needs-flag
 pseudo-device kcov
 file	dev/kcov.c			kcov	needs-flag
 
+pseudo-device dt
+file	dev/dt/dt_dev.c			dt	needs-flag
+file	dev/dt/dt_prov_profile.c	dt
+file	dev/dt/dt_prov_syscall.c	dt
+file	dev/dt/dt_prov_static.c		dt
+
 # XXX machine-independent SCSI files should live somewhere here, maybe
 
 # kernel sources
@@ -638,8 +634,6 @@ file dev/audio.c			audio			needs-flag
 file dev/cons.c
 file dev/diskmap.c
 file dev/firmload.c			firmload
-file dev/flash.c			flash			needs-flag
-file dev/ic/ncr5380sbc.c		ncr5380sbc
 file dev/ic/dp8390.c			dp8390nic
 file dev/ic/rtl80x9.c			rtl80x9
 file dev/ic/tea5757.c			tea5757
@@ -808,19 +802,18 @@ file net/rtable.c
 file net/route.c
 file net/rtsock.c
 file net/slcompress.c			ppp
-file net/if_enc.c			enc			needs-count
+file net/if_enc.c			enc
 file net/if_gre.c			gre			needs-count
-file net/if_mobileip.c			mobileip		needs-count
-file net/if_trunk.c			trunk			needs-count
+file net/if_trunk.c			trunk
 file net/trunklacp.c			trunk
 file net/if_aggr.c			aggr
 file net/if_tpmr.c			tpmr
-file net/if_mpe.c			mpe			needs-count
-file net/if_mpw.c			mpw			needs-count
+file net/if_mpe.c			mpe
+file net/if_mpw.c			mpw
 file net/if_mpip.c			mpip
 file net/if_bpe.c			bpe			needs-count
-file net/if_vether.c			vether			needs-count
-file net/if_pair.c			pair			needs-count
+file net/if_vether.c			vether
+file net/if_pair.c			pair
 file net/if_pppx.c			pppx			needs-count
 file net/if_vxlan.c			vxlan			needs-count
 file net/bfd.c				bfd
@@ -966,11 +959,9 @@ file uvm/uvm_page.c
 file uvm/uvm_pager.c
 file uvm/uvm_pdaemon.c
 file uvm/uvm_pmemrange.c
-file uvm/uvm_stat.c
 file uvm/uvm_swap.c
 file uvm/uvm_swap_encrypt.c		uvm_swap_encrypt
 file uvm/uvm_unix.c
-file uvm/uvm_user.c
 file uvm/uvm_vnode.c
 
 # IPv6

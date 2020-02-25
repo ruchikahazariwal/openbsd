@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1998-2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -19,12 +18,11 @@
 #ifndef GENERIC_NULL_10_H
 #define GENERIC_NULL_10_H 1
 
-/* $ISC: null_10.h,v 1.21.18.2 2005/04/29 00:16:37 marka Exp $ */
+/* $Id: null_10.h,v 1.5 2020/01/20 18:51:53 florian Exp $ */
 
 typedef struct dns_rdata_null {
 	dns_rdatacommon_t	common;
-	isc_mem_t		*mctx;
-	isc_uint16_t		length;
+	uint16_t		length;
 	unsigned char		*data;
 } dns_rdata_null_t;
 

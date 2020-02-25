@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_clock.c,v 1.99 2019/08/02 02:17:35 cheloha Exp $	*/
+/*	$OpenBSD: kern_clock.c,v 1.101 2020/01/21 16:16:23 mpi Exp $	*/
 /*	$NetBSD: kern_clock.c,v 1.34 1996/06/09 04:51:03 briggs Exp $	*/
 
 /*-
@@ -55,6 +55,11 @@
 #include <sys/gmon.h>
 #endif
 
+#include "dt.h"
+#if NDT > 0
+#include <dev/dt/dtvar.h>
+#endif
+
 /*
  * Clock handling routines.
  *
@@ -87,8 +92,6 @@ int	ticks;
 static int psdiv, pscnt;		/* prof => stat divider */
 int	psratio;			/* ratio: prof / stat */
 
-void	*softclock_si;
-
 volatile unsigned long jiffies;		/* XXX Linux API for drm(4) */
 
 /*
@@ -98,10 +101,6 @@ void
 initclocks(void)
 {
 	int i;
-
-	softclock_si = softintr_establish(IPL_SOFTCLOCK, softclock, NULL);
-	if (softclock_si == NULL)
-		panic("initclocks: unable to register softclock intr");
 
 	ticks = INT_MAX - (15 * 60 * hz);
 	jiffies = ULONG_MAX - (10 * 60 * hz);
@@ -174,6 +173,12 @@ hardclock(struct clockframe *frame)
 	if (--ci->ci_schedstate.spc_rrticks <= 0)
 		roundrobin(ci);
 
+#if NDT > 0
+	DT_ENTER(profile, NULL);
+	if (CPU_IS_PRIMARY(ci))
+		DT_ENTER(interval, NULL);
+#endif
+
 	/*
 	 * If we are not the primary CPU, we're not allowed to do
 	 * any more work.
@@ -186,12 +191,9 @@ hardclock(struct clockframe *frame)
 	jiffies++;
 
 	/*
-	 * Update real-time timeout queue.
-	 * Process callouts at a very low cpu priority, so we don't keep the
-	 * relatively high clock interrupt priority any longer than necessary.
+	 * Update the timeout wheel.
 	 */
-	if (timeout_hardclock_update())
-		softintr_schedule(softclock_si);
+	timeout_hardclock_update();
 }
 
 /*

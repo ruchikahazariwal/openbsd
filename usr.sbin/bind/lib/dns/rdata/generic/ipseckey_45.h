@@ -1,7 +1,7 @@
 /*
- * Copyright (C) 2005  Internet Systems Consortium, Inc. ("ISC")
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -14,22 +14,21 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: ipseckey_45.h,v 1.2.2.1 2005/07/07 03:17:36 marka Exp $ */
+/* $Id: ipseckey_45.h,v 1.5 2020/01/20 18:51:53 florian Exp $ */
 
 #ifndef GENERIC_IPSECKEY_45_H
 #define GENERIC_IPSECKEY_45_H 1
 
 typedef struct dns_rdata_ipseckey {
 	dns_rdatacommon_t	common;
-	isc_mem_t		*mctx;
-	isc_uint8_t		precedence;
-	isc_uint8_t		gateway_type;
-	isc_uint8_t		algorithm;
+	uint8_t		precedence;
+	uint8_t		gateway_type;
+	uint8_t		algorithm;
 	struct in_addr		in_addr;	/* gateway type 1 */
 	struct in6_addr		in6_addr;	/* gateway type 2 */
 	dns_name_t		gateway;	/* gateway type 3 */
 	unsigned char		*key;
-	isc_uint16_t		keylength;
+	uint16_t		keylength;
 } dns_rdata_ipseckey_t;
 
 #endif /* GENERIC_IPSECKEY_45_H */

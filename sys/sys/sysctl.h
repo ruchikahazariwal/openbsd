@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.h,v 1.195 2019/08/21 20:44:09 cheloha Exp $	*/
+/*	$OpenBSD: sysctl.h,v 1.202 2020/02/01 08:57:27 anton Exp $	*/
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*
@@ -165,7 +165,7 @@ struct ctlname {
 #define	KERN_SHMINFO		62	/* struct: SysV struct shminfo */
 #define KERN_INTRCNT		63	/* node: interrupt counters */
 #define	KERN_WATCHDOG		64	/* node: watchdog */
-/* was KERN_EMUL		65	*/
+#define	KERN_ALLOWDT		65	/* int: allowdt */
 #define	KERN_PROC		66	/* struct: process entries */
 #define	KERN_MAXCLUSTERS	67	/* number of mclusters */
 #define KERN_EVCOUNT		68	/* node: event counters */
@@ -257,7 +257,7 @@ struct ctlname {
 	{ "shminfo", CTLTYPE_STRUCT }, \
 	{ "intrcnt", CTLTYPE_NODE }, \
  	{ "watchdog", CTLTYPE_NODE }, \
- 	{ "gap", 0 }, \
+ 	{ "allowdt", CTLTYPE_INT }, \
  	{ "proc", CTLTYPE_STRUCT }, \
  	{ "maxclusters", CTLTYPE_INT }, \
 	{ "evcount", CTLTYPE_NODE }, \
@@ -274,8 +274,8 @@ struct ctlname {
 	{ "proc_nobroadcastkill", CTLTYPE_NODE }, \
 	{ "proc_vmmap", CTLTYPE_NODE }, \
 	{ "global_ptrace", CTLTYPE_INT }, \
-	{ "gap", 0 }, \
-	{ "gap", 0 }, \
+	{ "consbufsize", CTLTYPE_INT }, \
+	{ "consbuf", CTLTYPE_STRUCT }, \
 	{ "audio", CTLTYPE_STRUCT }, \
 	{ "cpustats", CTLTYPE_STRUCT }, \
 	{ "pfstatus", CTLTYPE_STRUCT }, \
@@ -497,24 +497,33 @@ struct kinfo_vmentry {
 	u_int8_t kve_flags;		/* u_int8_t */
 };
 
+/* keep in sync with UVM_ET_* */
 #define KVE_ET_OBJ		0x00000001
 #define KVE_ET_SUBMAP		0x00000002
 #define KVE_ET_COPYONWRITE 	0x00000004
 #define KVE_ET_NEEDSCOPY	0x00000008
 #define KVE_ET_HOLE		0x00000010
 #define KVE_ET_NOFAULT		0x00000020
-#define KVE_ET_FREEMAPPED	0x00000080
+#define KVE_ET_STACK		0x00000040
+#define KVE_ET_WC		0x00000080
+#define KVE_ET_CONCEAL		0x00000100
+#define KVE_ET_SYSCALL		0x00000200
+#define KVE_ET_FREEMAPPED	0x00000800
+
 #define KVE_PROT_NONE		0x00000000
 #define KVE_PROT_READ		0x00000001
 #define KVE_PROT_WRITE		0x00000002
 #define KVE_PROT_EXEC		0x00000004
+
 #define KVE_ADV_NORMAL		0x00000000
 #define KVE_ADV_RANDOM		0x00000001
 #define KVE_ADV_SEQUENTIAL	0x00000002
+
 #define KVE_INH_SHARE		0x00000000
 #define KVE_INH_COPY		0x00000010
 #define KVE_INH_NONE		0x00000020
 #define KVE_INH_ZERO		0x00000030
+
 #define KVE_F_STATIC		0x01
 #define KVE_F_KMEM		0x02
 
@@ -551,6 +560,10 @@ struct kinfo_vmentry {
 #define PR_LOCK(pr)	/* nothing */
 #define PR_UNLOCK(pr)	/* nothing */
 #endif
+
+#define _getcompatprio(_p)						\
+	((_p)->p_stat == SRUN ? (_p)->p_runpri : 			\
+	    ((_p)->p_stat == SSLEEP) ? (_p)->p_slppri : (_p)->p_usrpri)
 
 #define PTRTOINT64(_x)	((u_int64_t)(u_long)(_x))
 
@@ -619,7 +632,7 @@ do {									\
 	(kp)->p_stat = (p)->p_stat;					\
 	(kp)->p_nice = (pr)->ps_nice;					\
 									\
-	(kp)->p_xstat = (p)->p_xstat;					\
+	(kp)->p_xstat = W_EXITCODE((pr)->ps_xexit, (pr)->ps_xsig);	\
 	(kp)->p_acflag = (pr)->ps_acflag;				\
 	(kp)->p_pledge = (pr)->ps_pledge;				\
 									\
@@ -650,7 +663,7 @@ do {									\
 		(kp)->p_stat = (p)->p_stat;				\
 		(kp)->p_slptime = (p)->p_slptime;			\
 		(kp)->p_holdcnt = 1;					\
-		(kp)->p_priority = (p)->p_priority;			\
+		(kp)->p_priority = _getcompatprio(p);			\
 		(kp)->p_usrpri = (p)->p_usrpri;				\
 		if ((p)->p_wchan && (p)->p_wmesg)			\
 			copy_str((kp)->p_wmesg, (p)->p_wmesg,		\
@@ -669,9 +682,6 @@ do {									\
 		struct timeval tv;					\
 									\
 		(kp)->p_uvalid = 1;					\
-									\
-		(kp)->p_ustart_sec = (pr)->ps_start.tv_sec;		\
-		(kp)->p_ustart_usec = (pr)->ps_start.tv_nsec/1000;	\
 									\
 		(kp)->p_uru_maxrss = (p)->p_ru.ru_maxrss;		\
 		(kp)->p_uru_ixrss = (p)->p_ru.ru_ixrss;			\
@@ -724,7 +734,7 @@ do {									\
 
 struct kinfo_file {
 	uint64_t	f_fileaddr;	/* PTR: address of struct file */
-	uint32_t	f_flag;		/* SHORT: flags (see fcntl.h) */
+	uint32_t	f_flag;		/* UINT: flags (see fcntl.h) */
 	uint32_t	f_iflags;	/* INT: internal flags */
 	uint32_t	f_type;		/* INT: descriptor type */
 	uint32_t	f_count;	/* UINT: reference count */

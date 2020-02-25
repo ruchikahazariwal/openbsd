@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1999-2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -18,19 +17,19 @@
 #ifndef GENERIC_LOC_29_H
 #define GENERIC_LOC_29_H 1
 
-/* $ISC: loc_29.h,v 1.15.18.2 2005/04/29 00:16:34 marka Exp $ */
+/* $Id: loc_29.h,v 1.4 2020/01/09 18:17:17 florian Exp $ */
 
 /*!
  * \brief Per RFC1876 */
 
 typedef struct dns_rdata_loc_0 {
-	isc_uint8_t	version;	/* must be first and zero */
-	isc_uint8_t	size;
-	isc_uint8_t	horizontal;
-	isc_uint8_t	vertical;
-	isc_uint32_t	latitude;
-	isc_uint32_t	longitude;
-	isc_uint32_t	altitude;
+	uint8_t	version;	/* must be first and zero */
+	uint8_t	size;
+	uint8_t	horizontal;
+	uint8_t	vertical;
+	uint32_t	latitude;
+	uint32_t	longitude;
+	uint32_t	altitude;
 } dns_rdata_loc_0_t;
 
 typedef struct dns_rdata_loc {

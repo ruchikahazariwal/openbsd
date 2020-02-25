@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1999-2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,25 +14,25 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: lib.h,v 1.8.18.2 2005/04/29 00:16:58 marka Exp $ */
+/* $Id: lib.h,v 1.5 2020/01/20 18:46:57 florian Exp $ */
 
 #ifndef ISC_LIB_H
 #define ISC_LIB_H 1
 
-/*! \file */
+/*! \file isc/lib.h */
 
 #include <isc/types.h>
 #include <isc/lang.h>
 
 ISC_LANG_BEGINDECLS
 
-LIBISC_EXTERNAL_DATA extern isc_msgcat_t *isc_msgcat;
-
 void
-isc_lib_initmsgcat(void);
+isc_lib_register(void);
 /*!<
- * \brief Initialize the ISC library's message catalog, isc_msgcat, if it
- * has not already been initialized.
+ * \brief Register the ISC library implementations for some base services
+ * such as memory or event management and handling socket or timer events.
+ * An external application that wants to use the ISC library must call this
+ * function very early in main().
  */
 
 ISC_LANG_ENDDECLS

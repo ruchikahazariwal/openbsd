@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sched.c,v 1.59 2019/10/15 10:05:43 mpi Exp $	*/
+/*	$OpenBSD: kern_sched.c,v 1.64 2020/01/30 08:51:27 mpi Exp $	*/
 /*
  * Copyright (c) 2007, 2008 Artur Grabowski <art@openbsd.org>
  *
@@ -26,6 +26,7 @@
 #include <sys/mutex.h>
 #include <sys/task.h>
 #include <sys/smr.h>
+#include <sys/tracepoint.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -257,10 +258,11 @@ setrunqueue(struct cpu_info *ci, struct proc *p, uint8_t prio)
 
 	p->p_cpu = ci;
 	p->p_stat = SRUN;
-	p->p_priority = prio;
+	p->p_runpri = prio;
 
 	spc = &p->p_cpu->ci_schedstate;
 	spc->spc_nrun++;
+	TRACEPOINT(sched, enqueue, p->p_tid, p->p_p->ps_pid);
 
 	TAILQ_INSERT_TAIL(&spc->spc_qs[queue], p, p_runq);
 	spc->spc_whichqs |= (1 << queue);
@@ -268,17 +270,21 @@ setrunqueue(struct cpu_info *ci, struct proc *p, uint8_t prio)
 
 	if (cpuset_isset(&sched_idle_cpus, p->p_cpu))
 		cpu_unidle(p->p_cpu);
+
+	if (prio < spc->spc_curpriority)
+		need_resched(ci);
 }
 
 void
 remrunqueue(struct proc *p)
 {
 	struct schedstate_percpu *spc;
-	int queue = p->p_priority >> 2;
+	int queue = p->p_runpri >> 2;
 
 	SCHED_ASSERT_LOCKED();
 	spc = &p->p_cpu->ci_schedstate;
 	spc->spc_nrun--;
+	TRACEPOINT(sched, dequeue, p->p_tid, p->p_p->ps_pid);
 
 	TAILQ_REMOVE(&spc->spc_qs[queue], p, p_runq);
 	if (TAILQ_EMPTY(&spc->spc_qs[queue])) {
@@ -303,7 +309,7 @@ sched_chooseproc(void)
 			for (queue = 0; queue < SCHED_NQS; queue++) {
 				while ((p = TAILQ_FIRST(&spc->spc_qs[queue]))) {
 					remrunqueue(p);
-					setrunqueue(NULL, p, p->p_priority);
+					setrunqueue(NULL, p, p->p_runpri);
 					if (p->p_cpu == curcpu()) {
 						KASSERT(p->p_flag & P_CPUPEG);
 						goto again;
@@ -575,7 +581,7 @@ sched_proc_to_cpu_cost(struct cpu_info *ci, struct proc *p)
 	 * and the higher the priority of the proc.
 	 */
 	if (!cpuset_isset(&sched_idle_cpus, ci)) {
-		cost += (p->p_priority - spc->spc_curpriority) *
+		cost += (p->p_usrpri - spc->spc_curpriority) *
 		    sched_cost_priority;
 		cost += sched_cost_runnable;
 	}

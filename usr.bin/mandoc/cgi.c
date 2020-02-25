@@ -1,4 +1,4 @@
-/*	$OpenBSD: cgi.c,v 1.106 2019/10/01 17:54:04 schwarze Exp $ */
+/*	$OpenBSD: cgi.c,v 1.109 2020/01/10 15:20:49 schwarze Exp $ */
 /*
  * Copyright (c) 2011, 2012 Kristaps Dzonsons <kristaps@bsd.lv>
  * Copyright (c) 2014-2019 Ingo Schwarze <schwarze@usta.de>
@@ -336,6 +336,8 @@ resp_begin_http(int code, const char *msg)
 
 	printf("Content-Type: text/html; charset=utf-8\r\n"
 	     "Cache-Control: no-cache\r\n"
+	     "Content-Security-Policy: default-src 'none'; "
+	     "style-src 'self' 'unsafe-inline'\r\n"
 	     "Pragma: no-cache\r\n"
 	     "\r\n");
 
@@ -405,7 +407,8 @@ resp_searchform(const struct req *req, enum focus focus)
 {
 	int		 i;
 
-	printf("<form action=\"/%s\" method=\"get\">\n"
+	printf("<form action=\"/%s\" method=\"get\" "
+	       "autocomplete=\"off\" autocapitalize=\"none\">\n"
 	       "  <fieldset>\n"
 	       "    <legend>Manual Page Search Parameters</legend>\n",
 	       scriptname);

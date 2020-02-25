@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012, 2014  Internet Systems Consortium, Inc. ("ISC")
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -14,7 +14,7 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: tlsa_52.h,v 1.1 2015/02/07 05:50:00 pelikan Exp $ */
+/* $Id: tlsa_52.h,v 1.5 2020/01/20 18:51:53 florian Exp $ */
 
 #ifndef GENERIC_TLSA_52_H
 #define GENERIC_TLSA_52_H 1
@@ -24,11 +24,10 @@
  */
 typedef struct dns_rdata_tlsa {
 	dns_rdatacommon_t	common;
-	isc_mem_t		*mctx;
-	isc_uint8_t		usage;
-	isc_uint8_t		selector;
-	isc_uint8_t		match;
-	isc_uint16_t		length;
+	uint8_t		usage;
+	uint8_t		selector;
+	uint8_t		match;
+	uint16_t		length;
 	unsigned char		*data;
 } dns_rdata_tlsa_t;
 

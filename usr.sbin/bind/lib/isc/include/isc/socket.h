@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2004-2006, 2008  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1998-2002  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -15,7 +14,7 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: socket.h,v 1.57.18.6.46.4 2008/07/23 23:16:43 marka Exp $ */
+/* $Id: socket.h,v 1.13 2020/01/26 11:26:54 florian Exp $ */
 
 #ifndef ISC_SOCKET_H
 #define ISC_SOCKET_H 1
@@ -24,7 +23,7 @@
  ***** Module Info
  *****/
 
-/*! \file
+/*! \file isc/socket.h
  * \brief Provides TCP and UDP sockets for network I/O.  The sockets are event
  * sources in the task system.
  *
@@ -57,13 +56,15 @@
  *** Imports
  ***/
 
-#include <isc/lang.h>
-#include <isc/types.h>
 #include <isc/event.h>
 #include <isc/eventclass.h>
-#include <isc/time.h>
+#include <isc/lang.h>
+
 #include <isc/region.h>
 #include <isc/sockaddr.h>
+#include <isc/time.h>
+#include <isc/types.h>
+
 
 ISC_LANG_BEGINDECLS
 
@@ -98,8 +99,9 @@ struct isc_socketevent {
 	isc_sockaddr_t		address;	/*%< source address */
 	isc_time_t		timestamp;	/*%< timestamp of packet recv */
 	struct in6_pktinfo	pktinfo;	/*%< ipv6 pktinfo */
-	isc_uint32_t		attributes;	/*%< see below */
+	uint32_t		attributes;	/*%< see below */
 	isc_eventdestructor_t   destroy;	/*%< original destructor */
+	unsigned int		dscp;		/*%< UDP dscp value */
 };
 
 typedef struct isc_socket_newconnev isc_socket_newconnev_t;
@@ -126,6 +128,8 @@ struct isc_socket_connev {
  * _TIMESTAMP:	The timestamp member is valid.
  * _PKTINFO:	The pktinfo member is valid.
  * _MULTICAST:	The UDP packet was received via a multicast transmission.
+ * _DSCP:	The UDP DSCP value is valid.
+ * _USEMINMTU:	Set the per packet IPV6_USE_MIN_MTU flag.
  */
 #define ISC_SOCKEVENTATTR_ATTACHED		0x80000000U /* internal */
 #define ISC_SOCKEVENTATTR_TRUNC			0x00800000U /* public */
@@ -133,6 +137,8 @@ struct isc_socket_connev {
 #define ISC_SOCKEVENTATTR_TIMESTAMP		0x00200000U /* public */
 #define ISC_SOCKEVENTATTR_PKTINFO		0x00100000U /* public */
 #define ISC_SOCKEVENTATTR_MULTICAST		0x00080000U /* public */
+#define ISC_SOCKEVENTATTR_DSCP			0x00040000U /* public */
+#define ISC_SOCKEVENTATTR_USEMINMTU		0x00020000U /* public */
 /*@}*/
 
 #define ISC_SOCKEVENT_ANYEVENT  (0)
@@ -150,7 +156,6 @@ struct isc_socket_connev {
 typedef enum {
 	isc_sockettype_udp = 1,
 	isc_sockettype_tcp = 2,
-	isc_sockettype_unix = 3
 } isc_sockettype_t;
 
 /*@{*/
@@ -181,6 +186,72 @@ typedef enum {
 #define ISC_SOCKFLAG_NORETRY	0x00000002	/*%< drop failed UDP sends */
 /*@}*/
 
+/*@{*/
+/*!
+ * Flags for fdwatchcreate.
+ */
+#define ISC_SOCKFDWATCH_READ	0x00000001	/*%< watch for readable */
+#define ISC_SOCKFDWATCH_WRITE	0x00000002	/*%< watch for writable */
+/*@}*/
+
+/*% Socket and socket manager methods */
+typedef struct isc_socketmgrmethods {
+	void		(*destroy)(isc_socketmgr_t **managerp);
+	isc_result_t	(*socketcreate)(isc_socketmgr_t *manager, int pf,
+					isc_sockettype_t type,
+					isc_socket_t **socketp);
+} isc_socketmgrmethods_t;
+
+typedef struct isc_socketmethods {
+	void		(*attach)(isc_socket_t *socket,
+				  isc_socket_t **socketp);
+	void		(*detach)(isc_socket_t **socketp);
+	isc_result_t	(*bind)(isc_socket_t *sock, isc_sockaddr_t *sockaddr,
+				unsigned int options);
+	isc_result_t	(*connect)(isc_socket_t *sock, isc_sockaddr_t *addr,
+				   isc_task_t *task, isc_taskaction_t action,
+				   void *arg);
+	void		(*cancel)(isc_socket_t *sock, isc_task_t *task,
+				  unsigned int how);
+} isc_socketmethods_t;
+
+/*%
+ * This structure is actually just the common prefix of a socket manager
+ * object implementation's version of an isc_socketmgr_t.
+ * \brief
+ * Direct use of this structure by clients is forbidden.  socket implementations
+ * may change the structure.  'magic' must be ISCAPI_SOCKETMGR_MAGIC for any
+ * of the isc_socket_ routines to work.  socket implementations must maintain
+ * all socket invariants.
+ * In effect, this definition is used only for non-BIND9 version ("export")
+ * of the library, and the export version does not work for win32.  So, to avoid
+ * the definition conflict with win32/socket.c, we enable this definition only
+ * for non-Win32 (i.e. Unix) platforms.
+ */
+struct isc_socketmgr {
+	unsigned int		impmagic;
+	unsigned int		magic;
+	isc_socketmgrmethods_t	*methods;
+};
+
+#define ISCAPI_SOCKETMGR_MAGIC		ISC_MAGIC('A','s','m','g')
+#define ISCAPI_SOCKETMGR_VALID(m)	((m) != NULL && \
+					 (m)->magic == ISCAPI_SOCKETMGR_MAGIC)
+
+/*%
+ * This is the common prefix of a socket object.  The same note as
+ * that for the socketmgr structure applies.
+ */
+struct isc_socket {
+	unsigned int		impmagic;
+	unsigned int		magic;
+	isc_socketmethods_t	*methods;
+};
+
+#define ISCAPI_SOCKET_MAGIC	ISC_MAGIC('A','s','c','t')
+#define ISCAPI_SOCKET_VALID(s)	((s) != NULL && \
+				 (s)->magic == ISCAPI_SOCKET_MAGIC)
+
 /***
  *** Socket and Socket Manager Functions
  ***
@@ -196,6 +267,9 @@ isc_socket_create(isc_socketmgr_t *manager,
 /*%<
  * Create a new 'type' socket managed by 'manager'.
  *
+ * For isc_sockettype_fdwatch sockets you should use isc_socket_fdwatchcreate()
+ * rather than isc_socket_create().
+ *
  * Note:
  *
  *\li	'pf' is the desired protocol family, e.g. PF_INET or PF_INET6.
@@ -205,6 +279,8 @@ isc_socket_create(isc_socketmgr_t *manager,
  *\li	'manager' is a valid manager
  *
  *\li	'socketp' is a valid pointer, and *socketp == NULL
+ *
+ *\li	'type' is not isc_sockettype_fdwatch
  *
  * Ensures:
  *
@@ -248,30 +324,6 @@ isc_socket_cancel(isc_socket_t *sock, isc_task_t *task,
  *
  * \li ISC_SOCKCANCEL_CONNECT:
  *	Cancel pending isc_socket_connect() call.
- */
-
-void
-isc_socket_shutdown(isc_socket_t *sock, unsigned int how);
-/*%<
- * Shutdown 'socket' according to 'how'.
- *
- * Requires:
- *
- * \li	'socket' is a valid socket.
- *
- * \li	'task' is NULL or is a valid task.
- *
- * \li	If 'how' is 'ISC_SOCKSHUT_RECV' or 'ISC_SOCKSHUT_ALL' then
- *
- *		The read queue must be empty.
- *
- *		No further read requests may be made.
- *
- * \li	If 'how' is 'ISC_SOCKSHUT_SEND' or 'ISC_SOCKSHUT_ALL' then
- *
- *		The write queue must be empty.
- *
- *		No further write requests may be made.
  */
 
 void
@@ -319,7 +371,7 @@ isc_socket_detach(isc_socket_t **socketp);
 
 isc_result_t
 isc_socket_bind(isc_socket_t *sock, isc_sockaddr_t *addressp,
-	        unsigned int options);
+		unsigned int options);
 /*%<
  * Bind 'socket' to '*addressp'.
  *
@@ -340,66 +392,9 @@ isc_socket_bind(isc_socket_t *sock, isc_sockaddr_t *addressp,
  */
 
 isc_result_t
-isc_socket_privsep(int);
-
-isc_result_t
-isc_socket_filter(isc_socket_t *sock, const char *filter);
-/*%<
- * Inform the kernel that it should perform accept filtering.
- * If filter is NULL the current filter will be removed.:w
- */
-
-isc_result_t
-isc_socket_listen(isc_socket_t *sock, unsigned int backlog);
-/*%<
- * Set listen mode on the socket.  After this call, the only function that
- * can be used (other than attach and detach) is isc_socket_accept().
- *
- * Notes:
- *
- * \li	'backlog' is as in the UNIX system call listen() and may be
- *	ignored by non-UNIX implementations.
- *
- * \li	If 'backlog' is zero, a reasonable system default is used, usually
- *	SOMAXCONN.
- *
- * Requires:
- *
- * \li	'socket' is a valid, bound TCP socket or a valid, bound UNIX socket.
- *
- * Returns:
- *
- * \li	ISC_R_SUCCESS
- * \li	ISC_R_UNEXPECTED
- */
-
-isc_result_t
-isc_socket_accept(isc_socket_t *sock,
-		  isc_task_t *task, isc_taskaction_t action, const void *arg);
-/*%<
- * Queue accept event.  When a new connection is received, the task will
- * get an ISC_SOCKEVENT_NEWCONN event with the sender set to the listen
- * socket.  The new socket structure is sent inside the isc_socket_newconnev_t
- * event type, and is attached to the task 'task'.
- *
- * REQUIRES:
- * \li	'socket' is a valid TCP socket that isc_socket_listen() was called
- *	on.
- *
- * \li	'task' is a valid task
- *
- * \li	'action' is a valid action
- *
- * RETURNS:
- * \li	ISC_R_SUCCESS
- * \li	ISC_R_NOMEMORY
- * \li	ISC_R_UNEXPECTED
- */
-
-isc_result_t
 isc_socket_connect(isc_socket_t *sock, isc_sockaddr_t *addressp,
 		   isc_task_t *task, isc_taskaction_t action,
-		   const void *arg);
+		   void *arg);
 /*%<
  * Connect 'socket' to peer with address *saddr.  When the connection
  * succeeds, or when an error occurs, a CONNECT event with action 'action'
@@ -430,53 +425,11 @@ isc_socket_connect(isc_socket_t *sock, isc_sockaddr_t *addressp,
  * \li	ISC_R_UNEXPECTED
  */
 
-isc_result_t
-isc_socket_getpeername(isc_socket_t *sock, isc_sockaddr_t *addressp);
-/*%<
- * Get the name of the peer connected to 'socket'.
- *
- * Requires:
- *
- * \li	'socket' is a valid TCP socket.
- *
- * Returns:
- *
- * \li	ISC_R_SUCCESS
- * \li	ISC_R_TOOSMALL
- * \li	ISC_R_UNEXPECTED
- */
-
-isc_result_t
-isc_socket_getsockname(isc_socket_t *sock, isc_sockaddr_t *addressp);
-/*%<
- * Get the name of 'socket'.
- *
- * Requires:
- *
- * \li	'socket' is a valid socket.
- *
- * Returns:
- *
- * \li	ISC_R_SUCCESS
- * \li	ISC_R_TOOSMALL
- * \li	ISC_R_UNEXPECTED
- */
-
 /*@{*/
-isc_result_t
-isc_socket_recv(isc_socket_t *sock, isc_region_t *region,
-		unsigned int minimum,
-		isc_task_t *task, isc_taskaction_t action, const void *arg);
 isc_result_t
 isc_socket_recvv(isc_socket_t *sock, isc_bufferlist_t *buflist,
 		 unsigned int minimum,
-		 isc_task_t *task, isc_taskaction_t action, const void *arg);
-
-isc_result_t
-isc_socket_recv2(isc_socket_t *sock, isc_region_t *region,
-		 unsigned int minimum, isc_task_t *task,
-		 isc_socketevent_t *event, unsigned int flags);
-
+		 isc_task_t *task, isc_taskaction_t action, void *arg);
 /*!
  * Receive from 'socket', storing the results in region.
  *
@@ -552,25 +505,13 @@ isc_socket_recv2(isc_socket_t *sock, isc_region_t *region,
 
 /*@{*/
 isc_result_t
-isc_socket_send(isc_socket_t *sock, isc_region_t *region,
-		isc_task_t *task, isc_taskaction_t action, const void *arg);
-isc_result_t
-isc_socket_sendto(isc_socket_t *sock, isc_region_t *region,
-		  isc_task_t *task, isc_taskaction_t action, const void *arg,
-		  isc_sockaddr_t *address, struct in6_pktinfo *pktinfo);
-isc_result_t
 isc_socket_sendv(isc_socket_t *sock, isc_bufferlist_t *buflist,
-		 isc_task_t *task, isc_taskaction_t action, const void *arg);
+		 isc_task_t *task, isc_taskaction_t action, void *arg);
 isc_result_t
-isc_socket_sendtov(isc_socket_t *sock, isc_bufferlist_t *buflist,
-		   isc_task_t *task, isc_taskaction_t action, const void *arg,
-		   isc_sockaddr_t *address, struct in6_pktinfo *pktinfo);
-isc_result_t
-isc_socket_sendto2(isc_socket_t *sock, isc_region_t *region,
-		   isc_task_t *task,
-		   isc_sockaddr_t *address, struct in6_pktinfo *pktinfo,
-		   isc_socketevent_t *event, unsigned int flags);
-
+isc_socket_sendtov2(isc_socket_t *sock, isc_bufferlist_t *buflist,
+		    isc_task_t *task, isc_taskaction_t action, void *arg,
+		    isc_sockaddr_t *address, struct in6_pktinfo *pktinfo,
+		    unsigned int flags);
 /*!
  * Send the contents of 'region' to the socket's peer.
  *
@@ -646,17 +587,15 @@ isc_socket_sendto2(isc_socket_t *sock, isc_region_t *region,
 /*@}*/
 
 isc_result_t
-isc_socketmgr_create(isc_mem_t *mctx, isc_socketmgr_t **managerp);
+isc_socketmgr_create(isc_socketmgr_t **managerp);
+
 /*%<
- * Create a socket manager.
+ * Create a socket manager.  If "maxsocks" is non-zero, it specifies the
+ * maximum number of sockets that the created manager should handle.
  *
  * Notes:
  *
- *\li	All memory will be allocated in memory context 'mctx'.
- *
  * Requires:
- *
- *\li	'mctx' is a valid memory context.
  *
  *\li	'managerp' points to a NULL isc_socketmgr_t.
  *
@@ -669,6 +608,7 @@ isc_socketmgr_create(isc_mem_t *mctx, isc_socketmgr_t **managerp);
  *\li	#ISC_R_SUCCESS
  *\li	#ISC_R_NOMEMORY
  *\li	#ISC_R_UNEXPECTED
+ *\li	#ISC_R_NOTIMPLEMENTED
  */
 
 void
@@ -694,73 +634,6 @@ isc_socketmgr_destroy(isc_socketmgr_t **managerp);
  *\li	*managerp == NULL
  *
  *\li	All resources used by the manager have been freed.
- */
-
-isc_sockettype_t
-isc_socket_gettype(isc_socket_t *sock);
-/*%<
- * Returns the socket type for "sock."
- *
- * Requires:
- *
- *\li	"sock" is a valid socket.
- */
-
-/*@{*/
-isc_boolean_t
-isc_socket_isbound(isc_socket_t *sock);
-
-void
-isc_socket_ipv6only(isc_socket_t *sock, isc_boolean_t yes);
-/*%<
- * If the socket is an IPv6 socket set/clear the IPV6_IPV6ONLY socket
- * option if the host OS supports this option.
- *
- * Requires:
- *\li	'sock' is a valid socket.
- */
-/*@}*/
-
-void
-isc_socket_cleanunix(isc_sockaddr_t *addr, isc_boolean_t active);
-
-/*%<
- * Cleanup UNIX domain sockets in the file-system.  If 'active' is true
- * then just unlink the socket.  If 'active' is false try to determine
- * if there is a listener of the socket or not.  If no listener is found
- * then unlink socket.
- *
- * Prior to unlinking the path is tested to see if it a socket.
- *
- * Note: there are a number of race conditions which cannot be avoided
- *       both in the filesystem and any application using UNIX domain
- *	 sockets (e.g. socket is tested between bind() and listen(),
- *	 the socket is deleted and replaced in the file-system between
- *	 stat() and unlink()).
- */
-
-isc_result_t
-isc_socket_permunix(isc_sockaddr_t *sockaddr, isc_uint32_t perm,
-                    isc_uint32_t owner, isc_uint32_t group);
-/*%<
- * Set ownership and file permissions on the UNIX domain socket.
- *
- * Note: On Solaris and SunOS this secures the directory containing
- *       the socket as Solaris and SunOS do not honour the filesytem
- *	 permissions on the socket.
- *
- * Requires:
- * \li	'sockaddr' to be a valid UNIX domain sockaddr.
- *
- * Returns:
- * \li	#ISC_R_SUCCESS
- * \li	#ISC_R_FAILURE
- */
-
-void
-isc__socketmgr_setreserved(isc_socketmgr_t *mgr, isc_uint32_t);
-/*%<
- * Temporary.  For use by named only.
  */
 
 ISC_LANG_ENDDECLS

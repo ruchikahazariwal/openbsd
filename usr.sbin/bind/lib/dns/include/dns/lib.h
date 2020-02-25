@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1999-2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,12 +14,12 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: lib.h,v 1.8.18.4 2005/09/20 04:33:48 marka Exp $ */
+/* $Id: lib.h,v 1.5 2020/01/20 18:46:57 florian Exp $ */
 
 #ifndef DNS_LIB_H
 #define DNS_LIB_H 1
 
-/*! \file */
+/*! \file dns/lib.h */
 
 #include <isc/types.h>
 #include <isc/lang.h>
@@ -30,14 +29,20 @@ ISC_LANG_BEGINDECLS
 /*%
  * Tuning: external query load in packets per seconds.
  */
-LIBDNS_EXTERNAL_DATA extern unsigned int dns_pps;
-LIBDNS_EXTERNAL_DATA extern isc_msgcat_t *dns_msgcat;
+extern unsigned int dns_pps;
+
+isc_result_t
+dns_lib_init(void);
+/*%<
+ * A set of initialization procedure used in the DNS library.  This function
+ * is provided for an application that is not aware of the underlying ISC or
+ * DNS libraries much.
+ */
 
 void
-dns_lib_initmsgcat(void);
+dns_lib_shutdown(void);
 /*%<
- * Initialize the DNS library's message catalog, dns_msgcat, if it
- * has not already been initialized.
+ * Free temporary resources allocated in dns_lib_init().
  */
 
 ISC_LANG_ENDDECLS

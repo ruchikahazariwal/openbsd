@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnode.h,v 1.153 2019/08/26 18:56:29 anton Exp $	*/
+/*	$OpenBSD: vnode.h,v 1.155 2020/01/20 23:21:56 claudio Exp $	*/
 /*	$NetBSD: vnode.h,v 1.38 1996/02/29 20:59:05 cgd Exp $	*/
 
 /*
@@ -88,7 +88,7 @@ RBT_HEAD(namecache_rb_cache, namecache);
 struct uvm_vnode;
 struct vnode {
 	struct uvm_vnode *v_uvm;		/* uvm data */
-	struct vops *v_op;			/* vnode operations vector */
+	const struct vops *v_op;		/* vnode operations vector */
 	enum	vtype v_type;			/* vnode type */
 	enum	vtagtype v_tag;			/* type of underlying data */
 	u_int	v_flag;				/* vnode flags (see below) */
@@ -104,7 +104,7 @@ struct vnode {
 	u_int	v_inflight;
 	struct	mount *v_mount;			/* ptr to vfs we are in */
 	TAILQ_ENTRY(vnode) v_freelist;		/* vnode freelist */
-	LIST_ENTRY(vnode) v_mntvnodes;		/* vnodes for mount point */
+	TAILQ_ENTRY(vnode) v_mntvnodes;		/* vnodes for mount point */
 	struct	buf_rb_bufs v_bufs_tree;	/* lookup of all bufs */
 	struct	buflists v_cleanblkhd;		/* clean blocklist head */
 	struct	buflists v_dirtyblkhd;		/* dirty blocklist head */
@@ -297,8 +297,8 @@ struct vops {
 	int	(*vop_kqfilter)(void *);
 };
 
-extern struct vops dead_vops;
-extern struct vops spec_vops;
+extern const struct vops dead_vops;
+extern const struct vops spec_vops;
 
 struct vop_generic_args {
 	void		*a_garbage;
@@ -585,7 +585,7 @@ struct vnode;
 int	bdevvp(dev_t, struct vnode **);
 int	cdevvp(dev_t, struct vnode **);
 struct vnode *checkalias(struct vnode *, dev_t, struct mount *);
-int	getnewvnode(enum vtagtype, struct mount *, struct vops *,
+int	getnewvnode(enum vtagtype, struct mount *, const struct vops *,
 	    struct vnode **);
 int	vaccess(enum vtype, mode_t, uid_t, gid_t, mode_t, struct ucred *);
 int	vnoperm(struct vnode *);

@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1999-2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,7 +14,7 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: serial.h,v 1.10.18.2 2005/04/29 00:17:02 marka Exp $ */
+/* $Id: serial.h,v 1.4 2020/01/09 18:17:19 florian Exp $ */
 
 #ifndef ISC_SERIAL_H
 #define ISC_SERIAL_H 1
@@ -23,8 +22,8 @@
 #include <isc/lang.h>
 #include <isc/types.h>
 
-/*! \file
- *	\brief Implement 32 bit serial space arithmetic comparision functions.
+/*! \file isc/serial.h
+ *	\brief Implement 32 bit serial space arithmetic comparison functions.
  *	Note: Undefined results are returned as ISC_FALSE.
  */
 
@@ -35,37 +34,37 @@
 ISC_LANG_BEGINDECLS
 
 isc_boolean_t
-isc_serial_lt(isc_uint32_t a, isc_uint32_t b);
+isc_serial_lt(uint32_t a, uint32_t b);
 /*%<
  *	Return true if 'a' < 'b' otherwise false.
  */
 
 isc_boolean_t
-isc_serial_gt(isc_uint32_t a, isc_uint32_t b);
+isc_serial_gt(uint32_t a, uint32_t b);
 /*%<
  *	Return true if 'a' > 'b' otherwise false.
  */
 
 isc_boolean_t
-isc_serial_le(isc_uint32_t a, isc_uint32_t b);
+isc_serial_le(uint32_t a, uint32_t b);
 /*%<
  *	Return true if 'a' <= 'b' otherwise false.
  */
 
 isc_boolean_t
-isc_serial_ge(isc_uint32_t a, isc_uint32_t b);
+isc_serial_ge(uint32_t a, uint32_t b);
 /*%<
  *	Return true if 'a' >= 'b' otherwise false.
  */
 
 isc_boolean_t
-isc_serial_eq(isc_uint32_t a, isc_uint32_t b);
+isc_serial_eq(uint32_t a, uint32_t b);
 /*%<
  *	Return true if 'a' == 'b' otherwise false.
  */
 
 isc_boolean_t
-isc_serial_ne(isc_uint32_t a, isc_uint32_t b);
+isc_serial_ne(uint32_t a, uint32_t b);
 /*%<
  *	Return true if 'a' != 'b' otherwise false.
  */

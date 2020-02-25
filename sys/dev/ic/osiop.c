@@ -1,4 +1,4 @@
-/*	$OpenBSD: osiop.c,v 1.51 2017/04/30 16:45:46 mpi Exp $	*/
+/*	$OpenBSD: osiop.c,v 1.53 2020/01/25 21:48:42 krw Exp $	*/
 /*	$NetBSD: osiop.c,v 1.9 2002/04/05 18:27:54 bouyer Exp $	*/
 
 /*
@@ -181,10 +181,7 @@ struct cfdriver osiop_cd = {
 };
 
 struct scsi_adapter osiop_adapter = {
-	osiop_scsicmd,
-	osiop_minphys,
-	NULL,
-	NULL,
+	osiop_scsicmd, osiop_minphys, NULL, NULL, NULL
 };
 
 void
@@ -355,7 +352,6 @@ osiop_minphys(struct buf *bp, struct scsi_link *sl)
 {
 	if (bp->b_bcount > OSIOP_MAX_XFER)
 		bp->b_bcount = OSIOP_MAX_XFER;
-	minphys(bp);
 }
 
 void *

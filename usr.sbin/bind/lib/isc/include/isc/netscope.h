@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 2002  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,12 +14,12 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: netscope.h,v 1.5.18.2 2005/04/29 00:17:00 marka Exp $ */
+/* $Id: netscope.h,v 1.4 2020/01/09 18:17:19 florian Exp $ */
 
 #ifndef ISC_NETSCOPE_H
 #define ISC_NETSCOPE_H 1
 
-/*! \file */
+/*! \file isc/netscope.h */
 
 ISC_LANG_BEGINDECLS
 
@@ -36,8 +35,8 @@ ISC_LANG_BEGINDECLS
  * \li	ISC_R_FAILURE: conversion fails
  */
 isc_result_t
-isc_netscope_pton(int af, char *scopename, void *addr, isc_uint32_t *zoneid);
+isc_netscope_pton(int af, char *scopename, void *addr, uint32_t *zoneid);
 
 ISC_LANG_ENDDECLS
 
-#endif /* ISC_NETADDR_H */
+#endif /* ISC_NETSCOPE_H */

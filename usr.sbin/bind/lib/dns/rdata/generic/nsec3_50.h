@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, 2011, 2012  Internet Systems Consortium, Inc. ("ISC")
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -18,7 +18,7 @@
 #ifndef GENERIC_NSEC3_50_H
 #define GENERIC_NSEC3_50_H 1
 
-/* $Id: nsec3_50.h,v 1.1 2015/02/07 05:50:00 pelikan Exp $ */
+/* $Id: nsec3_50.h,v 1.5 2020/01/20 18:51:53 florian Exp $ */
 
 /*!
  * \brief Per RFC 5155 */
@@ -27,13 +27,12 @@
 
 typedef struct dns_rdata_nsec3 {
 	dns_rdatacommon_t	common;
-	isc_mem_t		*mctx;
 	dns_hash_t		hash;
 	unsigned char		flags;
 	dns_iterations_t	iterations;
 	unsigned char		salt_length;
 	unsigned char		next_length;
-	isc_uint16_t		len;
+	uint16_t		len;
 	unsigned char		*salt;
 	unsigned char		*next;
 	unsigned char		*typebits;

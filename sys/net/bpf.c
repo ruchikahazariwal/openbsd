@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpf.c,v 1.181 2019/10/01 11:51:13 dlg Exp $	*/
+/*	$OpenBSD: bpf.c,v 1.186 2020/01/27 19:16:43 jcs Exp $	*/
 /*	$NetBSD: bpf.c,v 1.33 1997/02/21 23:59:35 thorpej Exp $	*/
 
 /*
@@ -58,6 +58,7 @@
 #include <sys/smr.h>
 #include <sys/specdev.h>
 #include <sys/selinfo.h>
+#include <sys/sigio.h>
 #include <sys/task.h>
 
 #include <net/if.h>
@@ -123,6 +124,13 @@ void	bpf_resetd(struct bpf_d *);
 
 void	bpf_prog_smr(void *);
 void	bpf_d_smr(void *);
+
+/*
+ * Reference count access to descriptor buffers
+ */
+void	bpf_get(struct bpf_d *);
+void	bpf_put(struct bpf_d *);
+
 
 struct rwlock bpf_sysctl_lk = RWLOCK_INITIALIZER("bpfsz");
 
@@ -318,11 +326,13 @@ bpf_detachd(struct bpf_d *d)
 
 		d->bd_promisc = 0;
 
+		bpf_get(d);
 		mtx_leave(&d->bd_mtx);
 		NET_LOCK();
 		error = ifpromisc(bp->bif_ifp, 0);
 		NET_UNLOCK();
 		mtx_enter(&d->bd_mtx);
+		bpf_put(d);
 
 		if (error && !(error == EINVAL || error == ENODEV ||
 		    error == ENXIO))
@@ -367,10 +377,12 @@ bpfopen(dev_t dev, int flag, int mode, struct proc *p)
 	mtx_init(&bd->bd_mtx, IPL_NET);
 	task_set(&bd->bd_wake_task, bpf_wakeup_cb, bd);
 	smr_init(&bd->bd_smr);
+	sigio_init(&bd->bd_sigio);
 
 	if (flag & FNONBLOCK)
 		bd->bd_rtout = -1;
 
+	bpf_get(bd);
 	LIST_INSERT_HEAD(&bpf_d_list, bd, bd_list);
 
 	return (0);
@@ -391,13 +403,7 @@ bpfclose(dev_t dev, int flag, int mode, struct proc *p)
 	bpf_wakeup(d);
 	LIST_REMOVE(d, bd_list);
 	mtx_leave(&d->bd_mtx);
-
-	/*
-	 * Wait for the task to finish here, before proceeding to garbage
-	 * collection.
-	 */
-	taskq_barrier(systq);
-	smr_call(&d->bd_smr, bpf_d_smr, d);
+	bpf_put(d);
 
 	return (0);
 }
@@ -431,6 +437,7 @@ bpfread(dev_t dev, struct uio *uio, int ioflag)
 	if (d->bd_bif == NULL)
 		return (ENXIO);
 
+	bpf_get(d);
 	mtx_enter(&d->bd_mtx);
 
 	/*
@@ -536,6 +543,7 @@ bpfread(dev_t dev, struct uio *uio, int ioflag)
 	d->bd_in_uiomove = 0;
 out:
 	mtx_leave(&d->bd_mtx);
+	bpf_put(d);
 
 	return (error);
 }
@@ -550,11 +558,13 @@ bpf_wakeup(struct bpf_d *d)
 	MUTEX_ASSERT_LOCKED(&d->bd_mtx);
 
 	/*
-	 * As long as csignal() and selwakeup() need to be protected
+	 * As long as pgsigio() and selwakeup() need to be protected
 	 * by the KERNEL_LOCK() we have to delay the wakeup to
 	 * another context to keep the hot path KERNEL_LOCK()-free.
 	 */
-	task_add(systq, &d->bd_wake_task);
+	bpf_get(d);
+	if (!task_add(systq, &d->bd_wake_task))
+		bpf_put(d);
 }
 
 void
@@ -566,9 +576,10 @@ bpf_wakeup_cb(void *xd)
 
 	wakeup(d);
 	if (d->bd_async && d->bd_sig)
-		csignal(d->bd_pgid, d->bd_sig, d->bd_siguid, d->bd_sigeuid);
+		pgsigio(&d->bd_sigio, d->bd_sig, 0);
 
 	selwakeup(&d->bd_sel);
+	bpf_put(d);
 }
 
 int
@@ -586,6 +597,7 @@ bpfwrite(dev_t dev, struct uio *uio, int ioflag)
 	if (d->bd_bif == NULL)
 		return (ENXIO);
 
+	bpf_get(d);
 	ifp = d->bd_bif->bif_ifp;
 
 	if (ifp == NULL || (ifp->if_flags & IFF_UP) == 0) {
@@ -619,6 +631,7 @@ bpfwrite(dev_t dev, struct uio *uio, int ioflag)
 	NET_UNLOCK();
 
 out:
+	bpf_put(d);
 	return (error);
 }
 
@@ -693,6 +706,8 @@ bpfioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 			return (EPERM);
 		}
 	}
+
+	bpf_get(d);
 
 	switch (cmd) {
 	default:
@@ -956,22 +971,14 @@ bpfioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		d->bd_async = *(int *)addr;
 		break;
 
-	/*
-	 * N.B.  ioctl (FIOSETOWN) and fcntl (F_SETOWN) both end up doing
-	 * the equivalent of a TIOCSPGRP and hence end up here.  *However*
-	 * TIOCSPGRP's arg is a process group if it's positive and a process
-	 * id if it's negative.  This is exactly the opposite of what the
-	 * other two functions want!  Therefore there is code in ioctl and
-	 * fcntl to negate the arg before calling here.
-	 */
-	case TIOCSPGRP:		/* Process or group to send signals to */
-		d->bd_pgid = *(int *)addr;
-		d->bd_siguid = p->p_ucred->cr_ruid;
-		d->bd_sigeuid = p->p_ucred->cr_uid;
+	case FIOSETOWN:		/* Process or group to send signals to */
+	case TIOCSPGRP:
+		error = sigio_setown(&d->bd_sigio, cmd, addr);
 		break;
 
+	case FIOGETOWN:
 	case TIOCGPGRP:
-		*(int *)addr = d->bd_pgid;
+		sigio_getown(&d->bd_sigio, cmd, addr);
 		break;
 
 	case BIOCSRSIG:		/* Set receive signal */
@@ -991,6 +998,7 @@ bpfioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		break;
 	}
 
+	bpf_put(d);
 	return (error);
 }
 
@@ -1156,8 +1164,12 @@ bpfpoll(dev_t dev, int events, struct proc *p)
 	return (revents);
 }
 
-struct filterops bpfread_filtops =
-	{ 1, NULL, filt_bpfrdetach, filt_bpfread };
+const struct filterops bpfread_filtops = {
+	.f_isfd		= 1,
+	.f_attach	= NULL,
+	.f_detach	= filt_bpfrdetach,
+	.f_event	= filt_bpfread,
+};
 
 int
 bpfkqfilter(dev_t dev, struct knote *kn)
@@ -1178,6 +1190,7 @@ bpfkqfilter(dev_t dev, struct knote *kn)
 		return (EINVAL);
 	}
 
+	bpf_get(d);
 	kn->kn_hook = d;
 	SLIST_INSERT_HEAD(klist, kn, kn_selnext);
 
@@ -1197,6 +1210,7 @@ filt_bpfrdetach(struct knote *kn)
 	KERNEL_ASSERT_LOCKED();
 
 	SLIST_REMOVE(&d->bd_sel.si_note, kn, knote, kn_selnext);
+	bpf_put(d);
 }
 
 int
@@ -1567,6 +1581,7 @@ bpf_d_smr(void *smr)
 {
 	struct bpf_d	*bd = smr;
 
+	sigio_free(&bd->bd_sigio);
 	free(bd->bd_sbuf, M_DEVBUF, bd->bd_bufsize);
 	free(bd->bd_hbuf, M_DEVBUF, bd->bd_bufsize);
 	free(bd->bd_fbuf, M_DEVBUF, bd->bd_bufsize);
@@ -1577,6 +1592,25 @@ bpf_d_smr(void *smr)
 		bpf_prog_smr(bd->bd_wfilter);
 
 	free(bd, M_DEVBUF, sizeof(*bd));
+}
+
+void
+bpf_get(struct bpf_d *bd)
+{
+	atomic_inc_int(&bd->bd_ref);
+}
+
+/*
+ * Free buffers currently in use by a descriptor
+ * when the reference count drops to zero.
+ */
+void
+bpf_put(struct bpf_d *bd)
+{
+	if (atomic_dec_int_nv(&bd->bd_ref) > 0)
+		return;
+
+	smr_call(&bd->bd_smr, bpf_d_smr, bd);
 }
 
 void *
@@ -1621,18 +1655,14 @@ bpfattach(caddr_t *driverp, struct ifnet *ifp, u_int dlt, u_int hdrlen)
 void
 bpfdetach(struct ifnet *ifp)
 {
-	struct bpf_if *bp, *nbp, **pbp = &bpf_iflist;
+	struct bpf_if *bp, *nbp;
 
 	KERNEL_ASSERT_LOCKED();
 
 	for (bp = bpf_iflist; bp; bp = nbp) {
 		nbp = bp->bif_next;
-		if (bp->bif_ifp == ifp) {
-			*pbp = nbp;
-
+		if (bp->bif_ifp == ifp)
 			bpfsdetach(bp);
-		} else
-			pbp = &bp->bif_next;
 	}
 	ifp->if_bpf = NULL;
 }
@@ -1640,9 +1670,11 @@ bpfdetach(struct ifnet *ifp)
 void
 bpfsdetach(void *p)
 {
-	struct bpf_if *bp = p;
+	struct bpf_if *bp = p, *tbp;
 	struct bpf_d *bd;
 	int maj;
+
+	KERNEL_ASSERT_LOCKED();
 
 	/* Locate the major number. */
 	for (maj = 0; maj < nchrdev; maj++)
@@ -1651,6 +1683,16 @@ bpfsdetach(void *p)
 
 	while ((bd = SMR_SLIST_FIRST_LOCKED(&bp->bif_dlist)))
 		vdevgone(maj, bd->bd_unit, bd->bd_unit, VCHR);
+
+	for (tbp = bpf_iflist; tbp; tbp = tbp->bif_next) {
+		if (tbp->bif_next == bp) {
+			tbp->bif_next = bp->bif_next;
+			break;
+		}
+	}
+
+	if (bpf_iflist == bp)
+		bpf_iflist = bp->bif_next;
 
 	free(bp, M_DEVBUF, sizeof(*bp));
 }

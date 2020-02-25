@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1998-2001, 2003  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,19 +14,17 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: result.c,v 1.62.18.6 2005/06/22 22:05:48 marka Exp $ */
+/* $Id: result.c,v 1.7 2020/01/26 11:24:19 florian Exp $ */
 
 /*! \file */
 
-#include <config.h>
+
 
 #include <stddef.h>
 #include <stdlib.h>
 
 #include <isc/lib.h>
 #include <isc/msgs.h>
-#include <isc/mutex.h>
-#include <isc/once.h>
 #include <isc/resultclass.h>
 #include <isc/util.h>
 
@@ -35,12 +32,11 @@ typedef struct resulttable {
 	unsigned int				base;
 	unsigned int				last;
 	const char **				text;
-	isc_msgcat_t *				msgcat;
 	int					set;
 	ISC_LINK(struct resulttable)		link;
 } resulttable;
 
-static const char *text[ISC_R_NRESULTS] = {
+static const char *description[ISC_R_NRESULTS] = {
 	"success",				/*%< 0 */
 	"out of memory",			/*%< 1 */
 	"timed out",				/*%< 2 */
@@ -100,19 +96,22 @@ static const char *text[ISC_R_NRESULTS] = {
 	"not a valid number",			/*%< 56 */
 	"disabled",				/*%< 57 */
 	"max size",				/*%< 58 */
-	"invalid address format"		/*%< 59 */
+	"invalid address format",		/*%< 59 */
+	"bad base32 encoding",			/*%< 60 */
+	"unset",				/*%< 61 */
+	"multiple",				/*%< 62 */
+	"would block",				/*%< 63 */
 };
 
 #define ISC_RESULT_RESULTSET			2
 #define ISC_RESULT_UNAVAILABLESET		3
 
-static isc_once_t 				once = ISC_ONCE_INIT;
+static isc_boolean_t 				once = ISC_FALSE;
 static ISC_LIST(resulttable)			tables;
-static isc_mutex_t				lock;
 
 static isc_result_t
 register_table(unsigned int base, unsigned int nresults, const char **text,
-	       isc_msgcat_t *msgcat, int set)
+	       int set)
 {
 	resulttable *table;
 
@@ -130,15 +129,10 @@ register_table(unsigned int base, unsigned int nresults, const char **text,
 	table->base = base;
 	table->last = base + nresults - 1;
 	table->text = text;
-	table->msgcat = msgcat;
 	table->set = set;
 	ISC_LINK_INIT(table, link);
 
-	LOCK(&lock);
-
 	ISC_LIST_APPEND(tables, table, link);
-
-	UNLOCK(&lock);
 
 	return (ISC_R_SUCCESS);
 }
@@ -147,34 +141,31 @@ static void
 initialize_action(void) {
 	isc_result_t result;
 
-	RUNTIME_CHECK(isc_mutex_init(&lock) == ISC_R_SUCCESS);
 	ISC_LIST_INIT(tables);
 
-	result = register_table(ISC_RESULTCLASS_ISC, ISC_R_NRESULTS, text,
-				isc_msgcat, ISC_RESULT_RESULTSET);
+	result = register_table(ISC_RESULTCLASS_ISC, ISC_R_NRESULTS,
+				description, ISC_RESULT_RESULTSET);
 	if (result != ISC_R_SUCCESS)
 		UNEXPECTED_ERROR(__FILE__, __LINE__,
-				 "register_table() %s: %u",
-				 isc_msgcat_get(isc_msgcat, ISC_MSGSET_GENERAL,
-						ISC_MSG_FAILED, "failed"),
+				 "register_table() %s: %u", "failed",
 				 result);
 }
 
 static void
 initialize(void) {
-	isc_lib_initmsgcat();
-	RUNTIME_CHECK(isc_once_do(&once, initialize_action) == ISC_R_SUCCESS);
+	if (!once) {
+		once = ISC_TRUE;
+		initialize_action();
+	}
 }
 
 const char *
 isc_result_totext(isc_result_t result) {
 	resulttable *table;
-	const char *text, *default_text;
+	const char *text;
 	int index;
 
 	initialize();
-
-	LOCK(&lock);
 
 	text = NULL;
 	for (table = ISC_LIST_HEAD(tables);
@@ -182,31 +173,21 @@ isc_result_totext(isc_result_t result) {
 	     table = ISC_LIST_NEXT(table, link)) {
 		if (result >= table->base && result <= table->last) {
 			index = (int)(result - table->base);
-			default_text = table->text[index];
-			/*
-			 * Note: we use 'index + 1' as the message number
-			 * instead of index because isc_msgcat_get() requires
-			 * the message number to be > 0.
-			 */
-			text = isc_msgcat_get(table->msgcat, table->set,
-					      index + 1, default_text);
+			text = table->text[index];
 			break;
 		}
 	}
 	if (text == NULL)
-		text = isc_msgcat_get(isc_msgcat, ISC_RESULT_UNAVAILABLESET,
-				      1, "(result code text not available)");
-
-	UNLOCK(&lock);
+		text = "(result code text not available)";
 
 	return (text);
 }
 
 isc_result_t
 isc_result_register(unsigned int base, unsigned int nresults,
-		    const char **text, isc_msgcat_t *msgcat, int set)
+		    const char **text, int set)
 {
 	initialize();
 
-	return (register_table(base, nresults, text, msgcat, set));
+	return (register_table(base, nresults, text, set));
 }

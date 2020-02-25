@@ -1,4 +1,4 @@
-/*	$OpenBSD: drm_linux.c,v 1.49 2019/08/27 11:46:07 kettenis Exp $	*/
+/*	$OpenBSD: drm_linux.c,v 1.56 2020/01/16 16:35:03 mpi Exp $	*/
 /*
  * Copyright (c) 2013 Jonathan Gray <jsg@openbsd.org>
  * Copyright (c) 2015, 2016 Mark Kettenis <kettenis@openbsd.org>
@@ -91,7 +91,7 @@ schedule_timeout(long timeout)
 	sleep_setup(&sls, sch_ident, sch_priority, "schto");
 	if (timeout != MAX_SCHEDULE_TIMEOUT)
 		sleep_setup_timeout(&sls, timeout);
-	sleep_setup_signal(&sls, sch_priority);
+	sleep_setup_signal(&sls);
 
 	wait = (sch_proc == curproc && timeout > 0);
 
@@ -115,20 +115,8 @@ schedule_timeout(long timeout)
 int
 wake_up_process(struct proc *p)
 {
-	int s, r = 0;
-
-	SCHED_LOCK(s);
 	atomic_cas_ptr(&sch_proc, p, NULL);
-	if (p->p_wchan) {
-		if (p->p_stat == SSLEEP) {
-			setrunnable(p);
-			r = 1;
-		} else
-			unsleep(p);
-	}
-	SCHED_UNLOCK(s);
-
-	return r;
+	return wakeup_proc(p, NULL);
 }
 
 void
@@ -240,7 +228,7 @@ kthread_parkme(void)
 	while (thread->flags & KTHREAD_SHOULDPARK) {
 		thread->flags |= KTHREAD_PARKED;
 		wakeup(thread);
-		tsleep(thread, PPAUSE | PCATCH, "parkme", 0);
+		tsleep_nsec(thread, PPAUSE | PCATCH, "parkme", INFSLP);
 		thread->flags &= ~KTHREAD_PARKED;
 	}
 }
@@ -253,7 +241,7 @@ kthread_park(struct proc *p)
 	while ((thread->flags & KTHREAD_PARKED) == 0) {
 		thread->flags |= KTHREAD_SHOULDPARK;
 		wake_up_process(thread->proc);
-		tsleep(thread, PPAUSE | PCATCH, "park", 0);
+		tsleep_nsec(thread, PPAUSE | PCATCH, "park", INFSLP);
 	}
 }
 
@@ -281,7 +269,7 @@ kthread_stop(struct proc *p)
 	while ((thread->flags & KTHREAD_STOPPED) == 0) {
 		thread->flags |= KTHREAD_SHOULDSTOP;
 		wake_up_process(thread->proc);
-		tsleep(thread, PPAUSE | PCATCH, "stop", 0);
+		tsleep_nsec(thread, PPAUSE | PCATCH, "stop", INFSLP);
 	}
 	LIST_REMOVE(thread, next);
 	free(thread, M_DRM, sizeof(*thread));
@@ -352,28 +340,56 @@ timeval_to_us(const struct timeval *tv)
 
 extern char *hw_vendor, *hw_prod, *hw_ver;
 
+#if NBIOS > 0
+extern char smbios_board_vendor[];
+extern char smbios_board_prod[];
+extern char smbios_board_serial[];
+#endif
+
 bool
 dmi_match(int slot, const char *str)
 {
 	switch (slot) {
 	case DMI_SYS_VENDOR:
-	case DMI_BOARD_VENDOR:
 		if (hw_vendor != NULL &&
 		    !strcmp(hw_vendor, str))
 			return true;
 		break;
 	case DMI_PRODUCT_NAME:
-	case DMI_BOARD_NAME:
 		if (hw_prod != NULL &&
 		    !strcmp(hw_prod, str))
 			return true;
 		break;
 	case DMI_PRODUCT_VERSION:
-	case DMI_BOARD_VERSION:
 		if (hw_ver != NULL &&
 		    !strcmp(hw_ver, str))
 			return true;
 		break;
+#if NBIOS > 0
+	case DMI_BOARD_VENDOR:
+		if (strcmp(smbios_board_vendor, str) == 0)
+			return true;
+		break;
+	case DMI_BOARD_NAME:
+		if (strcmp(smbios_board_prod, str) == 0)
+			return true;
+		break;
+	case DMI_BOARD_SERIAL:
+		if (strcmp(smbios_board_serial, str) == 0)
+			return true;
+		break;
+#else
+	case DMI_BOARD_VENDOR:
+		if (hw_vendor != NULL &&
+		    !strcmp(hw_vendor, str))
+			return true;
+		break;
+	case DMI_BOARD_NAME:
+		if (hw_prod != NULL &&
+		    !strcmp(hw_prod, str))
+			return true;
+		break;
+#endif
 	case DMI_NONE:
 	default:
 		return false;
@@ -1521,7 +1537,7 @@ dmabuf_seek(struct file *fp, off_t *offset, int whence, struct proc *p)
 	return (0);
 }
 
-struct fileops dmabufops = {
+const struct fileops dmabufops = {
 	.fo_read	= dmabuf_read,
 	.fo_write	= dmabuf_write,
 	.fo_ioctl	= dmabuf_ioctl,
@@ -1724,7 +1740,8 @@ wait_on_bit(unsigned long *word, int bit, unsigned mode)
 
 	mtx_enter(&wait_bit_mtx);
 	while (test_bit(bit, word)) {
-		err = msleep(word, &wait_bit_mtx, PWAIT | mode, "wtb", 0);
+		err = msleep_nsec(word, &wait_bit_mtx, PWAIT | mode, "wtb",
+		    INFSLP);
 		if (err) {
 			mtx_leave(&wait_bit_mtx);
 			return 1;
@@ -1838,4 +1855,35 @@ pci_resize_resource(struct pci_dev *pdev, int bar, int nsize)
 	pci_conf_write(pdev->pc, pdev->tag, offset + RBCTRL0, reg);
 
 	return 0;
+}
+
+TAILQ_HEAD(, shrinker) shrinkers = TAILQ_HEAD_INITIALIZER(shrinkers);
+
+int
+register_shrinker(struct shrinker *shrinker)
+{
+	TAILQ_INSERT_TAIL(&shrinkers, shrinker, next);
+	return 0;
+}
+
+void
+unregister_shrinker(struct shrinker *shrinker)
+{
+	TAILQ_REMOVE(&shrinkers, shrinker, next);
+}
+
+void
+drmbackoff(long npages)
+{
+	struct shrink_control sc;
+	struct shrinker *shrinker;
+	u_long ret;
+
+	shrinker = TAILQ_FIRST(&shrinkers);
+	while (shrinker && npages > 0) {
+		sc.nr_to_scan = npages;
+		ret = shrinker->scan_objects(shrinker, &sc);
+		npages -= ret;
+		shrinker = TAILQ_NEXT(shrinker, next);
+	}
 }

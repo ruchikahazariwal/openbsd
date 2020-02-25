@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.h,v 1.22 2010/07/01 19:47:04 bluhm Exp $ */
+/*	$OpenBSD: rde.h,v 1.24 2020/01/21 15:17:12 denis Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -140,6 +140,9 @@ void		 orig_intra_area_prefix_lsas(struct area *);
 void		 lsa_init(struct lsa_tree *);
 int		 lsa_compare(struct vertex *, struct vertex *);
 void		 vertex_free(struct vertex *);
+void		 vertex_nexthop_clear(struct vertex *);
+void		 vertex_nexthop_add(struct vertex *, struct vertex *,
+		    const struct in6_addr *, u_int32_t);
 int		 lsa_newer(struct lsa_hdr *, struct lsa_hdr *);
 int		 lsa_check(struct rde_nbr *, struct lsa *, u_int16_t);
 int		 lsa_self(struct lsa *);
@@ -156,7 +159,7 @@ struct vertex	*lsa_find_tree(struct lsa_tree *, u_int16_t, u_int32_t,
 u_int32_t	 lsa_find_lsid(struct lsa_tree *, u_int16_t, u_int32_t,
 		    int (*)(struct lsa *, struct lsa *), struct lsa *);
 u_int16_t	 lsa_num_links(struct vertex *);
-void		 lsa_snap(struct rde_nbr *, u_int32_t);
+void		 lsa_snap(struct rde_nbr *);
 void		 lsa_dump(struct lsa_tree *, int, pid_t);
 void		 lsa_merge(struct rde_nbr *, struct lsa *, struct vertex *);
 void		 lsa_remove_invalid_sums(struct area *);

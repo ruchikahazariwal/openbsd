@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004-2006  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1999-2002  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,7 +14,7 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: compress.h,v 1.32.18.6 2006/03/02 00:37:21 marka Exp $ */
+/* $Id: compress.h,v 1.5 2020/01/20 18:51:52 florian Exp $ */
 
 #ifndef DNS_COMPRESS_H
 #define DNS_COMPRESS_H 1
@@ -32,7 +31,7 @@ ISC_LANG_BEGINDECLS
 #define DNS_COMPRESS_ALL		0x01	/*%< all compression. */
 #define DNS_COMPRESS_CASESENSITIVE	0x02	/*%< case sensitive compression. */
 
-/*! \file
+/*! \file dns/compress.h
  *	Direct manipulation of the structures is strongly discouraged.
  */
 
@@ -43,9 +42,9 @@ typedef struct dns_compressnode dns_compressnode_t;
 
 struct dns_compressnode {
 	isc_region_t		r;
-	isc_uint16_t		offset;
-	isc_uint16_t		count;
-	isc_uint8_t		labels;
+	uint16_t		offset;
+	uint16_t		count;
+	uint8_t		labels;
 	dns_compressnode_t	*next;
 };
 
@@ -57,8 +56,7 @@ struct dns_compress {
 	dns_compressnode_t	*table[DNS_COMPRESS_TABLESIZE];
 	/*% Preallocated nodes for the table. */
 	dns_compressnode_t	initialnodes[DNS_COMPRESS_INITIALNODES];
-	isc_uint16_t		count;		/*%< Number of nodes. */
-	isc_mem_t		*mctx;		/*%< Memory context. */
+	uint16_t		count;		/*%< Number of nodes. */
 };
 
 typedef enum {
@@ -75,9 +73,9 @@ struct dns_decompress {
 };
 
 isc_result_t
-dns_compress_init(dns_compress_t *cctx, int edns, isc_mem_t *mctx);
+dns_compress_init(dns_compress_t *cctx, int edns);
 /*%<
- *	Inialise the compression context structure pointed to by 'cctx'.
+ *	Initialise the compression context structure pointed to by 'cctx'.
  *
  *	Requires:
  *	\li	'cctx' is a valid dns_compress_t structure.
@@ -87,7 +85,6 @@ dns_compress_init(dns_compress_t *cctx, int edns, isc_mem_t *mctx);
  *
  *	Returns:
  *	\li	#ISC_R_SUCCESS
- *	\li	failures from dns_rbt_create()
  */
 
 void
@@ -136,7 +133,7 @@ dns_compress_setsensitive(dns_compress_t *cctx, isc_boolean_t sensitive);
 isc_boolean_t
 dns_compress_getsensitive(dns_compress_t *cctx);
 /*
- *	Return whether case is to be preservered when compressing
+ *	Return whether case is to be preserved when compressing
  *	domain names.
  *
  *	Requires:
@@ -158,7 +155,7 @@ dns_compress_getedns(dns_compress_t *cctx);
 
 isc_boolean_t
 dns_compress_findglobal(dns_compress_t *cctx, const dns_name_t *name,
-			dns_name_t *prefix, isc_uint16_t *offset);
+			dns_name_t *prefix, uint16_t *offset);
 /*%<
  *	Finds longest possible match of 'name' in the global compression table.
  *
@@ -166,7 +163,7 @@ dns_compress_findglobal(dns_compress_t *cctx, const dns_name_t *name,
  *\li		'cctx' to be initialized.
  *\li		'name' to be a absolute name.
  *\li		'prefix' to be initialized.
- *\li		'offset' to point to an isc_uint16_t.
+ *\li		'offset' to point to an uint16_t.
  *
  *	Ensures:
  *\li		'prefix' and 'offset' are valid if ISC_TRUE is 	returned.
@@ -177,7 +174,7 @@ dns_compress_findglobal(dns_compress_t *cctx, const dns_name_t *name,
 
 void
 dns_compress_add(dns_compress_t *cctx, const dns_name_t *name,
-		 const dns_name_t *prefix, isc_uint16_t offset);
+		 const dns_name_t *prefix, uint16_t offset);
 /*%<
  *	Add compression pointers for 'name' to the compression table,
  *	not replacing existing pointers.
@@ -193,7 +190,7 @@ dns_compress_add(dns_compress_t *cctx, const dns_name_t *name,
  */
 
 void
-dns_compress_rollback(dns_compress_t *cctx, isc_uint16_t offset);
+dns_compress_rollback(dns_compress_t *cctx, uint16_t offset);
 
 /*%<
  *	Remove any compression pointers from global table >= offset.

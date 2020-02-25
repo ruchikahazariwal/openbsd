@@ -1,4 +1,4 @@
-/* $OpenBSD: ssl_locl.h,v 1.247 2019/04/22 15:12:20 jsing Exp $ */
+/* $OpenBSD: ssl_locl.h,v 1.260 2020/02/01 11:38:35 jsing Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -186,6 +186,16 @@ __BEGIN_HIDDEN_DECLS
 #define s2n(s,c)	((c[0]=(unsigned char)(((s)>> 8)&0xff), \
 			  c[1]=(unsigned char)(((s)    )&0xff)),c+=2)
 
+#if 0
+#ifndef LIBRESSL_HAS_TLS1_3_CLIENT
+#define LIBRESSL_HAS_TLS1_3_CLIENT
+#endif
+#endif
+
+#if defined(LIBRESSL_HAS_TLS1_3_CLIENT) || defined(LIBRESSL_HAS_TLS1_3_SERVER)
+#define LIBRESSL_HAS_TLS1_3
+#endif
+
 /* LOCAL STUFF */
 
 #define SSL_DECRYPT	0
@@ -334,6 +344,10 @@ __BEGIN_HIDDEN_DECLS
 #define SSL_USE_TLS1_2_CIPHERS(s) \
 	(s->method->internal->ssl3_enc->enc_flags & SSL_ENC_FLAG_TLS1_2_CIPHERS)
 
+/* Allow TLS 1.3 ciphersuites only. */
+#define SSL_USE_TLS1_3_CIPHERS(s) \
+	(s->method->internal->ssl3_enc->enc_flags & SSL_ENC_FLAG_TLS1_3_CIPHERS)
+
 #define SSL_PKEY_RSA_ENC	0
 #define SSL_PKEY_RSA_SIGN	1
 #define SSL_PKEY_DH_RSA		2
@@ -376,14 +390,14 @@ typedef struct ssl_method_internal_st {
 
 	int (*ssl_accept)(SSL *s);
 	int (*ssl_connect)(SSL *s);
+	int (*ssl_shutdown)(SSL *s);
 
 	int (*ssl_renegotiate)(SSL *s);
 	int (*ssl_renegotiate_check)(SSL *s);
 
-	long (*ssl_get_message)(SSL *s, int st1, int stn, int mt,
-	    long max, int *ok);
-	int (*ssl_read_bytes)(SSL *s, int type, unsigned char *buf,
-	    int len, int peek);
+	int (*ssl_pending)(const SSL *s);
+	int (*ssl_read_bytes)(SSL *s, int type, unsigned char *buf, int len,
+	    int peek);
 	int (*ssl_write_bytes)(SSL *s, int type, const void *buf_, int len);
 
 	const struct ssl_method_st *(*get_ssl_method)(int version);
@@ -446,11 +460,7 @@ typedef struct ssl_handshake_tls13_st {
 	/* Version proposed by peer server. */
 	uint16_t server_version;
 
-	/* X25519 key share. */
-	uint8_t *x25519_public;
-	uint8_t *x25519_private;
-	uint8_t *x25519_peer_public;
-
+	struct tls13_key_share *key_share;
 	struct tls13_secrets *secrets;
 
 	uint8_t *cookie;
@@ -459,6 +469,10 @@ typedef struct ssl_handshake_tls13_st {
 	/* Preserved transcript hash. */
 	uint8_t transcript_hash[EVP_MAX_MD_SIZE];
 	size_t transcript_hash_len;
+
+	/* Legacy session ID. */
+	uint8_t legacy_session_id[SSL_MAX_SSL_SESSION_ID_LENGTH];
+	size_t legacy_session_id_len;
 } SSL_HANDSHAKE_TLS13;
 
 typedef struct ssl_ctx_internal_st {
@@ -856,6 +870,7 @@ typedef struct ssl3_state_internal_st {
 		DH *dh;
 
 		EC_KEY *ecdh; /* holds short lived ECDH key */
+		int ecdh_nid;
 
 		uint8_t *x25519;
 
@@ -1001,6 +1016,7 @@ typedef struct sess_cert_st {
 	/* Obviously we don't have the private keys of these,
 	 * so maybe we shouldn't even use the CERT_PKEY type here. */
 
+	int peer_nid;
 	DH *peer_dh_tmp;
 	EC_KEY *peer_ecdh_tmp;
 	uint8_t *peer_x25519_tmp;
@@ -1031,6 +1047,9 @@ typedef struct ssl3_enc_method {
 
 /* Allow TLS 1.2 ciphersuites: applies to DTLS 1.2 as well as TLS 1.2. */
 #define SSL_ENC_FLAG_TLS1_2_CIPHERS     (1 << 4)
+
+/* Allow TLS 1.3 ciphersuites only. */
+#define SSL_ENC_FLAG_TLS1_3_CIPHERS     (1 << 5)
 
 /*
  * ssl_aead_ctx_st contains information about an AEAD that is being used to
@@ -1069,6 +1088,7 @@ int ssl_cipher_is_permitted(const SSL_CIPHER *cipher, uint16_t min_ver,
     uint16_t max_ver);
 
 const SSL_METHOD *tls_legacy_client_method(void);
+const SSL_METHOD *tls_legacy_server_method(void);
 
 const SSL_METHOD *dtls1_get_client_method(int ver);
 const SSL_METHOD *dtls1_get_server_method(int ver);
@@ -1079,6 +1099,7 @@ extern SSL3_ENC_METHOD DTLSv1_enc_data;
 extern SSL3_ENC_METHOD TLSv1_enc_data;
 extern SSL3_ENC_METHOD TLSv1_1_enc_data;
 extern SSL3_ENC_METHOD TLSv1_2_enc_data;
+extern SSL3_ENC_METHOD TLSv1_3_enc_data;
 
 void ssl_clear_cipher_state(SSL *s);
 void ssl_clear_cipher_read_state(SSL *s);
@@ -1257,6 +1278,12 @@ int ssl3_get_client_certificate(SSL *s);
 int ssl3_get_client_key_exchange(SSL *s);
 int ssl3_get_cert_verify(SSL *s);
 
+int ssl_kex_generate_ecdhe_ecp(EC_KEY *ecdh, int nid);
+int ssl_kex_public_ecdhe_ecp(EC_KEY *ecdh, CBB *cbb);
+int ssl_kex_peer_public_ecdhe_ecp(EC_KEY *ecdh, int nid, CBS *cbs);
+int ssl_kex_derive_ecdhe_ecp(EC_KEY *ecdh, EC_KEY *ecdh_peer,
+    uint8_t **shared_key, size_t *shared_key_len);
+
 int tls1_new(SSL *s);
 void tls1_free(SSL *s);
 void tls1_clear(SSL *s);
@@ -1332,15 +1359,6 @@ int tls1_process_ticket(SSL *s, CBS *session_id, CBS *ext_block,
 long ssl_get_algorithm2(SSL *s);
 
 int tls1_check_ec_server_key(SSL *s);
-
-int ssl_add_clienthello_use_srtp_ext(SSL *s, unsigned char *p,
-    int *len, int maxlen);
-int ssl_parse_clienthello_use_srtp_ext(SSL *s, const unsigned char *d,
-    int len, int *al);
-int ssl_add_serverhello_use_srtp_ext(SSL *s, unsigned char *p,
-    int *len, int maxlen);
-int ssl_parse_serverhello_use_srtp_ext(SSL *s, const unsigned char *d,
-    int len, int *al);
 
 /* s3_cbc.c */
 void ssl3_cbc_copy_mac(unsigned char *out, const SSL3_RECORD *rec,

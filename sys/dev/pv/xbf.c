@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbf.c,v 1.32 2017/07/17 10:30:03 mikeb Exp $	*/
+/*	$OpenBSD: xbf.c,v 1.34 2020/01/26 00:53:31 krw Exp $	*/
 
 /*
  * Copyright (c) 2016, 2017 Mike Belopuhov
@@ -299,7 +299,7 @@ xbf_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	sc->sc_switch.scsi_cmd = xbf_scsi_cmd;
-	sc->sc_switch.scsi_minphys = scsi_minphys;
+	sc->sc_switch.dev_minphys = scsi_minphys;
 	sc->sc_switch.dev_probe = xbf_dev_probe;
 
 	sc->sc_link.adapter = &sc->sc_switch;
@@ -738,7 +738,7 @@ xbf_poll_cmd(struct scsi_xfer *xs)
 		if (ISSET(xs->flags, SCSI_NOSLEEP))
 			delay(10);
 		else
-			tsleep(xs, PRIBIO, "xbfpoll", 1);
+			tsleep_nsec(xs, PRIBIO, "xbfpoll", USEC_TO_NSEC(10));
 		xbf_intr(xs->sc_link->adapter_softc);
 	} while(--timo > 0);
 

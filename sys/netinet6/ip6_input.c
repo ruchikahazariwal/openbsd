@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_input.c,v 1.219 2019/08/21 15:32:18 florian Exp $	*/
+/*	$OpenBSD: ip6_input.c,v 1.224 2019/12/30 14:52:00 bluhm Exp $	*/
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -144,7 +144,7 @@ ip6_init(void)
 
 	pr = pffindproto(PF_INET6, IPPROTO_RAW, SOCK_RAW);
 	if (pr == NULL)
-		panic("ip6_init");
+		panic("%s", __func__);
 	for (i = 0; i < IPPROTO_MAX; i++)
 		ip6_protox[i] = pr - inet6sw;
 	for (pr = inet6domain.dom_protosw;
@@ -335,12 +335,6 @@ ip6_input_if(struct mbuf **mp, int *offp, int nxt, int af, struct ifnet *ifp)
 		goto bad;
 	}
 
-	if (IN6_IS_ADDR_LOOPBACK(&ip6->ip6_src) ||
-	    IN6_IS_ADDR_LOOPBACK(&ip6->ip6_dst)) {
-		nxt = ip6_ours(mp, offp, nxt, af);
-		goto out;
-	}
-
 #if NPF > 0
 	if (pf_ouraddr(m) == 1) {
 		nxt = ip6_ours(mp, offp, nxt, af);
@@ -432,6 +426,32 @@ ip6_input_if(struct mbuf **mp, int *offp, int nxt, int af, struct ifnet *ifp)
 		struct in6_ifaddr *ia6 = ifatoia6(rt->rt_ifa);
 		if (ia6->ia6_flags & IN6_IFF_ANYCAST)
 			m->m_flags |= M_ACAST;
+
+		if (ip6_forwarding == 0 && rt->rt_ifidx != ifp->if_index &&
+		    !((ifp->if_flags & IFF_LOOPBACK) ||
+		    (ifp->if_type == IFT_ENC) ||
+		    (m->m_pkthdr.pf.flags & PF_TAG_TRANSLATE_LOCALHOST))) {
+			/* received on wrong interface */
+#if NCARP > 0
+			struct ifnet *out_if;
+
+			/*
+			 * Virtual IPs on carp interfaces need to be checked
+			 * also against the parent interface and other carp
+			 * interfaces sharing the same parent.
+			 */
+			out_if = if_get(rt->rt_ifidx);
+			if (!(out_if && carp_strict_addr_chk(out_if, ifp))) {
+				ip6stat_inc(ip6s_wrongif);
+				if_put(out_if);
+				goto bad;
+			}
+			if_put(out_if);
+#else
+			ip6stat_inc(ip6s_wrongif);
+			goto bad;
+#endif
+		}
 		/*
 		 * packets to a tentative, duplicated, or somehow invalid
 		 * address must not be accepted.
@@ -1204,7 +1224,7 @@ ip6_nexthdr(struct mbuf *m, int off, int proto, int *nxtp)
 
 	/* just in case */
 	if (m == NULL)
-		panic("ip6_nexthdr: m == NULL");
+		panic("%s: m == NULL", __func__);
 	if ((m->m_flags & M_PKTHDR) == 0 || m->m_pkthdr.len < off)
 		return -1;
 

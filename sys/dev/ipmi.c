@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipmi.c,v 1.105 2019/08/19 18:31:02 kettenis Exp $ */
+/*	$OpenBSD: ipmi.c,v 1.108 2020/01/11 18:51:54 kettenis Exp $ */
 
 /*
  * Copyright (c) 2015 Masao Uebayashi
@@ -958,7 +958,7 @@ ipmi_cmd_wait(struct ipmi_cmd *c)
 	res = task_add(c->c_sc->sc_cmd_taskq, &t);
 	KASSERT(res == 1);
 
-	tsleep(c, PWAIT, "ipmicmd", 0);
+	tsleep_nsec(c, PWAIT, "ipmicmd", INFSLP);
 
 	res = task_del(c->c_sc->sc_cmd_taskq, &t);
 	KASSERT(res == 0);
@@ -1171,8 +1171,8 @@ signextend(unsigned long val, int bits)
 long
 ipmi_convert(u_int8_t v, struct sdrtype1 *s1, long adj)
 {
-	short	M, B;
-	char	K1, K2;
+	int16_t	M, B;
+	int8_t	K1, K2;
 	long	val;
 
 	/* Calculate linear reading variables */
@@ -1450,7 +1450,7 @@ ipmi_map_regs(struct ipmi_softc *sc, struct ipmi_attach_args *ia)
 	if (bus_space_map(sc->sc_iot, ia->iaa_if_iobase,
 	    sc->sc_if->nregs * sc->sc_if_iospacing,
 	    0, &sc->sc_ioh)) {
-		printf("%s: bus_space_map(%lx %x %x 0 %p) failed\n",
+		printf("%s: bus_space_map(%lx %lx %x 0 %p) failed\n",
 		    DEVNAME(sc),
 		    (unsigned long)sc->sc_iot, ia->iaa_if_iobase,
 		    sc->sc_if->nregs * sc->sc_if_iospacing, &sc->sc_ioh);
@@ -1540,7 +1540,7 @@ ipmi_attach_common(struct ipmi_softc *sc, struct ipmi_attach_args *ia)
 	printf(": version %d.%d interface %s",
 	    ia->iaa_if_rev >> 4, ia->iaa_if_rev & 0xF, sc->sc_if->name);
 	if (sc->sc_if->nregs > 0)
-		printf(" %sbase 0x%x/%x spacing %d",
+		printf(" %sbase 0x%lx/%x spacing %d",
 		    ia->iaa_if_iotype == 'i' ? "io" : "mem", ia->iaa_if_iobase,
 		    ia->iaa_if_iospacing * sc->sc_if->nregs,
 		    ia->iaa_if_iospacing);

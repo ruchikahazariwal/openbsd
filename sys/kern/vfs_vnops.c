@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_vnops.c,v 1.108 2019/10/06 16:24:14 beck Exp $	*/
+/*	$OpenBSD: vfs_vnops.c,v 1.111 2020/01/05 13:46:02 visa Exp $	*/
 /*	$NetBSD: vfs_vnops.c,v 1.20 1996/02/04 02:18:41 christos Exp $	*/
 
 /*
@@ -66,7 +66,7 @@ int vn_kqfilter(struct file *, struct knote *);
 int vn_closefile(struct file *, struct proc *);
 int vn_seek(struct file *, off_t *, int, struct proc *);
 
-struct 	fileops vnops = {
+const struct fileops vnops = {
 	.fo_read	= vn_read,
 	.fo_write	= vn_write,
 	.fo_ioctl	= vn_ioctl,
@@ -98,11 +98,8 @@ vn_open(struct nameidata *ndp, int fmode, int cmode)
 	 * has not set other flags or operations in the nameidata
 	 * structure.
 	 */
-	/* XXX consider changing to KASSERT after release */
-	if (!(ndp->ni_cnd.cn_flags == 0 || ndp->ni_cnd.cn_flags == KERNELPATH))
-		return EINVAL;
-	if (!(ndp->ni_cnd.cn_nameiop == 0))
-		return EINVAL;
+	KASSERT(ndp->ni_cnd.cn_flags == 0 || ndp->ni_cnd.cn_flags == KERNELPATH);
+	KASSERT(ndp->ni_cnd.cn_nameiop == 0);
 
         if ((fmode & (FREAD|FWRITE)) == 0)
 		return (EINVAL);
@@ -567,7 +564,7 @@ vn_lock(struct vnode *vp, int flags)
 	do {
 		if (vp->v_flag & VXLOCK) {
 			vp->v_flag |= VXWANT;
-			tsleep(vp, PINOD, "vn_lock", 0);
+			tsleep_nsec(vp, PINOD, "vn_lock", INFSLP);
 			error = ENOENT;
 		} else {
 			vp->v_lockcount++;

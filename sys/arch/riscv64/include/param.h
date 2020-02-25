@@ -67,6 +67,10 @@
 #define MSGBUFSIZE	(16 * PAGE_SIZE)	/* XXX default message buffer size */
 #endif
 
+#ifndef KSTACK_PAGES
+#define KSTACK_PAGES	4			/*pages of kernel stack, with pcb*/
+#endif
+
 /*
  * XXX Maximum size of the kernel malloc arena in PAGE_SIZE-sized
  * logical pages.

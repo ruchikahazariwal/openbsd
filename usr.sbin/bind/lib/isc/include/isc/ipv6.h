@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1999-2002  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,7 +14,7 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: ipv6.h,v 1.20.18.2 2005/04/29 00:16:56 marka Exp $ */
+/* $Id: ipv6.h,v 1.7 2020/01/22 13:02:10 florian Exp $ */
 
 #ifndef ISC_IPV6_H
 #define ISC_IPV6_H 1
@@ -53,19 +52,19 @@
  *** Imports.
  ***/
 
-#include <isc/int.h>
-#include <isc/platform.h>
+
+
 
 /***
  *** Types.
  ***/
 
 struct in6_addr {
-        union {
-		isc_uint8_t	_S6_u8[16];
-		isc_uint16_t	_S6_u16[8];
-		isc_uint32_t	_S6_u32[4];
-        } _S6_un;
+	union {
+		uint8_t	_S6_u8[16];
+		uint16_t	_S6_u16[8];
+		uint32_t	_S6_u32[4];
+	} _S6_un;
 };
 #define s6_addr		_S6_un._S6_u8
 #define s6_addr8	_S6_un._S6_u8
@@ -75,61 +74,55 @@ struct in6_addr {
 #define IN6ADDR_ANY_INIT 	{{{ 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }}}
 #define IN6ADDR_LOOPBACK_INIT 	{{{ 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1 }}}
 
-LIBISC_EXTERNAL_DATA extern const struct in6_addr in6addr_any;
-LIBISC_EXTERNAL_DATA extern const struct in6_addr in6addr_loopback;
+extern const struct in6_addr in6addr_any;
+extern const struct in6_addr in6addr_loopback;
 
 struct sockaddr_in6 {
-#ifdef ISC_PLATFORM_HAVESALEN
-	isc_uint8_t		sin6_len;
-	isc_uint8_t		sin6_family;
-#else
-	isc_uint16_t		sin6_family;
-#endif
-	isc_uint16_t		sin6_port;
-	isc_uint32_t		sin6_flowinfo;
+	uint8_t		sin6_len;
+	uint8_t		sin6_family;
+	uint16_t		sin6_port;
+	uint32_t		sin6_flowinfo;
 	struct in6_addr		sin6_addr;
-	isc_uint32_t		sin6_scope_id;
+	uint32_t		sin6_scope_id;
 };
 
-#ifdef ISC_PLATFORM_HAVESALEN
 #define SIN6_LEN 1
-#endif
 
 /*%
  * Unspecified
  */
 #define IN6_IS_ADDR_UNSPECIFIED(a)      \
-        (((a)->s6_addr32[0] == 0) &&    \
-         ((a)->s6_addr32[1] == 0) &&    \
-         ((a)->s6_addr32[2] == 0) &&    \
-         ((a)->s6_addr32[3] == 0))
+	(((a)->s6_addr32[0] == 0) &&    \
+	 ((a)->s6_addr32[1] == 0) &&    \
+	 ((a)->s6_addr32[2] == 0) &&    \
+	 ((a)->s6_addr32[3] == 0))
 
 /*%
  * Loopback
  */
 #define IN6_IS_ADDR_LOOPBACK(a)         \
-        (((a)->s6_addr32[0] == 0) &&    \
-         ((a)->s6_addr32[1] == 0) &&    \
-         ((a)->s6_addr32[2] == 0) &&    \
-         ((a)->s6_addr32[3] == htonl(1)))
+	(((a)->s6_addr32[0] == 0) &&    \
+	 ((a)->s6_addr32[1] == 0) &&    \
+	 ((a)->s6_addr32[2] == 0) &&    \
+	 ((a)->s6_addr32[3] == htonl(1)))
 
 /*%
  * IPv4 compatible
  */
 #define IN6_IS_ADDR_V4COMPAT(a)         \
-        (((a)->s6_addr32[0] == 0) &&    \
-         ((a)->s6_addr32[1] == 0) &&    \
-         ((a)->s6_addr32[2] == 0) &&    \
-         ((a)->s6_addr32[3] != 0) &&    \
-         ((a)->s6_addr32[3] != htonl(1)))
+	(((a)->s6_addr32[0] == 0) &&    \
+	 ((a)->s6_addr32[1] == 0) &&    \
+	 ((a)->s6_addr32[2] == 0) &&    \
+	 ((a)->s6_addr32[3] != 0) &&    \
+	 ((a)->s6_addr32[3] != htonl(1)))
 
 /*%
  * Mapped
  */
 #define IN6_IS_ADDR_V4MAPPED(a)               \
-        (((a)->s6_addr32[0] == 0) &&          \
-         ((a)->s6_addr32[1] == 0) &&          \
-         ((a)->s6_addr32[2] == htonl(0x0000ffff)))
+	(((a)->s6_addr32[0] == 0) &&          \
+	 ((a)->s6_addr32[1] == 0) &&          \
+	 ((a)->s6_addr32[2] == htonl(0x0000ffff)))
 
 /*%
  * Multicast

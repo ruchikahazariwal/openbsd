@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.235 2019/10/06 16:24:14 beck Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.245 2020/02/01 15:52:34 anton Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -62,6 +62,7 @@
 #include <sys/sched.h>
 #include <sys/user.h>
 #include <sys/syslog.h>
+#include <sys/ttycom.h>
 #include <sys/pledge.h>
 #include <sys/witness.h>
 
@@ -75,8 +76,12 @@ int	filt_sigattach(struct knote *kn);
 void	filt_sigdetach(struct knote *kn);
 int	filt_signal(struct knote *kn, long hint);
 
-struct filterops sig_filtops =
-	{ 0, filt_sigattach, filt_sigdetach, filt_signal };
+const struct filterops sig_filtops = {
+	.f_isfd		= 0,
+	.f_attach	= filt_sigattach,
+	.f_detach	= filt_sigdetach,
+	.f_event	= filt_signal,
+};
 
 void proc_stop(struct proc *p, int);
 void proc_stop_sweep(void *);
@@ -507,7 +512,7 @@ sys_sigsuspend(struct proc *p, void *v, register_t *retval)
 	struct sigacts *ps = pr->ps_sigacts;
 
 	dosigsuspend(p, SCARG(uap, mask) &~ sigcantmask);
-	while (tsleep(ps, PPAUSE|PCATCH, "pause", 0) == 0)
+	while (tsleep_nsec(ps, PPAUSE|PCATCH, "pause", INFSLP) == 0)
 		/* void */;
 	/* always return EINTR rather than ERESTART... */
 	return (EINTR);
@@ -708,33 +713,6 @@ killpg1(struct proc *cp, int signum, int pgid, int all)
 	CANDELIVER((cr)->cr_ruid, (cr)->cr_uid, (pr))
 
 /*
- * Deliver signum to pgid, but first check uid/euid against each
- * process and see if it is permitted.
- */
-void
-csignal(pid_t pgid, int signum, uid_t uid, uid_t euid)
-{
-	struct pgrp *pgrp;
-	struct process *pr;
-
-	if (pgid == 0)
-		return;
-	if (pgid < 0) {
-		pgid = -pgid;
-		if ((pgrp = pgfind(pgid)) == NULL)
-			return;
-		LIST_FOREACH(pr, &pgrp->pg_members, ps_pglist)
-			if (CANDELIVER(uid, euid, pr))
-				prsignal(pr, signum);
-	} else {
-		if ((pr = prfind(pgid)) == NULL)
-			return;
-		if (CANDELIVER(uid, euid, pr))
-			prsignal(pr, signum);
-	}
-}
-
-/*
  * Send a signal to a process group.  If checktty is 1,
  * limit to members which have a controlling terminal.
  */
@@ -907,9 +885,7 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 	if (type == SPROCESS) {
 		/* Accept SIGKILL to coredumping processes */
 		if (pr->ps_flags & PS_COREDUMP && signum == SIGKILL) {
-			if (pr->ps_single != NULL)
-				p = pr->ps_single;
-			atomic_setbits_int(&p->p_p->ps_siglist, mask);
+			atomic_setbits_int(&pr->ps_siglist, mask);
 			return;
 		}
 
@@ -1067,7 +1043,7 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 			if (pr->ps_flags & PS_PPWAIT)
 				goto out;
 			atomic_clearbits_int(siglist, mask);
-			p->p_xstat = signum;
+			pr->ps_xsig = signum;
 			proc_stop(p, 0);
 			goto out;
 		}
@@ -1133,7 +1109,7 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 		 * runnable and can look at the signal.  But don't make
 		 * the process runnable, leave it stopped.
 		 */
-		if (p->p_wchan && p->p_flag & P_SINTR)
+		if (p->p_flag & P_SINTR)
 			unsleep(p);
 		goto out;
 
@@ -1154,8 +1130,8 @@ runfast:
 	/*
 	 * Raise priority to at least PUSER.
 	 */
-	if (p->p_priority > PUSER)
-		p->p_priority = PUSER;
+	if (p->p_usrpri > PUSER)
+		p->p_usrpri = PUSER;
 run:
 	setrunnable(p);
 out:
@@ -1196,7 +1172,7 @@ issignal(struct proc *p)
 		signum = ffs((long)mask);
 		mask = sigmask(signum);
 		atomic_clearbits_int(&p->p_siglist, mask);
-		atomic_clearbits_int(&p->p_p->ps_siglist, mask);
+		atomic_clearbits_int(&pr->ps_siglist, mask);
 
 		/*
 		 * We should see pending but ignored signals
@@ -1213,7 +1189,7 @@ issignal(struct proc *p)
 		 */
 		if (((pr->ps_flags & (PS_TRACED | PS_PPWAIT)) == PS_TRACED) &&
 		    signum != SIGKILL) {
-			p->p_xstat = signum;
+			pr->ps_xsig = signum;
 
 			if (dolock)
 				KERNEL_LOCK();
@@ -1237,21 +1213,22 @@ issignal(struct proc *p)
 			 * If we are no longer being traced, or the parent
 			 * didn't give us a signal, look for more signals.
 			 */
-			if ((pr->ps_flags & PS_TRACED) == 0 || p->p_xstat == 0)
+			if ((pr->ps_flags & PS_TRACED) == 0 ||
+			    pr->ps_xsig == 0)
 				continue;
 
 			/*
 			 * If the new signal is being masked, look for other
 			 * signals.
 			 */
-			signum = p->p_xstat;
+			signum = pr->ps_xsig;
 			mask = sigmask(signum);
 			if ((p->p_sigmask & mask) != 0)
 				continue;
 
 			/* take the signal! */
 			atomic_clearbits_int(&p->p_siglist, mask);
-			atomic_clearbits_int(&p->p_p->ps_siglist, mask);
+			atomic_clearbits_int(&pr->ps_siglist, mask);
 		}
 
 		prop = sigprop[signum];
@@ -1289,7 +1266,7 @@ issignal(struct proc *p)
 		    		    (pr->ps_pgrp->pg_jobc == 0 &&
 				    prop & SA_TTYSTOP))
 					break;	/* == ignore */
-				p->p_xstat = signum;
+				pr->ps_xsig = signum;
 				if (dolock)
 					SCHED_LOCK(s);
 				proc_stop(p, 1);
@@ -1496,7 +1473,7 @@ sigexit(struct proc *p, int signum)
 		if (coredump(p) == 0)
 			signum |= WCOREFLAG;
 	}
-	exit1(p, W_EXITCODE(0, signum), EXIT_NORMAL);
+	exit1(p, 0, signum, EXIT_NORMAL);
 	/* NOTREACHED */
 }
 
@@ -1722,7 +1699,7 @@ sys___thrsigdivert(struct proc *p, void *v, register_t *retval)
 	sigset_t *m;
 	sigset_t mask = SCARG(uap, sigmask) &~ sigcantmask;
 	siginfo_t si;
-	uint64_t to_ticks = 0;
+	uint64_t nsecs = INFSLP;
 	int timeinvalid = 0;
 	int error = 0;
 
@@ -1738,14 +1715,8 @@ sys___thrsigdivert(struct proc *p, void *v, register_t *retval)
 #endif
 		if (!timespecisvalid(&ts))
 			timeinvalid = 1;
-		else {
-			to_ticks = (uint64_t)hz * ts.tv_sec +
-			    ts.tv_nsec / (tick * 1000);
-			if (to_ticks > INT_MAX)
-				to_ticks = INT_MAX;
-			if (to_ticks == 0 && ts.tv_nsec)
-				to_ticks = 1;
-		}
+		else
+			nsecs = TIMESPEC_TO_NSEC(&ts);
 	}
 
 	dosigsuspend(p, p->p_sigmask &~ mask);
@@ -1772,14 +1743,14 @@ sys___thrsigdivert(struct proc *p, void *v, register_t *retval)
 		if (timeinvalid)
 			error = EINVAL;
 
-		if (SCARG(uap, timeout) != NULL && to_ticks == 0)
+		if (SCARG(uap, timeout) != NULL && nsecs == INFSLP)
 			error = EAGAIN;
 
 		if (error != 0)
 			break;
 
-		error = tsleep(&sigwaitsleep, PPAUSE|PCATCH, "sigwait",
-		    (int)to_ticks);
+		error = tsleep_nsec(&sigwaitsleep, PPAUSE|PCATCH, "sigwait",
+		    nsecs);
 	}
 
 	if (error == 0) {
@@ -1915,7 +1886,7 @@ userret(struct proc *p)
 
 	WITNESS_WARN(WARN_PANIC, NULL, "userret: returning");
 
-	p->p_cpu->ci_schedstate.spc_curpriority = p->p_priority = p->p_usrpri;
+	p->p_cpu->ci_schedstate.spc_curpriority = p->p_usrpri;
 }
 
 int
@@ -1938,7 +1909,7 @@ single_thread_check(struct proc *p, int deep)
 			if (--pr->ps_singlecount == 0)
 				wakeup(&pr->ps_singlecount);
 			if (pr->ps_flags & PS_SINGLEEXIT)
-				exit1(p, 0, EXIT_THREAD_NOCHECK);
+				exit1(p, 0, 0, EXIT_THREAD_NOCHECK);
 
 			/* not exiting and don't need to unwind, so suspend */
 			SCHED_LOCK(s);
@@ -2056,7 +2027,7 @@ single_thread_wait(struct process *pr)
 {
 	/* wait until they're all suspended */
 	while (pr->ps_singlecount > 0)
-		tsleep(&pr->ps_singlecount, PWAIT, "suspend", 0);
+		tsleep_nsec(&pr->ps_singlecount, PWAIT, "suspend", INFSLP);
 }
 
 void
@@ -2164,7 +2135,7 @@ sigio_freelist(struct sigiolst *sigiolst)
 }
 
 int
-sigio_setown(struct sigio_ref *sir, pid_t pgid)
+sigio_setown(struct sigio_ref *sir, u_long cmd, caddr_t data)
 {
 	struct sigiolst rmlist;
 	struct proc *p = curproc;
@@ -2172,10 +2143,17 @@ sigio_setown(struct sigio_ref *sir, pid_t pgid)
 	struct process *pr = NULL;
 	struct sigio *sigio;
 	int error;
+	pid_t pgid = *(int *)data;
 
 	if (pgid == 0) {
 		sigio_free(sir);
 		return (0);
+	}
+
+	if (cmd == TIOCSPGRP) {
+		if (pgid < 0)
+			return (EINVAL);
+		pgid = -pgid;
 	}
 
 	sigio = malloc(sizeof(*sigio), M_SIGIO, M_WAITOK);
@@ -2266,8 +2244,8 @@ fail:
 	return (error);
 }
 
-pid_t
-sigio_getown(struct sigio_ref *sir)
+void
+sigio_getown(struct sigio_ref *sir, u_long cmd, caddr_t data)
 {
 	struct sigio *sigio;
 	pid_t pgid = 0;
@@ -2278,7 +2256,10 @@ sigio_getown(struct sigio_ref *sir)
 		pgid = sigio->sio_pgid;
 	mtx_leave(&sigio_lock);
 
-	return (pgid);
+	if (cmd == TIOCGPGRP)
+		pgid = -pgid;
+
+	*(int *)data = pgid;
 }
 
 void

@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-ether.c,v 1.35 2018/11/18 08:55:51 dlg Exp $	*/
+/*	$OpenBSD: print-ether.c,v 1.37 2020/01/24 22:46:36 procter Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
@@ -60,17 +60,17 @@ ether_print(const u_char *bp, u_int length)
 	ep = (const struct ether_header *)bp;
 	if (qflag) {
 		TCHECK2(*ep, 12);
-		(void)printf("%s %s %d: ",
-			     etheraddr_string(ESRC(ep)),
-			     etheraddr_string(EDST(ep)),
-			     length);
+		printf("%s %s %d: ",
+		    etheraddr_string(ESRC(ep)),
+		    etheraddr_string(EDST(ep)),
+		    length);
 	} else {
 		TCHECK2(*ep, 14);
-		(void)printf("%s %s %s %d: ",
-			     etheraddr_string(ESRC(ep)),
-			     etheraddr_string(EDST(ep)),
-			     etherproto_string(ep->ether_type),
-			     length);
+		printf("%s %s %s %d: ",
+		    etheraddr_string(ESRC(ep)),
+		    etheraddr_string(EDST(ep)),
+		    etherproto_string(ep->ether_type),
+		    length);
 	}
 	return;
 trunc:
@@ -243,7 +243,7 @@ recurse:
 
 	case ETHERTYPE_ATALK:
 		if (vflag)
-			fputs("et1 ", stdout);
+			printf("et1 ");
 		atalk_print_llap(p, length);
 		return (1);
 
@@ -287,6 +287,13 @@ recurse:
 			if (!xflag && !qflag)
 				default_print(p-18, caplen+4);
 		}
+		return (1);
+
+#ifndef ETHERTYPE_NSH
+#define ETHERTYPE_NSH 0x894f
+#endif
+	case ETHERTYPE_NSH:
+		nsh_print(p, length);
 		return (1);
 
 #ifndef ETHERTYPE_PBB

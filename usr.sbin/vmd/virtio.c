@@ -1,4 +1,4 @@
-/*	$OpenBSD: virtio.c,v 1.79 2019/09/24 12:14:54 mlarkin Exp $	*/
+/*	$OpenBSD: virtio.c,v 1.82 2019/12/11 06:45:16 pd Exp $	*/
 
 /*
  * Copyright (c) 2015 Mike Larkin <mlarkin@openbsd.org>
@@ -47,8 +47,8 @@
 #include "loadfile.h"
 #include "atomicio.h"
 
-extern char *__progname;
 
+extern char *__progname;
 struct viornd_dev viornd;
 struct vioblk_dev *vioblk;
 struct vionet_dev *vionet;
@@ -162,6 +162,15 @@ viombh_update_qs(void)
 	viombh.cfg.queue_address = viombh.vq[viombh.cfg.queue_select].qa;
 	viombh.cfg.queue_size = viombh.vq[viombh.cfg.queue_select].qs;
 }
+/* CMPE to dequeue the stats queue in viomb */
+// static void viombh_vq_dequeue()
+// {
+// 	printf("\n CMPE I am here testing in dequeue");
+// 	viombh_dev *sb;
+// 	int idx = sb->vq[0]->vq_queued;
+// 	printf("%s: CMPE got idx\n", __func__, idx);
+
+// }
 
 /* cmpe Update queue address */
 void
@@ -2221,23 +2230,6 @@ virtio_init(struct vmd_vm *vm, int child_cdrom,
 		return;
 	}
 
-	/* virtio memory balloon device */
-	if (pci_add_device(&id, PCI_VENDOR_QUMRANET,
-	    PCI_PRODUCT_QUMRANET_VIO_MEM, PCI_CLASS_SYSTEM,
-	    PCI_SUBCLASS_SYSTEM_MISC,
-	    PCI_VENDOR_OPENBSD,
-	    PCI_PRODUCT_VIRTIO_BALLOON, 1, NULL)) {
-		log_warnx("%s: can't add PCI virtio mem device",
-		    __progname);
-		return;
-	}
-
-	if (pci_add_bar(id, PCI_MAPREG_TYPE_IO, NULL, NULL)) {
-		log_warnx("%s: can't add bar for virtio mem device",
-		    __progname);
-		return;
-	}
-
 	memset(&vmmci, 0, sizeof(vmmci));
 	vmmci.cfg.device_feature = VMMCI_F_TIMESYNC | VMMCI_F_ACK |
 	    VMMCI_F_SYNCRTC;
@@ -2261,7 +2253,7 @@ virtio_init(struct vmd_vm *vm, int child_cdrom,
             PCI_PRODUCT_VIRTIO_BALLOON,     // defined in pv/virtioreg.h
             1,
             NULL)) {
-			log_warnx("%s: can't add PCI virtio mem device",
+			log_warnx("%s: can't add PCI virtio memory balloon device",
 				__progname);
 			return;
 	}
@@ -2274,11 +2266,11 @@ virtio_init(struct vmd_vm *vm, int child_cdrom,
 	if (pci_add_bar(id,
         PCI_MAPREG_TYPE_IO,     //defined in pci/pcireg.h
         virtio_mbh_io, NULL)) {
-		log_warnx("%s: can't add bar for virtio mem device",
+		log_warnx("%s: can't add bar for virtio memory balloon device",
 			__progname);
 		return;
 	}
-
+	printf("\n I am here testing2");
 	// viombh defined in vmd/virtio.h
 	// vcp "vm_create_params" defined in include/vmmvar.h
 	memset(&viombh, 0, sizeof(viombh));
@@ -2295,7 +2287,8 @@ virtio_init(struct vmd_vm *vm, int child_cdrom,
 	viombh.irq = pci_get_dev_irq(id);
 	viombh.vm_id = vcp->vcp_id;
 	viombh.cfg.device_feature = VIRTIO_BALLOON_F_STATS_VQ;
-
+	printf("\n I am here testing1");
+	//viombh_vq_dequeue();
 	/* cmpe end */
 }
 
@@ -2425,11 +2418,6 @@ vionet_restore(int fd, struct vmd_vm *vm, int *child_taps)
 			memset(&vionet[i].event, 0, sizeof(struct event));
 			event_set(&vionet[i].event, vionet[i].fd,
 			    EV_READ | EV_PERSIST, vionet_rx_event, &vionet[i]);
-			if (event_add(&vionet[i].event, NULL)) {
-				log_warn("could not initialize vionet event "
-				    "handler");
-				return (-1);
-			}
 		}
 	}
 	return (0);
@@ -2646,4 +2634,30 @@ virtio_dump(int fd)
 	//CMPE Ends
 
 	return (0);
+}
+
+void
+virtio_stop(struct vm_create_params *vcp)
+{
+	uint8_t i;
+	for (i = 0; i < vcp->vcp_nnics; i++) {
+		if (event_del(&vionet[i].event)) {
+			log_warn("could not initialize vionet event "
+			    "handler");
+			return;
+		}
+	}
+}
+
+void
+virtio_start(struct vm_create_params *vcp)
+{
+	uint8_t i;
+	for (i = 0; i < vcp->vcp_nnics; i++) {
+		if (event_add(&vionet[i].event, NULL)) {
+			log_warn("could not initialize vionet event "
+			    "handler");
+			return;
+		}
+	}
 }

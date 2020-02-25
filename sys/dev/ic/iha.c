@@ -1,4 +1,4 @@
-/*	$OpenBSD: iha.c,v 1.43 2015/03/14 03:38:47 jsg Exp $ */
+/*	$OpenBSD: iha.c,v 1.46 2020/01/26 00:53:31 krw Exp $ */
 /*-------------------------------------------------------------------------
  *
  * Device driver for the INI-9XXXU/UW or INIC-940/950  PCI SCSI Controller.
@@ -53,10 +53,7 @@ struct cfdriver iha_cd = {
 };
 
 struct scsi_adapter iha_switch = {
-	iha_scsi_cmd,	/* scsi_cmd() */
-	iha_minphys,	/* scsi_minphys() */
-	NULL,		/* probe_dev(void) */
-	NULL		/* free_dev() */
+	iha_scsi_cmd, iha_minphys, NULL, NULL, NULL
 };
 
 /*
@@ -449,15 +446,13 @@ iha_init_tulip(struct iha_softc *sc)
  * iha_minphys - reduce bp->b_bcount to something less than
  *		 or equal to the largest I/O possible through
  *		 the adapter. Called from higher layers
- *		 via sc->sc_adapter.scsi_minphys.
+ *		 via sc->sc_adapter.dev_minphys.
  */
 void
 iha_minphys(struct buf *bp, struct scsi_link *sl)
 {
 	if (bp->b_bcount > ((IHA_MAX_SG_ENTRIES - 1) * PAGE_SIZE))
 		bp->b_bcount = ((IHA_MAX_SG_ENTRIES - 1) * PAGE_SIZE);
-
-	minphys(bp);
 }
 
 /*

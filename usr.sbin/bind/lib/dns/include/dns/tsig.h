@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004-2006  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1999-2002  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,17 +14,20 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: tsig.h,v 1.43.18.4 2006/01/27 23:57:44 marka Exp $ */
+/* $Id: tsig.h,v 1.9 2020/01/25 10:43:06 florian Exp $ */
 
 #ifndef DNS_TSIG_H
 #define DNS_TSIG_H 1
 
-/*! \file */
+/*! \file dns/tsig.h */
 
 #include <isc/lang.h>
 #include <isc/refcount.h>
-#include <isc/rwlock.h>
+
+#include <isc/stdio.h>
 #include <isc/stdtime.h>
+
+
 
 #include <dns/types.h>
 #include <dns/name.h>
@@ -35,21 +37,15 @@
 /*
  * Algorithms.
  */
-LIBDNS_EXTERNAL_DATA extern dns_name_t *dns_tsig_hmacmd5_name;
-#define DNS_TSIG_HMACMD5_NAME		dns_tsig_hmacmd5_name
-LIBDNS_EXTERNAL_DATA extern dns_name_t *dns_tsig_gssapi_name;
-#define DNS_TSIG_GSSAPI_NAME		dns_tsig_gssapi_name
-LIBDNS_EXTERNAL_DATA extern dns_name_t *dns_tsig_gssapims_name;
-#define DNS_TSIG_GSSAPIMS_NAME		dns_tsig_gssapims_name
-LIBDNS_EXTERNAL_DATA extern dns_name_t *dns_tsig_hmacsha1_name;
+extern dns_name_t *dns_tsig_hmacsha1_name;
 #define DNS_TSIG_HMACSHA1_NAME		dns_tsig_hmacsha1_name
-LIBDNS_EXTERNAL_DATA extern dns_name_t *dns_tsig_hmacsha224_name;
+extern dns_name_t *dns_tsig_hmacsha224_name;
 #define DNS_TSIG_HMACSHA224_NAME	dns_tsig_hmacsha224_name
-LIBDNS_EXTERNAL_DATA extern dns_name_t *dns_tsig_hmacsha256_name;
+extern dns_name_t *dns_tsig_hmacsha256_name;
 #define DNS_TSIG_HMACSHA256_NAME	dns_tsig_hmacsha256_name
-LIBDNS_EXTERNAL_DATA extern dns_name_t *dns_tsig_hmacsha384_name;
+extern dns_name_t *dns_tsig_hmacsha384_name;
 #define DNS_TSIG_HMACSHA384_NAME	dns_tsig_hmacsha384_name
-LIBDNS_EXTERNAL_DATA extern dns_name_t *dns_tsig_hmacsha512_name;
+extern dns_name_t *dns_tsig_hmacsha512_name;
 #define DNS_TSIG_HMACSHA512_NAME	dns_tsig_hmacsha512_name
 
 /*%
@@ -57,16 +53,9 @@ LIBDNS_EXTERNAL_DATA extern dns_name_t *dns_tsig_hmacsha512_name;
  */
 #define DNS_TSIG_FUDGE			300
 
-struct dns_tsig_keyring {
-	dns_rbt_t *keys;
-	isc_rwlock_t lock;
-	isc_mem_t *mctx;
-};
-
 struct dns_tsigkey {
 	/* Unlocked */
 	unsigned int		magic;		/*%< Magic number. */
-	isc_mem_t		*mctx;
 	dst_key_t		*key;		/*%< Key */
 	dns_name_t		name;		/*%< Key name */
 	dns_name_t		*algorithm;	/*%< Algorithm name */
@@ -74,12 +63,14 @@ struct dns_tsigkey {
 	isc_boolean_t		generated;	/*%< was this generated? */
 	isc_stdtime_t		inception;	/*%< start of validity period */
 	isc_stdtime_t		expire;		/*%< end of validity period */
-	dns_tsig_keyring_t	*ring;		/*%< the enclosing keyring */
 	isc_refcount_t		refs;		/*%< reference counter */
+	ISC_LINK(dns_tsigkey_t) link;
 };
 
 #define dns_tsigkey_identity(tsigkey) \
-	((tsigkey)->generated ? ((tsigkey)->creator) : (&((tsigkey)->name)))
+	((tsigkey) == NULL ? NULL : \
+	 (tsigkey)->generated ? ((tsigkey)->creator) : \
+	 (&((tsigkey)->name)))
 
 ISC_LANG_BEGINDECLS
 
@@ -87,15 +78,15 @@ isc_result_t
 dns_tsigkey_create(dns_name_t *name, dns_name_t *algorithm,
 		   unsigned char *secret, int length, isc_boolean_t generated,
 		   dns_name_t *creator, isc_stdtime_t inception,
-		   isc_stdtime_t expire, isc_mem_t *mctx,
-		   dns_tsig_keyring_t *ring, dns_tsigkey_t **key);
+		   isc_stdtime_t expire,
+		   dns_tsigkey_t **key);
 
 isc_result_t
 dns_tsigkey_createfromkey(dns_name_t *name, dns_name_t *algorithm,
 			  dst_key_t *dstkey, isc_boolean_t generated,
 			  dns_name_t *creator, isc_stdtime_t inception,
-			  isc_stdtime_t expire, isc_mem_t *mctx,
-			  dns_tsig_keyring_t *ring, dns_tsigkey_t **key);
+			  isc_stdtime_t expire,
+			  dns_tsigkey_t **key);
 /*%<
  *	Creates a tsig key structure and saves it in the keyring.  If key is
  *	not NULL, *key will contain a copy of the key.  The keys validity
@@ -106,15 +97,17 @@ dns_tsigkey_createfromkey(dns_name_t *name, dns_name_t *algorithm,
  *	allows a transient key with an invalid algorithm to exist long enough
  *	to generate a BADKEY response.
  *
+ *	If dns_tsigkey_createfromkey is successful a new reference to 'dstkey'
+ *	will have been made.
+ *
  *	Requires:
  *\li		'name' is a valid dns_name_t
  *\li		'algorithm' is a valid dns_name_t
  *\li		'secret' is a valid pointer
  *\li		'length' is an integer >= 0
- *\li		'key' is a valid dst key or NULL
+ *\li		'dstkey' is a valid dst key or NULL
  *\li		'creator' points to a valid dns_name_t or is NULL
  *\li		'mctx' is a valid memory context
- *\li		'ring' is a valid TSIG keyring or NULL
  *\li		'key' or '*key' must be NULL
  *
  *	Returns:
@@ -148,16 +141,6 @@ dns_tsigkey_detach(dns_tsigkey_t **keyp);
  *\li		'keyp' points to NULL
  */
 
-void
-dns_tsigkey_setdeleted(dns_tsigkey_t *key);
-/*%<
- *	Prevents this key from being used again.  It will be deleted when
- *	no references exist.
- *
- *	Requires:
- *\li		'key' is a valid TSIG key on a keyring
- */
-
 isc_result_t
 dns_tsig_sign(dns_message_t *msg);
 /*%<
@@ -177,8 +160,7 @@ dns_tsig_sign(dns_message_t *msg);
  */
 
 isc_result_t
-dns_tsig_verify(isc_buffer_t *source, dns_message_t *msg,
-		dns_tsig_keyring_t *ring1, dns_tsig_keyring_t *ring2);
+dns_tsig_verify(isc_buffer_t *source, dns_message_t *msg);
 /*%<
  *	Verifies the TSIG record in this message
  *
@@ -188,7 +170,6 @@ dns_tsig_verify(isc_buffer_t *source, dns_message_t *msg,
  *\li		'msg->tsigkey' is a valid TSIG key if this is a response
  *\li		'msg->tsig' is NULL
  *\li		'msg->querytsig' is not NULL if this is a response
- *\li		'ring1' and 'ring2' are each either a valid keyring or NULL
  *
  *	Returns:
  *\li		#ISC_R_SUCCESS
@@ -203,50 +184,6 @@ dns_tsig_verify(isc_buffer_t *source, dns_message_t *msg,
  *\li		#DNS_R_EXPECTEDRESPONSE - the message was set over TCP and
  *					 should have been a response,
  *					 but was not.
- */
-
-isc_result_t
-dns_tsigkey_find(dns_tsigkey_t **tsigkey, dns_name_t *name,
-		 dns_name_t *algorithm, dns_tsig_keyring_t *ring);
-/*%<
- *	Returns the TSIG key corresponding to this name and (possibly)
- *	algorithm.  Also increments the key's reference counter.
- *
- *	Requires:
- *\li		'tsigkey' is not NULL
- *\li		'*tsigkey' is NULL
- *\li		'name' is a valid dns_name_t
- *\li		'algorithm' is a valid dns_name_t or NULL
- *\li		'ring' is a valid keyring
- *
- *	Returns:
- *\li		#ISC_R_SUCCESS
- *\li		#ISC_R_NOTFOUND
- */
-
-
-isc_result_t
-dns_tsigkeyring_create(isc_mem_t *mctx, dns_tsig_keyring_t **ringp);
-/*%<
- *	Create an empty TSIG key ring.
- *
- *	Requires:
- *\li		'mctx' is not NULL
- *\li		'ringp' is not NULL, and '*ringp' is NULL
- *
- *	Returns:
- *\li		#ISC_R_SUCCESS
- *\li		#ISC_R_NOMEMORY
- */
-
-
-void
-dns_tsigkeyring_destroy(dns_tsig_keyring_t **ringp);
-/*%<
- *	Destroy a TSIG key ring.
- *
- *	Requires:
- *\li		'ringp' is not NULL
  */
 
 ISC_LANG_ENDDECLS

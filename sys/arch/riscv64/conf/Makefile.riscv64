@@ -9,7 +9,7 @@
 .include <bsd.own.mk>
 
 SIZE?=	size
-STRIP?=	ctfstrip
+STRIP?=	llvm-strip
 
 # source tree is located via $S relative to the compilation directory
 .ifndef S
@@ -42,7 +42,8 @@ CWARNFLAGS=	-Werror -Wall -Wimplicit-function-declaration \
 		-Wframe-larger-than=2047
 
 CMACHFLAGS=	--target=riscv64-unknown-openbsd6.6 -march=rv64gc \
-		-fno-omit-frame-pointer -mno-omit-leaf-frame-pointer
+		-fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -mno-relax \
+		-mcmodel=medany
 CMACHFLAGS+=	-ffreestanding ${NOPIE_FLAGS}
 SORTR=		sort -R
 .if ${IDENT:M-DNO_PROPOLICE}
@@ -57,7 +58,7 @@ DEBUG?=		-g
 COPTS?=		-O2
 CFLAGS=		${DEBUG} ${CWARNFLAGS} ${CMACHFLAGS} ${COPTS} ${PIPE}
 AFLAGS=		-D_LOCORE -x assembler-with-cpp ${CWARNFLAGS} ${CMACHFLAGS}
-LINKFLAGS=	-T ld.script -X --warn-common -nopie
+LINKFLAGS=	-T ld.script -X --warn-common -no-pie
 
 HOSTCC?=	${CC}
 HOSTED_CPPFLAGS=${CPPFLAGS:S/^-nostdinc$//}
@@ -137,7 +138,7 @@ gapdummy.o:
 makegap.sh:
 	cp $S/conf/makegap.sh $@
 
-MAKE_GAP = LD="${LD}" sh makegap.sh 0xd4d4d4d4 gapdummy.o
+MAKE_GAP = LD="${LD}" sh makegap.sh 0x00000000 gapdummy.o
 
 gap.o:	Makefile makegap.sh gapdummy.o vers.o
 	${MAKE_GAP}
@@ -156,7 +157,8 @@ cleandir: clean
 depend obj:
 
 locore0.o: ${_archdir}/${_arch}/locore0.S assym.h
-copy.o copystr.o: assym.h
+copy.o copystr.o copyinout.o: assym.h
+pagezero.o: assym.h
 cpuswitch.o exception.o support.o: assym.h
 locore.o trampoline.o: assym.h
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pipe.h,v 1.17 2019/07/14 10:21:11 semarie Exp $	*/
+/*	$OpenBSD: pipe.h,v 1.24 2020/01/24 11:07:41 anton Exp $	*/
 
 /*
  * Copyright (c) 1996 John S. Dyson
@@ -64,23 +64,29 @@ struct pipebuf {
 #define PIPE_WANTD	0x020	/* Pipe is wanted to be run-down. */
 #define PIPE_SEL	0x040	/* Pipe has a select active. */
 #define PIPE_EOF	0x080	/* Pipe is in EOF condition. */
-#define PIPE_LOCK	0x100	/* Process has exclusive access to pointers/data. */
-#define PIPE_LWANT	0x200	/* Process wants exclusive access to pointers/data. */
+#define PIPE_LOCK	0x100	/* Thread has exclusive I/O access. */
+#define PIPE_LWANT	0x200	/* Thread wants exclusive I/O access. */
 
 /*
  * Per-pipe data structure.
  * Two of these are linked together to produce bi-directional pipes.
+ *
+ * Locking:
+ *	I	immutable after creation
+ *	S	sigio_lock
+ *	p	pipe_lock
  */
 struct pipe {
-	struct	pipebuf pipe_buffer;	/* data storage */
-	struct	selinfo pipe_sel;	/* for compat with select */
-	struct	timespec pipe_atime;	/* time of last access */
-	struct	timespec pipe_mtime;	/* time of last modify */
-	struct	timespec pipe_ctime;	/* time of status change */
-	struct	sigio_ref pipe_sigio;	/* async I/O registration */
-	struct	pipe *pipe_peer;	/* link with other direction */
-	u_int	pipe_state;		/* pipe status info */
-	int	pipe_busy;		/* busy flag, mostly to handle rundown sanely */
+	struct	rwlock *pipe_lock;
+	struct	pipebuf pipe_buffer;	/* [p] data storage */
+	struct	selinfo pipe_sel;	/* [p] for compat with select */
+	struct	timespec pipe_atime;	/* [p] time of last access */
+	struct	timespec pipe_mtime;	/* [p] time of last modify */
+	struct	timespec pipe_ctime;	/* [I] time of status change */
+	struct	sigio_ref pipe_sigio;	/* [S] async I/O registration */
+	struct	pipe *pipe_peer;	/* [p] link with other direction */
+	u_int	pipe_state;		/* [p] pipe status info */
+	int	pipe_busy;		/* [p] # readers/writers */
 };
 
 #ifdef _KERNEL

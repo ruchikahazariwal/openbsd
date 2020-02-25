@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004-2006  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 2000, 2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,9 +14,9 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: md5.h,v 1.9.18.4 2006/02/01 00:10:34 marka Exp $ */
+/* $Id: md5.h,v 1.4 2020/01/09 13:52:23 florian Exp $ */
 
-/*! \file 
+/*! \file isc/md5.h
  * \brief This is the header file for the MD5 message-digest algorithm.
  *
  * The algorithm is due to Ron Rivest.  This code was
@@ -43,31 +42,6 @@
 #ifndef ISC_MD5_H
 #define ISC_MD5_H 1
 
-#include <isc/lang.h>
-#include <isc/types.h>
 
-#define ISC_MD5_DIGESTLENGTH 16U
-
-typedef struct {
-	isc_uint32_t buf[4];
-	isc_uint32_t bytes[2];
-	isc_uint32_t in[16];
-} isc_md5_t;
-
-ISC_LANG_BEGINDECLS
-
-void
-isc_md5_init(isc_md5_t *ctx);
-
-void
-isc_md5_invalidate(isc_md5_t *ctx);
-
-void
-isc_md5_update(isc_md5_t *ctx, const unsigned char *buf, unsigned int len);
-
-void
-isc_md5_final(isc_md5_t *ctx, unsigned char *digest);
-
-ISC_LANG_ENDDECLS
 
 #endif /* ISC_MD5_H */

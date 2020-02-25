@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpd.h,v 1.394 2019/10/01 08:57:47 claudio Exp $ */
+/*	$OpenBSD: bgpd.h,v 1.399 2020/01/24 05:44:05 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -379,10 +379,12 @@ struct peer_config {
 	u_int32_t		 remote_as;
 	u_int32_t		 local_as;
 	u_int32_t		 max_prefix;
+	u_int32_t		 max_out_prefix;
 	enum export_type	 export_type;
 	enum enforce_as		 enforce_as;
 	enum enforce_as		 enforce_local_as;
 	u_int16_t		 max_prefix_restart;
+	u_int16_t		 max_out_prefix_restart;
 	u_int16_t		 holdtime;
 	u_int16_t		 min_holdtime;
 	u_int16_t		 local_short_as;
@@ -574,7 +576,9 @@ enum suberr_cease {
 	ERR_CEASE_CONN_REJECT,
 	ERR_CEASE_OTHER_CHANGE,
 	ERR_CEASE_COLLISION,
-	ERR_CEASE_RSRC_EXHAUST
+	ERR_CEASE_RSRC_EXHAUST,
+	ERR_CEASE_HARD_RESET,
+	ERR_CEASE_MAX_SENT_PREFIX
 };
 
 struct kroute_node;
@@ -711,17 +715,16 @@ struct ctl_show_rib {
 	struct bgpd_addr	prefix;
 	struct bgpd_addr	remote_addr;
 	char			descr[PEER_DESCR_LEN];
-	time_t			lastchange;
+	time_t			age;
 	u_int32_t		remote_id;
 	u_int32_t		local_pref;
 	u_int32_t		med;
 	u_int32_t		weight;
 	u_int32_t		flags;
-	u_int16_t		aspath_len;
 	u_int8_t		prefixlen;
 	u_int8_t		origin;
 	u_int8_t		validation_state;
-	/* plus a aspath_len bytes long aspath */
+	/* plus an aspath */
 };
 
 enum as_spec {
@@ -1292,6 +1295,9 @@ int	trie_roa_check(struct trie_head *, struct bgpd_addr *, u_int8_t,
 void	trie_dump(struct trie_head *);
 int	trie_equal(struct trie_head *, struct trie_head *);
 
+/* timer.c */
+time_t			 getmonotime(void);
+
 /* util.c */
 const char	*log_addr(const struct bgpd_addr *);
 const char	*log_in6addr(const struct in6_addr *);
@@ -1430,14 +1436,16 @@ static const char * const suberr_update_names[] = {
 
 static const char * const suberr_cease_names[] = {
 	"none",
-	"max-prefix exceeded",
+	"received max-prefix exceeded",
 	"administratively down",
 	"peer unconfigured",
 	"administrative reset",
 	"connection rejected",
 	"other config change",
 	"collision",
-	"resource exhaustion"
+	"resource exhaustion",
+	"hard reset",
+	"sent max-prefix exceeded"
 };
 
 static const char * const ctl_res_strerror[] = {

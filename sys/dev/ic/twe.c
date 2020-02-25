@@ -1,4 +1,4 @@
-/*	$OpenBSD: twe.c,v 1.46 2016/01/22 00:40:25 jsg Exp $	*/
+/*	$OpenBSD: twe.c,v 1.50 2020/01/26 00:53:31 krw Exp $	*/
 
 /*
  * Copyright (c) 2000-2002 Michael Shalayeff.  All rights reserved.
@@ -65,7 +65,7 @@ struct cfdriver twe_cd = {
 void	twe_scsi_cmd(struct scsi_xfer *);
 
 struct scsi_adapter twe_switch = {
-	twe_scsi_cmd, tweminphys, 0, 0,
+	twe_scsi_cmd, twe_minphys, NULL, NULL, NULL
 };
 
 void *twe_get_ccb(void *);
@@ -487,7 +487,7 @@ twe_thread(v)
 
 		TWE_UNLOCK(sc, lock);
 		sc->sc_thread_on = 1;
-		tsleep(sc, PWAIT, "twespank", 0);
+		tsleep_nsec(sc, PWAIT, "twespank", INFSLP);
 	}
 }
 
@@ -753,11 +753,10 @@ twe_done(sc, ccb)
 }
 
 void
-tweminphys(struct buf *bp, struct scsi_link *sl)
+twe_minphys(struct buf *bp, struct scsi_link *sl)
 {
 	if (bp->b_bcount > TWE_MAXFER)
 		bp->b_bcount = TWE_MAXFER;
-	minphys(bp);
 }
 
 void

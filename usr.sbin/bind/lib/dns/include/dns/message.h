@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004-2006  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1999-2003  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -14,8 +13,6 @@
  * OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
  */
-
-/* $ISC: message.h,v 1.114.18.6 2006/03/02 23:19:20 marka Exp $ */
 
 #ifndef DNS_MESSAGE_H
 #define DNS_MESSAGE_H 1
@@ -33,12 +30,12 @@
 
 #include <dst/dst.h>
 
-/*! \file 
+/*! \file dns/message.h
  * \brief Message Handling Module
  *
  * How this beast works:
  *
- * When a dns message is received in a buffer, dns_message_fromwire() is called
+ * When a dns message is received in a buffer, dns_message_parse() is called
  * on the memory region.  Various items are checked including the format
  * of the message (if counts are right, if counts consume the entire sections,
  * and if sections consume the entire message) and known pseudo-RRs in the
@@ -81,8 +78,7 @@
  *	name = NULL;
  *	name = dns_message_gettempname(message, &name);
  *	dns_name_init(name, NULL);
- *	result = dns_name_fromtext(name, &source, dns_rootname, ISC_FALSE,
- *				   buffer);
+ *	result = dns_name_fromtext(name, &source, dns_rootname, 0, buffer);
  *	dns_message_takebuffer(message, &buffer);
  * \endcode
  *
@@ -101,12 +97,24 @@
 #define DNS_MESSAGEFLAG_AD		0x0020U
 #define DNS_MESSAGEFLAG_CD		0x0010U
 
+/*%< EDNS0 extended message flags */
 #define DNS_MESSAGEEXTFLAG_DO		0x8000U
+
+/*%< EDNS0 extended OPT codes */
+#define DNS_OPT_NSID		3		/*%< NSID opt code */
+#define DNS_OPT_CLIENT_SUBNET	8		/*%< client subnet opt code */
+#define DNS_OPT_EXPIRE		9		/*%< EXPIRE opt code */
+#define DNS_OPT_COOKIE		10		/*%< COOKIE opt code */
+#define DNS_OPT_PAD		12		/*%< PAD opt code */
+#define DNS_OPT_KEY_TAG		14		/*%< Key tag opt code */
+
+/*%< The number of EDNS options we know about. */
+#define DNS_EDNSOPTIONS	4
 
 #define DNS_MESSAGE_REPLYPRESERVE	(DNS_MESSAGEFLAG_RD|DNS_MESSAGEFLAG_CD)
 #define DNS_MESSAGEEXTFLAG_REPLYPRESERVE (DNS_MESSAGEEXTFLAG_DO)
 
-#define DNS_MESSAGE_HEADERLEN		12 /*%< 6 isc_uint16_t's */
+#define DNS_MESSAGE_HEADERLEN		12 /*%< 6 uint16_t's */
 
 #define DNS_MESSAGE_MAGIC		ISC_MAGIC('M','S','G','@')
 #define DNS_MESSAGE_VALID(msg)		ISC_MAGIC_VALID(msg, DNS_MESSAGE_MAGIC)
@@ -133,6 +141,8 @@ typedef int dns_pseudosection_t;
 typedef int dns_messagetextflag_t;
 #define DNS_MESSAGETEXTFLAG_NOCOMMENTS	0x0001
 #define DNS_MESSAGETEXTFLAG_NOHEADERS	0x0002
+#define DNS_MESSAGETEXTFLAG_ONESOA	0x0004
+#define DNS_MESSAGETEXTFLAG_OMITSOA	0x0008
 
 /*
  * Dynamic update names for these sections.
@@ -157,7 +167,7 @@ typedef int dns_messagetextflag_t;
 						   occurs */
 #define DNS_MESSAGEPARSE_CLONEBUFFER	0x0004	/*%< save a copy of the
 						   source buffer */
-#define DNS_MESSAGEPARSE_IGNORETRUNCATION 0x0008 /*%< trucation errors are
+#define DNS_MESSAGEPARSE_IGNORETRUNCATION 0x0008 /*%< truncation errors are
 						  * not fatal. */
 
 /*
@@ -180,7 +190,7 @@ struct dns_message {
 	dns_messageid_t			id;
 	unsigned int			flags;
 	dns_rcode_t			rcode;
-	unsigned int			opcode;
+	dns_opcode_t			opcode;
 	dns_rdataclass_t		rdclass;
 
 	/* 4 real, 1 pseudo */
@@ -202,6 +212,10 @@ struct dns_message {
 	unsigned int			verify_attempted : 1;
 	unsigned int			free_query : 1;
 	unsigned int			free_saved : 1;
+	unsigned int			sitok : 1;
+	unsigned int			sitbad : 1;
+	unsigned int			tkey : 1;
+	unsigned int			rdclass_set : 1;
 
 	unsigned int			opt_reserved;
 	unsigned int			sig_reserved;
@@ -209,10 +223,6 @@ struct dns_message {
 
 	isc_buffer_t		       *buffer;
 	dns_compress_t		       *cctx;
-
-	isc_mem_t		       *mctx;
-	isc_mempool_t		       *namepool;
-	isc_mempool_t		       *rdspool;
 
 	isc_bufferlist_t		scratchpad;
 	isc_bufferlist_t		cleanup;
@@ -243,6 +253,12 @@ struct dns_message {
 	const void *			order_arg;
 };
 
+struct dns_ednsopt {
+	uint16_t			code;
+	uint16_t			length;
+	unsigned char			*value;
+};
+
 /***
  *** Functions
  ***/
@@ -250,7 +266,7 @@ struct dns_message {
 ISC_LANG_BEGINDECLS
 
 isc_result_t
-dns_message_create(isc_mem_t *mctx, unsigned int intent, dns_message_t **msgp);
+dns_message_create(unsigned int intent, dns_message_t **msgp);
 
 /*%<
  * Create msg structure.
@@ -357,13 +373,20 @@ dns_message_totext(dns_message_t *msg, const dns_master_style_t *style,
 /*%<
  * Convert all sections of message 'msg' to a cleartext representation
  *
- * Notes:
- * \li     In flags, If #DNS_MESSAGETEXTFLAG_OMITDOT is set, then the
- *      final '.' in absolute names will not be emitted.  If
- *      #DNS_MESSAGETEXTFLAG_NOCOMMENTS is cleared, lines beginning
- *      with ";;" will be emitted indicating section name.  If
- *      #DNS_MESSAGETEXTFLAG_NOHEADERS is cleared, header lines will
- *      be emitted.
+ * Notes on flags:
+ *\li	If #DNS_MESSAGETEXTFLAG_NOCOMMENTS is cleared, lines beginning with
+ * 	";;" will be emitted indicating section name.
+ *\li	If #DNS_MESSAGETEXTFLAG_NOHEADERS is cleared, header lines will be
+ * 	emitted.
+ *\li   If #DNS_MESSAGETEXTFLAG_ONESOA is set then only print the first
+ *	SOA record in the answer section.
+ *\li	If *#DNS_MESSAGETEXTFLAG_OMITSOA is set don't print any SOA records
+ *	in the answer section.
+ *
+ * The SOA flags are useful for suppressing the display of the second
+ * SOA record in an AXFR by setting #DNS_MESSAGETEXTFLAG_ONESOA on the
+ * first message in an AXFR stream and #DNS_MESSAGETEXTFLAG_OMITSOA on
+ * subsequent messages.
  *
  * Requires:
  *
@@ -771,7 +794,7 @@ dns_message_addname(dns_message_t *msg, dns_name_t *name,
 
 void
 dns_message_removename(dns_message_t *msg, dns_name_t *name,
-                       dns_section_t section);
+		       dns_section_t section);
 /*%<
  * Remove a existing name from a given section.
  *
@@ -1031,7 +1054,7 @@ dns_message_setopt(dns_message_t *msg, dns_rdataset_t *opt);
  *\li	The OPT record has either been freed or ownership of it has
  *	been transferred to the message.
  *
- *\li	If ISC_R_SUCCESS was returned, the OPT record will be rendered 
+ *\li	If ISC_R_SUCCESS was returned, the OPT record will be rendered
  *	when dns_message_renderend() is called.
  *
  * Returns:
@@ -1112,8 +1135,7 @@ dns_message_setquerytsig(dns_message_t *msg, isc_buffer_t *querytsig);
  */
 
 isc_result_t
-dns_message_getquerytsig(dns_message_t *msg, isc_mem_t *mctx,
-			 isc_buffer_t **querytsig);
+dns_message_getquerytsig(dns_message_t *msg, isc_buffer_t **querytsig);
 /*%<
  * Gets the tsig from the TSIG from the signed query 'msg'.  This is also used
  * for chained TSIGs in TCP responses.  Unlike dns_message_gettsig, this makes
@@ -1195,7 +1217,7 @@ dns_message_takebuffer(dns_message_t *msg, isc_buffer_t **buffer);
  *\li	msg be a valid message.
  *
  *\li	buffer != NULL && *buffer is a valid isc_buffer_t, which was
- *	dynamincally allocated via isc_buffer_allocate().
+ *	dynamically allocated via isc_buffer_allocate().
  */
 
 isc_result_t
@@ -1234,26 +1256,6 @@ dns_message_signer(dns_message_t *msg, dns_name_t *signer);
  *
  *\li	#DNS_R_NOTVERIFIEDYET	- the message was signed by a TSIG or SIG(0),
  *				  but the signature has not been verified yet
- */
-
-isc_result_t
-dns_message_checksig(dns_message_t *msg, dns_view_t *view);
-/*%<
- * If this message was signed, verify the signature.
- *
- * Requires:
- *
- *\li	msg is a valid parsed message.
- *\li	view is a valid view or NULL
- *
- * Returns:
- *
- *\li	#ISC_R_SUCCESS		- the message was unsigned, or the message
- *				  was signed correctly.
- *
- *\li	#DNS_R_EXPECTEDTSIG	- A TSIG was expected, but not seen
- *\li	#DNS_R_UNEXPECTEDTSIG	- A TSIG was seen but not expected
- *\li	#DNS_R_TSIGVERIFYFAILURE - The TSIG failed to verify
  */
 
 isc_result_t
@@ -1315,7 +1317,7 @@ dns_message_setsortorder(dns_message_t *msg, dns_rdatasetorderfunc_t order,
  *\li	order_arg is NULL if and only if order is NULL.
  */
 
-void 
+void
 dns_message_settimeadjust(dns_message_t *msg, int timeadjust);
 /*%<
  * Adjust the time used to sign/verify a message by timeadjust.
@@ -1325,13 +1327,54 @@ dns_message_settimeadjust(dns_message_t *msg, int timeadjust);
  *\li	msg be a valid message.
  */
 
-int 
+int
 dns_message_gettimeadjust(dns_message_t *msg);
 /*%<
  * Return the current time adjustment.
  *
  * Requires:
  *\li	msg be a valid message.
+ */
+
+void
+dns_message_logpacket(dns_message_t *message, const char *description,
+		      isc_logcategory_t *category, isc_logmodule_t *module,
+		      int level);
+void
+dns_message_logfmtpacket(dns_message_t *message, const char *description,
+			 isc_logcategory_t *category, isc_logmodule_t *module,
+			 const dns_master_style_t *style, int level);
+/*%<
+ * Log 'message' at the specified logging parameters.
+ * 'description' will be emitted at the start of the message and will
+ * normally end with a newline.
+ */
+
+isc_result_t
+dns_message_buildopt(dns_message_t *msg, dns_rdataset_t **opt,
+		     unsigned int version, uint16_t udpsize,
+		     unsigned int flags, dns_ednsopt_t *ednsopts, size_t count);
+/*%<
+ * Built a opt record.
+ *
+ * Requires:
+ * \li   msg be a valid message.
+ * \li   opt to be a non NULL and *opt to be NULL.
+ *
+ * Returns:
+ * \li	 ISC_R_SUCCESS on success.
+ * \li	 ISC_R_NOMEMORY
+ * \li	 ISC_R_NOSPACE
+ * \li	 other.
+ */
+
+void
+dns_message_setclass(dns_message_t *msg, dns_rdataclass_t rdclass);
+/*%<
+ * Set the expected class of records in the response.
+ *
+ * Requires:
+ * \li   msg be a valid message with parsing intent.
  */
 
 ISC_LANG_ENDDECLS

@@ -1,4 +1,4 @@
-# $OpenBSD: GENERIC,v 1.129 2019/10/07 19:35:07 patrick Exp $
+# $OpenBSD: GENERIC,v 1.141 2020/02/04 01:01:09 kevlo Exp $
 #
 # GENERIC machine description file
 #
@@ -90,6 +90,7 @@ pluart*		at fdt?
 psci*		at fdt? early 1
 pwmreg*		at fdt? early 1
 syscon*		at fdt? early 1
+pwmfan*		at fdt?
 
 virtio*		at fdt?
 virtio*		at pci?
@@ -105,6 +106,8 @@ option	WSDISPLAY_DEFAULTSCREENS=6	# initial number of text consoles
 
 simplefb*	at fdt?
 wsdisplay*	at simplefb?
+simplepanel*	at fdt?
+pwmbl*		at fdt?			# PWM backlight
 
 radeondrm*	at pci?
 drm*		at radeondrm?
@@ -153,6 +156,8 @@ amlpinctrl*	at fdt? early 1
 amlpwm*		at fdt?
 amlreset*	at fdt? early 1
 amlrng*		at fdt?
+amlsm*		at fdt? early 1
+amltemp*	at fdt?
 amluart*	at fdt?
 amlusbphy*	at fdt?
 
@@ -185,11 +190,13 @@ sfp*		at fdt?
 rkclock*	at fdt? early 1
 rkgrf*		at fdt? early 1
 rkpinctrl*	at fdt? early 1
+rkemmcphy*	at fdt?
 rkgpio*		at fdt?
 rkiic*		at fdt?
 iic*		at rkiic?
 rkpcie*		at fdt?
 pci*		at rkpcie?
+rkpwm*		at fdt?
 rktemp*		at fdt?
 rkdwusb*	at fdt?
 dwmmc*		at fdt?
@@ -199,11 +206,14 @@ sdmmc*		at dwmmc?
 sxipio*		at fdt? early 1	# GPIO pins for leds & PHYs
 gpio*		at sxipio?
 sxiccmu*	at fdt? early 1	# Clock Control Module/Unit
+sxidog*		at fdt?
+sxipwm*		at fdt?
 sxirsb*		at fdt? early 1	# Reduced Serial Bus
 axppmic*	at rsb?
 sxirtc*		at fdt? early 1	# Real Time Clock
 sximmc*		at fdt?		# SD/MMC card controller
 sdmmc*		at sximmc?	# SD/MMC bus
+sxisid*		at fdt? early 1
 sxisyscon*	at fdt? early 1	# System controller
 sxitemp*	at fdt?		# Temperature sensor
 sxitwi*		at fdt?		# I2C controller
@@ -222,6 +232,7 @@ mcx*		at pci?			# Mellanox ConnectX-4/5 Ethernet
 mskc*		at pci?			# Marvell Yukon-2
 msk*		at mskc?		#  each port of above
 re*		at pci?			# Realtek 8169/8169S/8110S
+rge*		at pci?			# Realtek 8125
 
 # PCI SCSI
 ahci*		at pci? flags 0x0000	# AHCI SATA controllers
@@ -290,6 +301,8 @@ umass*		at uhub?		# USB Mass Storage devices
 uhidev*		at uhub?		# Human Interface Devices
 ums*		at uhidev?		# USB mouse
 wsmouse*	at ums? mux 0
+umt*		at uhidev?		# USB multitouch touchpad
+wsmouse*	at umt? mux 0
 uts*		at uhub?		# USB touchscreen
 wsmouse*	at uts? mux 0
 uwacom*		at uhidev?		# USB Wacom tablet
@@ -301,6 +314,7 @@ ucom*		at ucycom?
 uslhcom*	at uhidev?		# Silicon Labs CP2110 USB HID UART
 ucom*		at uslhcom?
 uhid*		at uhidev?		# USB generic HID support
+fido*		at uhidev?		# FIDO/U2F security key support
 upd*		at uhidev?		# USB Power Devices sensors
 aue*		at uhub?		# ADMtek AN986 Pegasus Ethernet
 atu*		at uhub?		# Atmel AT76c50x based 802.11b

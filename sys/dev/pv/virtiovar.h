@@ -237,10 +237,11 @@ void virtio_stop_vq_intr(struct virtio_softc *, struct virtqueue *);
 int virtio_start_vq_intr(struct virtio_softc *, struct virtqueue *);
 
 const char *virtio_device_string(int);
-#if VIRTIO_DEBUG
+
+//#if VIRTIO_DEBUG
 void virtio_log_features(uint64_t, uint64_t, const struct virtio_feature_name *);
 void virtio_vq_dump(struct virtqueue *vq);
-#endif
+//#endif
 int virtio_nused(struct virtqueue *vq);
 int virtio_postpone_intr(struct virtqueue *vq, uint16_t nslots);
 int virtio_postpone_intr_smart(struct virtqueue *vq);

@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004-2006  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 2003  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,7 +14,7 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: sshfp_44.h,v 1.2.18.3 2006/03/10 04:04:32 marka Exp $ */
+/* $Id: sshfp_44.h,v 1.7 2020/01/20 18:51:53 florian Exp $ */
 
 /*!
  *  \brief Per RFC 4255 */
@@ -25,10 +24,9 @@
 
 typedef struct dns_rdata_sshfp {
 	dns_rdatacommon_t	common;
-	isc_mem_t		*mctx;
-	isc_uint8_t		algorithm;
-	isc_uint8_t		digest_type;
-	isc_uint16_t		length;
+	uint8_t		algorithm;
+	uint8_t		digest_type;
+	uint16_t		length;
 	unsigned char		*digest;
 } dns_rdata_sshfp_t;
 

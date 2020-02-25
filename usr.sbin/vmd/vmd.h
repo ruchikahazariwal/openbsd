@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmd.h,v 1.97 2019/09/07 09:11:14 tobhe Exp $	*/
+/*	$OpenBSD: vmd.h,v 1.98 2019/12/12 03:53:38 pd Exp $	*/
 
 /*
  * Copyright (c) 2015 Mike Larkin <mlarkin@openbsd.org>
@@ -39,10 +39,10 @@
 #define SET(_v, _m)		((_v) |= (_m))
 #define CLR(_v, _m)		((_v) &= ~(_m))
 #define ISSET(_v, _m)		((_v) & (_m))
+#define NELEM(a) (sizeof(a) / sizeof((a)[0]))
 
 #define VMD_USER		"_vmd"
 #define VMD_CONF		"/etc/vm.conf"
-#define VMD_CONF		"/etc/examples/vm.conf"
 #define SOCKET_NAME		"/var/run/vmd.sock"
 #define VMM_NODE		"/dev/vmm"
 #define VM_DEFAULT_BIOS		"/etc/firmware/vmm-bios"
@@ -56,6 +56,8 @@
 #define NR_BACKLOG		5
 #define VMD_SWITCH_TYPE		"bridge"
 #define VM_DEFAULT_MEMORY	512
+
+#define VMD_DEFAULT_STAGGERED_START_DELAY 30
 
 /* Rate-limit fast reboots */
 #define VM_START_RATE_SEC	6	/* min. seconds since last reboot */
@@ -107,6 +109,9 @@ enum imsg_type {
 	IMSG_VMDOP_GET_INFO_VM_REQUEST,
 	IMSG_VMDOP_GET_INFO_VM_DATA,
 	IMSG_VMDOP_GET_INFO_VM_END_DATA,
+	IMSG_VMDOP_GET_VM_STATS_REQUEST,
+	IMSG_VMDOP_GET_VM_STATS_RESPONSE,
+	IMSG_VMDOP_GET_VM_STATS_END_RESPONSE,
 	IMSG_VMDOP_LOAD,
 	IMSG_VMDOP_RELOAD,
 	IMSG_VMDOP_PRIV_IFDESCR,
@@ -281,6 +286,7 @@ struct vmd_vm {
 #define VM_STATE_SHUTDOWN	0x04
 #define VM_STATE_RECEIVED	0x08
 #define VM_STATE_PAUSED		0x10
+#define VM_STATE_WAITING	0x20
 
 	/* For rate-limiting */
 	struct timeval		 vm_start_tv;
@@ -320,7 +326,10 @@ struct vmd_config {
 	unsigned int		 cfg_flags;
 #define VMD_CFG_INET6		0x01
 #define VMD_CFG_AUTOINET6	0x02
+#define VMD_CFG_STAGGERED_START	0x04
 
+	struct timeval		 delay;
+	int			 parallelism;
 	struct address		 cfg_localprefix;
 	struct address		 cfg_localprefix6;
 };

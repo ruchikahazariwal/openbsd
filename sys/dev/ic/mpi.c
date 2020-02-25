@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpi.c,v 1.206 2018/08/14 05:22:21 jmatthew Exp $ */
+/*	$OpenBSD: mpi.c,v 1.211 2020/01/27 03:35:05 krw Exp $ */
 
 /*
  * Copyright (c) 2005, 2006, 2009 David Gwynne <dlg@openbsd.org>
@@ -64,17 +64,13 @@ struct cfdriver mpi_cd = {
 
 void			mpi_scsi_cmd(struct scsi_xfer *);
 void			mpi_scsi_cmd_done(struct mpi_ccb *);
-void			mpi_minphys(struct buf *bp, struct scsi_link *sl);
+void			mpi_minphys(struct buf *, struct scsi_link *);
 int			mpi_scsi_probe(struct scsi_link *);
 int			mpi_scsi_ioctl(struct scsi_link *, u_long, caddr_t,
 			    int);
 
 struct scsi_adapter mpi_switch = {
-	mpi_scsi_cmd,
-	mpi_minphys,
-	mpi_scsi_probe,
-	NULL,
-	mpi_scsi_ioctl
+	mpi_scsi_cmd, mpi_minphys, mpi_scsi_probe, NULL, mpi_scsi_ioctl
 };
 
 struct mpi_dmamem	*mpi_dmamem_alloc(struct mpi_softc *, size_t);
@@ -364,7 +360,7 @@ mpi_attach(struct mpi_softc *sc)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_target;
 	sc->sc_link.adapter_buswidth = sc->sc_buswidth;
-	sc->sc_link.openings = MAX(sc->sc_maxcmds / sc->sc_buswidth, 16);
+	sc->sc_link.openings = sc->sc_maxcmds - 1;
 	sc->sc_link.pool = &sc->sc_iopool;
 
 	memset(&saa, 0, sizeof(saa));
@@ -1281,7 +1277,7 @@ mpi_wait(struct mpi_softc *sc, struct mpi_ccb *ccb)
 
 	mtx_enter(&cookie);
 	while (ccb->ccb_cookie != NULL)
-		msleep(ccb, &cookie, PRIBIO, "mpiwait", 0);
+		msleep_nsec(ccb, &cookie, PRIBIO, "mpiwait", INFSLP);
 	mtx_leave(&cookie);
 
 	done(ccb);
@@ -1610,7 +1606,6 @@ mpi_minphys(struct buf *bp, struct scsi_link *sl)
 	/* XXX */
 	if (bp->b_bcount > MAXPHYS)
 		bp->b_bcount = MAXPHYS;
-	minphys(bp);
 }
 
 int

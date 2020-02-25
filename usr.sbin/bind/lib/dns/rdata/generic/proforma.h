@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1998-2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -19,11 +18,10 @@
 #ifndef GENERIC_PROFORMA_H
 #define GENERIC_PROFORMA_H 1
 
-/* $ISC: proforma.h,v 1.19.18.2 2005/04/29 00:16:39 marka Exp $ */
+/* $Id: proforma.h,v 1.4 2020/01/20 18:51:53 florian Exp $ */
 
 typedef struct dns_rdata_# {
 	dns_rdatacommon_t	common;
-	isc_mem_t		*mctx;	/* if required */
 	/* type & class specific elements */
 } dns_rdata_#_t;
 

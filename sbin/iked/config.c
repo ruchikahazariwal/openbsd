@@ -1,4 +1,4 @@
-/*	$OpenBSD: config.c,v 1.50 2019/05/11 16:30:23 patrick Exp $	*/
+/*	$OpenBSD: config.c,v 1.53 2020/01/16 20:05:00 tobhe Exp $	*/
 
 /*
  * Copyright (c) 2019 Tobias Heider <tobias.heider@stusta.de>
@@ -188,6 +188,8 @@ config_new_policy(struct iked *env)
 	/* XXX caller does this again */
 	TAILQ_INIT(&pol->pol_proposals);
 	TAILQ_INIT(&pol->pol_sapeers);
+	TAILQ_INIT(&pol->pol_tssrc);
+	TAILQ_INIT(&pol->pol_tsdst);
 	RB_INIT(&pol->pol_flows);
 
 	return (pol);
@@ -197,6 +199,7 @@ void
 config_free_policy(struct iked *env, struct iked_policy *pol)
 {
 	struct iked_sa		*sa;
+	struct iked_ts	*tsi;
 
 	if (pol->pol_flags & IKED_POLICY_REFCNT)
 		goto remove;
@@ -216,6 +219,14 @@ config_free_policy(struct iked *env, struct iked_policy *pol)
 		return;
 
  remove:
+	while ((tsi = TAILQ_FIRST(&pol->pol_tssrc))) {
+		TAILQ_REMOVE(&pol->pol_tssrc, tsi, ts_entry);
+		free(tsi);
+	}
+	while ((tsi = TAILQ_FIRST(&pol->pol_tsdst))) {
+		TAILQ_REMOVE(&pol->pol_tsdst, tsi, ts_entry);
+		free(tsi);
+	}
 	config_free_proposals(&pol->pol_proposals, 0);
 	config_free_flows(env, &pol->pol_flows);
 	free(pol);
@@ -282,7 +293,7 @@ void
 config_free_childsas(struct iked *env, struct iked_childsas *head,
     struct iked_spi *peerspi, struct iked_spi *localspi)
 {
-	struct iked_childsa	*csa, *nextcsa;
+	struct iked_childsa	*csa, *nextcsa, *ipcomp;
 
 	if (localspi != NULL)
 		bzero(localspi, sizeof(*localspi));
@@ -306,6 +317,12 @@ config_free_childsas(struct iked *env, struct iked_childsas *head,
 		if (csa->csa_loaded) {
 			RB_REMOVE(iked_activesas, &env->sc_activesas, csa);
 			(void)pfkey_sa_delete(env->sc_pfkey, csa);
+		}
+		if ((ipcomp = csa->csa_bundled) != NULL) {
+			log_debug("%s: free IPCOMP %p", __func__, ipcomp);
+			if (ipcomp->csa_loaded)
+				(void)pfkey_sa_delete(env->sc_pfkey, ipcomp);
+			childsa_free(ipcomp);
 		}
 		childsa_free(csa);
 	}
@@ -732,6 +749,8 @@ config_getpolicy(struct iked *env, struct imsg *imsg)
 	memcpy(pol, buf, sizeof(*pol));
 	offset += sizeof(*pol);
 
+	TAILQ_INIT(&pol->pol_tssrc);
+	TAILQ_INIT(&pol->pol_tsdst);
 	TAILQ_INIT(&pol->pol_proposals);
 	TAILQ_INIT(&pol->pol_sapeers);
 	RB_INIT(&pol->pol_flows);
@@ -966,6 +985,29 @@ config_setkeys(struct iked *env)
 	EVP_PKEY_free(key);
 
 	return (ret);
+}
+
+int
+config_setnattport(struct iked *env)
+{
+	in_port_t nattport;
+
+	nattport = env->sc_nattport;
+	proc_compose(&env->sc_ps, PROC_IKEV2, IMSG_CTL_NATTPORT,
+	    &nattport, sizeof(nattport));
+	return (0);
+}
+
+int
+config_getnattport(struct iked *env, struct imsg *imsg)
+{
+	in_port_t nattport;
+
+	IMSG_SIZE_CHECK(imsg, &nattport);
+	memcpy(&nattport, imsg->data, sizeof(nattport));
+	env->sc_nattport = nattport;
+	log_debug("%s: nattport %u", __func__, env->sc_nattport);
+	return (0);
 }
 
 int

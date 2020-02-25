@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 2003  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -18,22 +17,21 @@
 #ifndef GENERIC_DNSSIG_46_H
 #define GENERIC_DNSSIG_46_H 1
 
-/* $ISC: rrsig_46.h,v 1.3.20.2 2005/04/29 00:16:39 marka Exp $ */
+/* $Id: rrsig_46.h,v 1.5 2020/01/20 18:51:53 florian Exp $ */
 
 /*!
  *  \brief Per RFC2535 */
 typedef struct dns_rdata_rrsig {
 	dns_rdatacommon_t	common;
-	isc_mem_t *		mctx;
 	dns_rdatatype_t		covered;
 	dns_secalg_t		algorithm;
-	isc_uint8_t		labels;
-	isc_uint32_t		originalttl;
-	isc_uint32_t		timeexpire;
-	isc_uint32_t		timesigned;
-	isc_uint16_t		keyid;
-        dns_name_t		signer;
-	isc_uint16_t		siglen;
+	uint8_t		labels;
+	uint32_t		originalttl;
+	uint32_t		timeexpire;
+	uint32_t		timesigned;
+	uint16_t		keyid;
+	dns_name_t		signer;
+	uint16_t		siglen;
 	unsigned char *		signature;
 } dns_rdata_rrsig_t;
 

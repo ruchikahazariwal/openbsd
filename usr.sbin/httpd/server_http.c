@@ -1,4 +1,4 @@
-/*	$OpenBSD: server_http.c,v 1.133 2019/05/08 21:46:56 tb Exp $	*/
+/*	$OpenBSD: server_http.c,v 1.136 2020/01/14 20:48:57 benno Exp $	*/
 
 /*
  * Copyright (c) 2006 - 2018 Reyk Floeter <reyk@openbsd.org>
@@ -151,9 +151,6 @@ server_http_authenticate(struct server_config *srv_conf, struct client *clt)
 	clt_user = decoded;
 	*clt_pass++ = '\0';
 	if ((clt->clt_remote_user = strdup(clt_user)) == NULL)
-		goto done;
-
-	if (clt_pass == NULL)
 		goto done;
 
 	if ((fp = fopen(auth->auth_htpasswd, "r")) == NULL)
@@ -1235,13 +1232,6 @@ server_response(struct httpd *httpd, struct client *clt)
 			clt->clt_persist = 0;
 	}
 
-	if (clt->clt_persist >= srv_conf->maxrequests)
-		clt->clt_persist = 0;
-
-	/* pipelining should end after the first "idempotent" method */
-	if (clt->clt_pipelining && clt->clt_toread > 0)
-		clt->clt_persist = 0;
-
 	/*
 	 * Do we have a Host header and matching configuration?
 	 * XXX the Host can also appear in the URL path.
@@ -1295,6 +1285,13 @@ server_response(struct httpd *httpd, struct client *clt)
 		srv_conf = clt->clt_srv_conf;
 	}
 
+	if (clt->clt_persist >= srv_conf->maxrequests)
+		clt->clt_persist = 0;
+
+	/* pipelining should end after the first "idempotent" method */
+	if (clt->clt_pipelining && clt->clt_toread > 0)
+		clt->clt_persist = 0;
+
 	if ((desc->http_host = strdup(hostname)) == NULL)
 		goto fail;
 
@@ -1332,7 +1329,8 @@ server_response(struct httpd *httpd, struct client *clt)
 			goto fail;
 
 		log_debug("%s: rewrote %s?%s -> %s?%s", __func__,
-		    desc->http_path, desc->http_query, path, query);
+		    desc->http_path, desc->http_query ? desc->http_query : "",
+		    path, query ? query : "");
 
 		free(desc->http_path_alias);
 		if ((desc->http_path_alias = strdup(path)) == NULL)

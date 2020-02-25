@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 2000, 2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,18 +14,21 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: soa.c,v 1.4.18.2 2005/04/29 00:16:05 marka Exp $ */
+/* $Id: soa.c,v 1.7 2020/01/28 17:17:05 florian Exp $ */
 
 /*! \file */
 
-#include <config.h>
 
+#include <string.h>
+
+#include <isc/buffer.h>
 #include <isc/util.h>
 
 #include <dns/rdata.h>
+#include "rdatastruct.h"
 #include <dns/soa.h>
 
-static inline isc_uint32_t
+static inline uint32_t
 decode_uint32(unsigned char *p) {
 	return ((p[0] << 24) +
 		(p[1] << 16) +
@@ -35,14 +37,14 @@ decode_uint32(unsigned char *p) {
 }
 
 static inline void
-encode_uint32(isc_uint32_t val, unsigned char *p) {
-	p[0] = (isc_uint8_t)(val >> 24);
-	p[1] = (isc_uint8_t)(val >> 16);
-	p[2] = (isc_uint8_t)(val >>  8);
-	p[3] = (isc_uint8_t)(val >>  0);
+encode_uint32(uint32_t val, unsigned char *p) {
+	p[0] = (uint8_t)(val >> 24);
+	p[1] = (uint8_t)(val >> 16);
+	p[2] = (uint8_t)(val >>  8);
+	p[3] = (uint8_t)(val >>  0);
 }
 
-static isc_uint32_t
+static uint32_t
 soa_get(dns_rdata_t *rdata, int offset) {
 	INSIST(rdata->type == dns_rdatatype_soa);
 	/*
@@ -60,29 +62,61 @@ soa_get(dns_rdata_t *rdata, int offset) {
 	return (decode_uint32(rdata->data + rdata->length - 20 + offset));
 }
 
-isc_uint32_t
+isc_result_t
+dns_soa_buildrdata(dns_name_t *origin, dns_name_t *contact,
+		   dns_rdataclass_t rdclass,
+		   uint32_t serial, uint32_t refresh,
+		   uint32_t retry, uint32_t expire,
+		   uint32_t minimum, unsigned char *buffer,
+		   dns_rdata_t *rdata) {
+	dns_rdata_soa_t soa;
+	isc_buffer_t rdatabuf;
+
+	REQUIRE(origin != NULL);
+	REQUIRE(contact != NULL);
+
+	memset(buffer, 0, DNS_SOA_BUFFERSIZE);
+	isc_buffer_init(&rdatabuf, buffer, DNS_SOA_BUFFERSIZE);
+
+	soa.common.rdtype = dns_rdatatype_soa;
+	soa.common.rdclass = rdclass;
+	soa.serial = serial;
+	soa.refresh = refresh;
+	soa.retry = retry;
+	soa.expire = expire;
+	soa.minimum = minimum;
+	dns_name_init(&soa.origin, NULL);
+	dns_name_clone(origin, &soa.origin);
+	dns_name_init(&soa.contact, NULL);
+	dns_name_clone(contact, &soa.contact);
+
+	return (dns_rdata_fromstruct(rdata, rdclass, dns_rdatatype_soa,
+				      &soa, &rdatabuf));
+}
+
+uint32_t
 dns_soa_getserial(dns_rdata_t *rdata) {
 	return soa_get(rdata, 0);
 }
-isc_uint32_t
+uint32_t
 dns_soa_getrefresh(dns_rdata_t *rdata) {
 	return soa_get(rdata, 4);
 }
-isc_uint32_t
+uint32_t
 dns_soa_getretry(dns_rdata_t *rdata) {
 	return soa_get(rdata, 8);
 }
-isc_uint32_t
+uint32_t
 dns_soa_getexpire(dns_rdata_t *rdata) {
 	return soa_get(rdata, 12);
 }
-isc_uint32_t
+uint32_t
 dns_soa_getminimum(dns_rdata_t *rdata) {
 	return soa_get(rdata, 16);
 }
 
 static void
-soa_set(dns_rdata_t *rdata, isc_uint32_t val, int offset) {
+soa_set(dns_rdata_t *rdata, uint32_t val, int offset) {
 	INSIST(rdata->type == dns_rdatatype_soa);
 	INSIST(rdata->length >= 20);
 	INSIST(offset >= 0 && offset <= 16);
@@ -90,22 +124,22 @@ soa_set(dns_rdata_t *rdata, isc_uint32_t val, int offset) {
 }
 
 void
-dns_soa_setserial(isc_uint32_t val, dns_rdata_t *rdata) {
+dns_soa_setserial(uint32_t val, dns_rdata_t *rdata) {
 	soa_set(rdata, val, 0);
 }
 void
-dns_soa_setrefresh(isc_uint32_t val, dns_rdata_t *rdata) {
+dns_soa_setrefresh(uint32_t val, dns_rdata_t *rdata) {
 	soa_set(rdata, val, 4);
 }
 void
-dns_soa_setretry(isc_uint32_t val, dns_rdata_t *rdata) {
+dns_soa_setretry(uint32_t val, dns_rdata_t *rdata) {
 	soa_set(rdata, val, 8);
 }
 void
-dns_soa_setexpire(isc_uint32_t val, dns_rdata_t *rdata) {
+dns_soa_setexpire(uint32_t val, dns_rdata_t *rdata) {
 	soa_set(rdata, val, 12);
 }
 void
-dns_soa_setminimum(isc_uint32_t val, dns_rdata_t *rdata) {
+dns_soa_setminimum(uint32_t val, dns_rdata_t *rdata) {
 	soa_set(rdata, val, 16);
 }

@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1999-2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,51 +14,79 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: lib.c,v 1.11.18.3 2005/08/15 01:46:50 marka Exp $ */
+/* $Id: lib.c,v 1.11 2020/01/26 11:24:19 florian Exp $ */
 
 /*! \file */
 
-#include <config.h>
-
 #include <stddef.h>
 
-#include <isc/once.h>
-#include <isc/msgcat.h>
+#include <isc/hash.h>
 #include <isc/util.h>
 
 #include <dns/lib.h>
+#include <dns/result.h>
+#include <dst/dst.h>
 
 /***
  *** Globals
  ***/
 
-LIBDNS_EXTERNAL_DATA unsigned int			dns_pps = 0U;
-LIBDNS_EXTERNAL_DATA isc_msgcat_t *			dns_msgcat = NULL;
-
-
-/***
- *** Private
- ***/
-
-static isc_once_t		msgcat_once = ISC_ONCE_INIT;
-
+unsigned int			dns_pps = 0U;
 
 /***
  *** Functions
  ***/
 
+static isc_boolean_t init_once = ISC_FALSE;
+static isc_boolean_t initialize_done = ISC_FALSE;
+static unsigned int references = 0;
+
 static void
-open_msgcat(void) {
-	isc_msgcat_open("libdns.cat", &dns_msgcat);
+initialize(void) {
+	isc_result_t result;
+
+	REQUIRE(initialize_done == ISC_FALSE);
+
+	dns_result_register();
+	result = isc_hash_create(DNS_NAME_MAXWIRE);
+	if (result != ISC_R_SUCCESS)
+		return;
+
+	result = dst_lib_init();
+	if (result != ISC_R_SUCCESS)
+		goto cleanup_hash;
+
+	initialize_done = ISC_TRUE;
+	return;
+
+  cleanup_hash:
+	isc_hash_destroy();
+}
+
+isc_result_t
+dns_lib_init(void) {
+	if (!init_once) {
+		init_once = ISC_TRUE;
+		initialize();
+	}
+	if (!initialize_done)
+		return (ISC_R_FAILURE);
+
+	references++;
+
+	return (ISC_R_SUCCESS);
 }
 
 void
-dns_lib_initmsgcat(void) {
+dns_lib_shutdown(void) {
+	isc_boolean_t cleanup_ok = ISC_FALSE;
 
-	/*
-	 * Initialize the DNS library's message catalog, dns_msgcat, if it
-	 * has not already been initialized.
-	 */
+	if (--references == 0)
+		cleanup_ok = ISC_TRUE;
 
-	RUNTIME_CHECK(isc_once_do(&msgcat_once, open_msgcat) == ISC_R_SUCCESS);
+	if (!cleanup_ok)
+		return;
+
+	dst_lib_destroy();
+	isc_hash_destroy();
 }

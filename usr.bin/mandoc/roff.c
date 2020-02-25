@@ -1,7 +1,7 @@
-/*	$OpenBSD: roff.c,v 1.238 2019/07/01 22:43:03 schwarze Exp $ */
+/*	$OpenBSD: roff.c,v 1.241 2020/01/19 17:59:01 schwarze Exp $ */
 /*
  * Copyright (c) 2008-2012, 2014 Kristaps Dzonsons <kristaps@bsd.lv>
- * Copyright (c) 2010-2015, 2017-2019 Ingo Schwarze <schwarze@openbsd.org>
+ * Copyright (c) 2010-2015, 2017-2020 Ingo Schwarze <schwarze@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -353,7 +353,7 @@ const char *__roff_name[MAN_MAX + 1] = {
 	"Lk",		"Mt",		"Brq",		"Bro",
 	"Brc",		"%C",		"Es",		"En",
 	"Dx",		"%Q",		"%U",		"Ta",
-	NULL,
+	"Tg",		NULL,
 	"TH",		"SH",		"SS",		"TP",
 	"TQ",
 	"LP",		"PP",		"P",		"IP",
@@ -769,6 +769,7 @@ void
 roff_reset(struct roff *r)
 {
 	roff_free1(r);
+	r->options |= MPARSE_COMMENT;
 	r->format = r->options & (MPARSE_MDOC | MPARSE_MAN);
 	r->control = '\0';
 	r->escape = '\\';
@@ -798,7 +799,7 @@ roff_alloc(int options)
 
 	r = mandoc_calloc(1, sizeof(struct roff));
 	r->reqtab = roffhash_alloc(0, ROFF_RENAMED);
-	r->options = options;
+	r->options = options | MPARSE_COMMENT;
 	r->format = options & (MPARSE_MDOC | MPARSE_MAN);
 	r->mstackpos = -1;
 	r->rstackpos = -1;
@@ -1244,7 +1245,7 @@ roff_expand(struct roff *r, struct buf *buf, int ln, int pos, char newesc)
 		 * in the syntax tree.
 		 */
 
-		if (newesc != ASCII_ESC && r->format == 0) {
+		if (newesc != ASCII_ESC && r->options & MPARSE_COMMENT) {
 			while (*ep == ' ' || *ep == '\t')
 				ep--;
 			ep[1] = '\0';
@@ -1813,8 +1814,10 @@ roff_parseln(struct roff *r, int ln, struct buf *buf, int *offs)
 		roff_addtbl(r->man, ln, r->tbl);
 		return e;
 	}
-	if ( ! ctl)
+	if ( ! ctl) {
+		r->options &= ~MPARSE_COMMENT;
 		return roff_parsetext(r, buf, pos, offs) | e;
+	}
 
 	/* Skip empty request lines. */
 
@@ -1837,6 +1840,7 @@ roff_parseln(struct roff *r, int ln, struct buf *buf, int *offs)
 
 	/* No scope is open.  This is a new request or macro. */
 
+	r->options &= ~MPARSE_COMMENT;
 	spos = pos;
 	t = roff_parse(r, buf->buf, &pos, ln, ppos);
 
@@ -2288,12 +2292,24 @@ roff_cond_sub(ROFF_ARGS)
 		}
 	}
 
+	t = roff_parse(r, buf->buf, &pos, ln, ppos);
+
+	/* For now, let high level macros abort .ce mode. */
+
+	if (roffce_node != NULL &&
+	    (t == TOKEN_NONE || t == ROFF_Dd || t == ROFF_EQ ||
+             t == ROFF_TH || t == ROFF_TS)) {
+		r->man->last = roffce_node;
+		r->man->next = ROFF_NEXT_SIBLING;
+		roffce_lines = 0;
+		roffce_node = NULL;
+	}
+
 	/*
 	 * Fully handle known macros when they are structurally
 	 * required or when the conditional evaluated to true.
 	 */
 
-	t = roff_parse(r, buf->buf, &pos, ln, ppos);
 	if (t == ROFF_break) {
 		if (irc & ROFF_LOOPMASK)
 			irc = ROFF_IGN | ROFF_LOOPEXIT;

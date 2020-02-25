@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 2000, 2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,14 +14,16 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: stdio.c,v 1.6 2004/03/05 05:11:47 marka Exp $ */
+/* $Id: stdio.c,v 1.6 2020/01/26 11:26:30 florian Exp $ */
 
-#include <config.h>
+
 
 #include <errno.h>
 #include <unistd.h>
 
 #include <isc/stdio.h>
+#include <isc/stat.h>
+#include <isc/util.h>
 
 #include "errno2result.h"
 
@@ -36,82 +37,3 @@ isc_stdio_open(const char *filename, const char *mode, FILE **fp) {
 	*fp = f;
 	return (ISC_R_SUCCESS);
 }
-
-isc_result_t
-isc_stdio_close(FILE *f) {
-	int r;
-
-	r = fclose(f);
-	if (r == 0)
-		return (ISC_R_SUCCESS);
-	else
-		return (isc__errno2result(errno));
-}
-
-isc_result_t
-isc_stdio_seek(FILE *f, long offset, int whence) {
-	int r;
-
-	r = fseek(f, offset, whence);
-	if (r == 0)
-		return (ISC_R_SUCCESS);
-	else
-		return (isc__errno2result(errno));
-}
-
-isc_result_t
-isc_stdio_read(void *ptr, size_t size, size_t nmemb, FILE *f, size_t *nret) {
-	isc_result_t result = ISC_R_SUCCESS;
-	size_t r;
-
-	clearerr(f);
-	r = fread(ptr, size, nmemb, f);
-	if (r != nmemb) {
-		if (feof(f))
-			result = ISC_R_EOF;
-		else
-			result = isc__errno2result(errno);
-	}
-	if (nret != NULL)
-		*nret = r;
-	return (result);
-}
-
-isc_result_t
-isc_stdio_write(const void *ptr, size_t size, size_t nmemb, FILE *f,
-	       size_t *nret)
-{
-	isc_result_t result = ISC_R_SUCCESS;
-	size_t r;
-
-	clearerr(f);
-	r = fwrite(ptr, size, nmemb, f);
-	if (r != nmemb)
-		result = isc__errno2result(errno);
-	if (nret != NULL)
-		*nret = r;
-	return (result);
-}
-
-isc_result_t
-isc_stdio_flush(FILE *f) {
-	int r;
-
-	r = fflush(f);
-	if (r == 0)
-		return (ISC_R_SUCCESS);
-	else
-		return (isc__errno2result(errno));
-}
-
-isc_result_t
-isc_stdio_sync(FILE *f) {
-	int r;
-
-	r = fsync(fileno(f));
-	if (r == 0)
-		return (ISC_R_SUCCESS);
-	else
-		return (isc__errno2result(errno));
-}
-

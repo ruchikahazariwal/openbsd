@@ -1,4 +1,4 @@
-/*	$OpenBSD: session.c,v 1.395 2019/10/02 08:57:00 claudio Exp $ */
+/*	$OpenBSD: session.c,v 1.398 2020/01/24 05:44:05 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004, 2005 Henning Brauer <henning@openbsd.org>
@@ -252,7 +252,7 @@ session_main(int debug, int verbose)
 				/* cloned peer that idled out? */
 				if (p->template && (p->state == STATE_IDLE ||
 				    p->state == STATE_ACTIVE) &&
-				    time(NULL) - p->stats.last_updown >=
+				    getmonotime() - p->stats.last_updown >=
 				    INTERVAL_HOLD_CLONED)
 					p->reconf_action = RECONF_DELETE;
 
@@ -610,6 +610,8 @@ bgp_fsm(struct peer *peer, enum session_events event)
 
 			peer->stats.last_sent_errcode = 0;
 			peer->stats.last_sent_suberr = 0;
+			peer->stats.last_rcvd_errcode = 0;
+			peer->stats.last_rcvd_suberr = 0;
 
 			if (!peer->depend_ok)
 				timer_stop(peer, Timer_ConnectRetry);
@@ -1701,6 +1703,7 @@ session_dispatch_msg(struct pollfd *pfd, struct peer *p)
 			bgp_fsm(p, EVNT_CON_FATAL);
 			return (1);
 		}
+		p->stats.last_write = getmonotime();
 		if (p->throttled && p->wbuf.queued < SESS_MSG_LOW_MARK) {
 			if (imsg_rde(IMSG_XON, p->conf.id, NULL, 0) == -1)
 				log_peer_warn(&p->conf, "imsg_compose XON");
@@ -1726,7 +1729,7 @@ session_dispatch_msg(struct pollfd *pfd, struct peer *p)
 		}
 
 		p->rbuf->wpos += n;
-		p->stats.last_read = time(NULL);
+		p->stats.last_read = getmonotime();
 		return (1);
 	}
 	return (0);
@@ -2188,6 +2191,8 @@ parse_notification(struct peer *peer)
 
 	log_notification(peer, errcode, subcode, p, datalen, "received");
 	peer->errcnt++;
+	peer->stats.last_rcvd_errcode = errcode;
+	peer->stats.last_rcvd_suberr = subcode;
 
 	if (errcode == ERR_OPEN && subcode == ERR_OPEN_CAPA) {
 		if (datalen == 0) {	/* zebra likes to send those.. humbug */
@@ -2506,6 +2511,7 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 	struct kif		*kif;
 	u_char			*data;
 	int			 n, fd, depend_ok, restricted;
+	u_int16_t		 t;
 	u_int8_t		 aid, errcode, subcode;
 
 	while (ibuf) {
@@ -2790,10 +2796,15 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 			case ERR_CEASE:
 				switch (subcode) {
 				case ERR_CEASE_MAX_PREFIX:
+				case ERR_CEASE_MAX_SENT_PREFIX:
+					t = p->conf.max_out_prefix_restart;
+					if (subcode == ERR_CEASE_MAX_PREFIX)
+						t = p->conf.max_prefix_restart;
+
 					bgp_fsm(p, EVNT_STOP);
-					if (p->conf.max_prefix_restart)
-						timer_set(p, Timer_IdleHold, 60 *
-						    p->conf.max_prefix_restart);
+					if (t)
+						timer_set(p, Timer_IdleHold,
+						    60 * t);
 					break;
 				default:
 					bgp_fsm(p, EVNT_CON_FATAL);
@@ -3048,7 +3059,7 @@ void
 session_down(struct peer *peer)
 {
 	bzero(&peer->capa.neg, sizeof(peer->capa.neg));
-	peer->stats.last_updown = time(NULL);
+	peer->stats.last_updown = getmonotime();
 	/*
 	 * session_down is called in the exit code path so check
 	 * if the RDE is still around, if not there is no need to
@@ -3075,7 +3086,7 @@ session_up(struct peer *p)
 	sup.remote_bgpid = p->remote_bgpid;
 	sup.short_as = p->short_as;
 	memcpy(&sup.capa, &p->capa.neg, sizeof(sup.capa));
-	p->stats.last_updown = time(NULL);
+	p->stats.last_updown = getmonotime();
 	if (imsg_rde(IMSG_SESSION_UP, p->conf.id, &sup, sizeof(sup)) == -1)
 		fatalx("imsg_compose error");
 }

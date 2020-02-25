@@ -1,4 +1,4 @@
-/*	$OpenBSD: ksmn.c,v 1.2 2019/09/27 01:26:46 brynet Exp $	*/
+/*	$OpenBSD: ksmn.c,v 1.4 2020/01/04 01:34:24 jsg Exp $	*/
 
 /*
  * Copyright (c) 2019 Bryan Steele <brynet@openbsd.org>
@@ -93,9 +93,9 @@ struct cfdriver ksmn_cd = {
 };
 
 static const struct pci_matchid ksmn_devices[] = {
-	{ PCI_VENDOR_AMD, PCI_PRODUCT_AMD_AMD64_17_RC },
-	{ PCI_VENDOR_AMD, PCI_PRODUCT_AMD_AMD64_17_1X_RC },
-	{ PCI_VENDOR_AMD, PCI_PRODUCT_AMD_AMD64_17_3X_RC }
+	{ PCI_VENDOR_AMD, PCI_PRODUCT_AMD_17_RC },
+	{ PCI_VENDOR_AMD, PCI_PRODUCT_AMD_17_1X_RC },
+	{ PCI_VENDOR_AMD, PCI_PRODUCT_AMD_17_3X_RC }
 };
 
 int
@@ -149,18 +149,21 @@ void
 ksmn_refresh(void *arg)
 {
 	struct ksmn_softc	*sc = arg;
-	struct ksensor	*s = &sc->sc_sensor;
-	pcireg_t	reg;
-	int 		c;
+	struct ksensor		*s = &sc->sc_sensor;
+	pcireg_t		reg;
+	int 			raw, offset = 0;
 
 	pci_conf_write(sc->sc_pc, sc->sc_pcitag, SMN_17H_ADDR_R,
 	    SMU_17H_THM);
 	reg = pci_conf_read(sc->sc_pc, sc->sc_pcitag, SMN_17H_DATA_R);
 
-	c = GET_CURTMP(reg) * 5 / 4; /* 1.25 */
+	raw = GET_CURTMP(reg);
 	if ((reg & CURTMP_17H_RANGE_SEL) != 0)
-		c -= CURTMP_17H_RANGE_ADJUST;
-	if (c > sc->sc_tctl_offset)
-		c -= sc->sc_tctl_offset;
-	s->value = c * 100000 + 273150000;
+		offset -= CURTMP_17H_RANGE_ADJUST;
+	offset -= sc->sc_tctl_offset;
+	/* convert to uC */
+	offset *= 100000;
+
+	/* convert raw (in steps of 0.125C) to uC, add offset, uC to uK. */
+	s->value = ((raw * 125000) + offset) + 273150000;
 }

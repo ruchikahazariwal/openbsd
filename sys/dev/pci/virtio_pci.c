@@ -741,10 +741,10 @@ virtio_pci_negotiate_features(struct virtio_softc *vsc,
 	host = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
 				VIRTIO_CONFIG_DEVICE_FEATURES);
 	negotiated = host & vsc->sc_driver_features;
-#if VIRTIO_DEBUG
+
 	if (guest_feature_names)
 		virtio_log_features(host, negotiated, guest_feature_names);
-#endif
+
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh,
 			  VIRTIO_CONFIG_GUEST_FEATURES, negotiated);
 	vsc->sc_active_features = negotiated;

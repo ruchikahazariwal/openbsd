@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpithinkpad.c,v 1.66 2019/10/13 10:56:31 kettenis Exp $	*/
+/*	$OpenBSD: acpithinkpad.c,v 1.68 2019/12/31 01:38:33 jsg Exp $	*/
 /*
  * Copyright (c) 2008 joshua stein <jcs@openbsd.org>
  *
@@ -17,6 +17,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/sensors.h>
 
 #include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
@@ -320,8 +321,10 @@ thinkpad_attach(struct device *parent, struct device *self, void *aux)
 		wskbd_set_backlight = thinkpad_set_kbd_backlight;
 	}
 
-	if (aml_evalinteger(sc->sc_acpi, sc->sc_devnode, "PBLG",
-	    0, NULL, &sc->sc_brightness) == 0) {
+	/* On version 2 and newer, let *drm or acpivout control brightness */
+	if (sc->sc_hkey_version == THINKPAD_HKEY_VERSION1 &&
+	    (aml_evalinteger(sc->sc_acpi, sc->sc_devnode, "PBLG",
+	    0, NULL, &sc->sc_brightness) == 0)) {
 		ws_get_param = thinkpad_get_param;
 		ws_set_param = thinkpad_set_param;
 	}

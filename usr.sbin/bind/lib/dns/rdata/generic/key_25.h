@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1999-2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -18,19 +17,18 @@
 #ifndef GENERIC_KEY_25_H
 #define GENERIC_KEY_25_H 1
 
-/* $ISC: key_25.h,v 1.15.18.2 2005/04/29 00:16:33 marka Exp $ */
+/* $Id: key_25.h,v 1.5 2020/01/20 18:51:53 florian Exp $ */
 
 /*!
  * \brief Per RFC2535 */
 
-typedef struct dns_rdata_key_t {
-        dns_rdatacommon_t	common;
-        isc_mem_t *		mctx;
-        isc_uint16_t		flags;
-        isc_uint8_t		protocol;
-        isc_uint8_t		algorithm;
-        isc_uint16_t		datalen;
-        unsigned char *		data;
+typedef struct dns_rdata_key {
+	dns_rdatacommon_t	common;
+	uint16_t		flags;
+	uint8_t		protocol;
+	uint8_t		algorithm;
+	uint16_t		datalen;
+	unsigned char *		data;
 } dns_rdata_key_t;
 
 

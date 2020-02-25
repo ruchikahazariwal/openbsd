@@ -1,4 +1,4 @@
-/*	$OpenBSD: trm.c,v 1.33 2015/05/07 01:09:56 jsg Exp $
+/*	$OpenBSD: trm.c,v 1.36 2020/01/26 00:53:31 krw Exp $
  * ------------------------------------------------------------
  *   O.S       : OpenBSD
  *   File Name : trm.c
@@ -134,10 +134,7 @@ struct  cfdriver trm_cd = {
 };
 
 struct scsi_adapter trm_switch = {
-	trm_scsi_cmd,
-	trm_minphys,
-	NULL,
-	NULL
+	trm_scsi_cmd, trm_minphys, NULL, NULL, NULL
 };
 
 /* 
@@ -2366,7 +2363,6 @@ trm_minphys(struct buf *bp, struct scsi_link *sl)
 	if (bp->b_bcount > (TRM_MAX_SG_LISTENTRY-1) * (long) NBPG) {
 		bp->b_bcount = (TRM_MAX_SG_LISTENTRY-1) * (long) NBPG;
 	}
-	minphys(bp);
 }
 
 /*
@@ -2434,7 +2430,7 @@ trm_initACB(struct trm_softc *sc, int unit)
 	}
 
 	sc->sc_adapter.scsi_cmd     = trm_scsi_cmd; 
-	sc->sc_adapter.scsi_minphys = trm_minphys;
+	sc->sc_adapter.dev_minphys  = trm_minphys;
 
 	sc->sc_link.adapter_softc    = sc;
 	sc->sc_link.adapter_target   = sc->sc_AdaptSCSIID;

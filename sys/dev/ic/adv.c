@@ -1,4 +1,4 @@
-/*	$OpenBSD: adv.c,v 1.37 2017/09/08 05:36:52 deraadt Exp $	*/
+/*	$OpenBSD: adv.c,v 1.41 2020/01/27 13:11:01 sthen Exp $	*/
 /*	$NetBSD: adv.c,v 1.6 1998/10/28 20:39:45 dante Exp $	*/
 
 /*
@@ -66,7 +66,7 @@ static void adv_start_ccbs(ASC_SOFTC *);
 static u_int8_t *adv_alloc_overrunbuf(char *dvname, bus_dma_tag_t);
 
 static void adv_scsi_cmd(struct scsi_xfer *);
-static void advminphys(struct buf *, struct scsi_link *);
+static void adv_minphys(struct buf *, struct scsi_link *);
 static void adv_narrow_isr_callback(ASC_SOFTC *, ASC_QDONE_INFO *);
 
 static int adv_poll(ASC_SOFTC *, struct scsi_xfer *, int);
@@ -82,12 +82,8 @@ struct cfdriver adv_cd = {
 };
 
 
-struct scsi_adapter adv_switch =
-{
-	adv_scsi_cmd,		/* called to start/enqueue a SCSI command */
-	advminphys,		/* to limit the transfer to max device can do */
-	0,			/* IT SEEMS IT IS NOT USED YET */
-	0,			/* as above... */
+struct scsi_adapter adv_switch = {
+	adv_scsi_cmd, adv_minphys, NULL, NULL, NULL
 };
 
 
@@ -521,11 +517,10 @@ adv_attach(sc)
 
 
 static void
-advminphys(struct buf *bp, struct scsi_link *sl)
+adv_minphys(struct buf *bp, struct scsi_link *sl)
 {
 	if (bp->b_bcount > ((ASC_MAX_SG_LIST - 1) * PAGE_SIZE))
 		bp->b_bcount = ((ASC_MAX_SG_LIST - 1) * PAGE_SIZE);
-	minphys(bp);
 }
 
 

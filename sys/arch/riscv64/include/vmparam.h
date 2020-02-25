@@ -91,8 +91,8 @@
 #define	USER_SPACE_BITS		39
 #define	VM_MAXUSER_ADDRESS	((1ULL << USER_SPACE_BITS) - 0x8000)
 #define	VM_MAX_ADDRESS		VM_MAXUSER_ADDRESS
-#define	VM_MIN_KERNEL_ADDRESS	((vaddr_t)0xffffffc000000000ULL)
-#define	VM_MAX_KERNEL_ADDRESS	((vaddr_t)0xffffffc7ffffffffULL)
+#define	VM_MIN_KERNEL_ADDRESS	0xffffffc000000000ULL
+#define	VM_MAX_KERNEL_ADDRESS	0xffffffc7ffffffffULL
 
 /* virtual sizes (bytes) for various kernel submaps */
 #define	VM_PHYS_SIZE		(USRIOSIZE*PAGE_SIZE)

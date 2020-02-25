@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 2000, 2001  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,17 +14,17 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: bit.h,v 1.8.18.2 2005/04/29 00:16:09 marka Exp $ */
+/* $Id: bit.h,v 1.4 2020/01/09 18:17:16 florian Exp $ */
 
 #ifndef DNS_BIT_H
 #define DNS_BIT_H 1
 
-/*! \file */
+/*! \file dns/bit.h */
 
-#include <isc/int.h>
+
 #include <isc/boolean.h>
 
-typedef isc_uint64_t dns_bitset_t;
+typedef uint64_t dns_bitset_t;
 
 #define DNS_BIT_SET(bit, bitset) \
      (*(bitset) |= ((dns_bitset_t)1 << (bit)))

@@ -1,4 +1,4 @@
-/*	$OpenBSD: config.c,v 1.27 2019/08/05 19:27:47 kettenis Exp $	*/
+/*	$OpenBSD: config.c,v 1.32 2020/01/22 07:52:38 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2012, 2018 Mark Kettenis
@@ -28,7 +28,7 @@
 
 #include "mdesc.h"
 #include "ldomctl.h"
-#include "util.h"
+#include "ldom_util.h"
 
 #define LDC_GUEST	0
 #define LDC_HV		1
@@ -388,7 +388,7 @@ pri_alloc_memory(uint64_t base, uint64_t size)
 			new_mblock->membase = base;
 			new_mblock->memsize = size;
 			new_mblock->resource_id = -1;
-			return new_mblock;;
+			return new_mblock;
 		}
 	}
 
@@ -1073,7 +1073,7 @@ void
 hvmd_finalize_pcie_device(struct md *md, struct device *device)
 {
 	struct rootcomplex *rootcomplex;
-	struct md_node *node, *child, *parent;;
+	struct md_node *node, *child, *parent;
 	struct component *component;
 	struct subdevice *subdevice;
 	uint64_t resource_id = 0;
@@ -2759,7 +2759,7 @@ primary_init(void)
 }
 
 void
-build_config(const char *filename)
+build_config(const char *filename, int noaction)
 {
 	struct guest *primary;
 	struct guest *guest;
@@ -2774,13 +2774,15 @@ build_config(const char *filename)
 	struct vnet *vnet;
 	struct var *var;
 	struct iodev *iodev;
-	uint64_t num_cpus, primary_num_cpus;
+	uint64_t num_cpus = 0, primary_num_cpus = 0;
 	uint64_t primary_stride = 1;
-	uint64_t memory, primary_memory;
+	uint64_t memory = 0, primary_memory = 0;
 
 	SIMPLEQ_INIT(&conf.domain_list);
 	if (parse_config(filename, &conf) < 0)
 		exit(1);
+	if (noaction)
+		exit(0);
 
 	pri = md_read("pri");
 	if (pri == NULL)
@@ -2792,8 +2794,6 @@ build_config(const char *filename)
 	pri_init(pri);
 	pri_alloc_memory(hv_membase, hv_memsize);
 
-	num_cpus = primary_num_cpus = 0;
-	memory = primary_memory = 0;
 	SIMPLEQ_FOREACH(domain, &conf.domain_list, entry) {
 		if (strcmp(domain->name, "primary") == 0) {
 			primary_num_cpus = domain->vcpu;
@@ -2870,4 +2870,20 @@ build_config(const char *filename)
 
 	guest_finalize(primary);
 	hvmd_finalize();
+}
+
+void
+list_components(void)
+{
+	struct component *component;
+
+	pri = md_read("pri");
+	if (pri == NULL)
+		err(1, "unable to get PRI");
+
+	pri_init(pri);
+
+	TAILQ_FOREACH(component, &components, link) {
+		printf("%s\n", component->path);
+	}
 }

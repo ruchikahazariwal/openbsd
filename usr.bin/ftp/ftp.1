@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ftp.1,v 1.115 2019/05/16 12:44:17 florian Exp $
+.\"	$OpenBSD: ftp.1,v 1.118 2020/01/16 16:46:47 schwarze Exp $
 .\"	$NetBSD: ftp.1,v 1.22 1997/08/18 10:20:22 lukem Exp $
 .\"
 .\" Copyright (c) 1985, 1989, 1990, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"	@(#)ftp.1	8.3 (Berkeley) 10/9/94
 .\"
-.Dd $Mdocdate: May 16 2019 $
+.Dd $Mdocdate: January 16 2020 $
 .Dt FTP 1
 .Os
 .Sh NAME
@@ -47,6 +47,7 @@
 .Op Ar host Op Ar port
 .Nm ftp
 .Op Fl C
+.Op Fl N Ar name
 .Op Fl o Ar output
 .Op Fl s Ar srcaddr
 .Sm off
@@ -58,6 +59,7 @@
 .Nm ftp
 .Op Fl C
 .Op Fl c Ar cookie
+.Op Fl N Ar name
 .Op Fl o Ar output
 .Op Fl S Ar ssl_options
 .Op Fl s Ar srcaddr
@@ -72,11 +74,13 @@
 .Ar ...
 .Nm ftp
 .Op Fl C
+.Op Fl N Ar name
 .Op Fl o Ar output
 .Op Fl s Ar srcaddr
 .Pf file: Ar
 .Nm ftp
 .Op Fl C
+.Op Fl N Ar name
 .Op Fl o Ar output
 .Op Fl s Ar srcaddr
 .Ar host : Ns / Ns Ar file Ns Op /
@@ -186,6 +190,10 @@ Causes
 .Nm
 to always display the progress meter in cases where it would not do
 so by default.
+.It Fl N Ar name
+Use this alternative name instead of
+.Nm
+in some error reports.
 .It Fl n
 Restrains
 .Nm
@@ -320,7 +328,7 @@ is provided to the user.
 The following commands are recognized
 by
 .Nm :
-.Bl -tag -width Fl
+.Bl -tag -width Ds
 .It Ic \&! Oo Ar command
 .Op Ar arg ...
 .Oc
@@ -361,8 +369,7 @@ and
 .It Ic ascii
 Set the file transfer
 .Ic type
-to network
-.Tn ASCII .
+to network ASCII.
 .It Ic bell Op Ic on | off
 Arrange that a bell be sounded after each file transfer
 command is completed.

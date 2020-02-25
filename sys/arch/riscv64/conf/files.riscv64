@@ -12,20 +12,34 @@ file	dev/cninit.c
 
 file	arch/riscv64/riscv64/autoconf.c
 file	arch/riscv64/riscv64/bus_space.c
-file	arch/riscv64/riscv64/bus_dma.c
+file	arch/riscv64/riscv64/clock.c
 file	arch/riscv64/riscv64/conf.c
 file	arch/riscv64/riscv64/disksubr.c		disk
 file	arch/riscv64/riscv64/locore.S
+file	arch/riscv64/riscv64/copy.S
+file	arch/riscv64/riscv64/copystr.S
+file	arch/riscv64/riscv64/exception.S
+file	arch/riscv64/riscv64/cpuswitch.S
 file	arch/riscv64/riscv64/machdep.c
 file	arch/riscv64/riscv64/intr.c
 file	arch/riscv64/riscv64/pmap.c
+file	arch/riscv64/riscv64/mem.c
+file	arch/riscv64/riscv64/process_machdep.c
+file	arch/riscv64/riscv64/vm_machdep.c
+file	arch/riscv64/riscv64/sig_machdep.c
+file	arch/riscv64/riscv64/softintr.c
+file	arch/riscv64/riscv64/support.S
+file	arch/riscv64/riscv64/pagezero.S
+file	arch/riscv64/riscv64/trap.c
 
 file	arch/riscv64/riscv64/db_disasm.c	ddb
 file	arch/riscv64/riscv64/db_interface.c	ddb
 file	arch/riscv64/riscv64/db_trace.c	ddb
 
+define	fdt {[early = 0]}
+
 define	mainbus {}
-device	mainbus
+device	mainbus: fdt
 attach	mainbus at root
 file	arch/riscv64/dev/mainbus.c			mainbus
 
@@ -35,9 +49,15 @@ file	arch/riscv64/riscv64/cpu.c
 
 include "scsi/files.scsi"
 
+file	netinet/in_cksum.c
+file	netinet/in4_cksum.c
+
 #
 # XXX simplebus
-# XXX ofw
+
+# FDT support
+include "dev/ofw/files.ofw"
+
 # XXX ofwbus
 # XXX timer
 # XXX interrupt controller

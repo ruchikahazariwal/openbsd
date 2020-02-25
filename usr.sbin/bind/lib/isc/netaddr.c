@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2004, 2005  Internet Systems Consortium, Inc. ("ISC")
- * Copyright (C) 1999-2002  Internet Software Consortium.
+ * Copyright (C) Internet Systems Consortium, Inc. ("ISC")
  *
- * Permission to use, copy, modify, and distribute this software for any
+ * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
@@ -15,11 +14,11 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: netaddr.c,v 1.27.18.8 2005/04/27 05:02:03 sra Exp $ */
+/* $Id: netaddr.c,v 1.11 2020/01/22 13:02:10 florian Exp $ */
 
 /*! \file */
 
-#include <config.h>
+
 
 #include <stdio.h>
 
@@ -27,9 +26,9 @@
 #include <isc/msgs.h>
 #include <isc/net.h>
 #include <isc/netaddr.h>
-#include <isc/print.h>
+
 #include <isc/sockaddr.h>
-#include <isc/string.h>
+#include <string.h>
 #include <isc/util.h>
 
 isc_boolean_t
@@ -53,12 +52,10 @@ isc_netaddr_equal(const isc_netaddr_t *a, const isc_netaddr_t *b) {
 		    a->zone != b->zone)
 			return (ISC_FALSE);
 		break;
-#ifdef ISC_PLATFORM_HAVESYSUNH
 	case AF_UNIX:
 		if (strcmp(a->type.un, b->type.un) != 0)
 			return (ISC_FALSE);
 		break;
-#endif
 	default:
 		return (ISC_FALSE);
 	}
@@ -69,17 +66,17 @@ isc_boolean_t
 isc_netaddr_eqprefix(const isc_netaddr_t *a, const isc_netaddr_t *b,
 		     unsigned int prefixlen)
 {
-	const unsigned char *pa, *pb;
-	unsigned int ipabytes; /* Length of whole IP address in bytes */
-	unsigned int nbytes;   /* Number of significant whole bytes */
-	unsigned int nbits;    /* Number of significant leftover bits */
+	const unsigned char *pa = NULL, *pb = NULL;
+	unsigned int ipabytes = 0; /* Length of whole IP address in bytes */
+	unsigned int nbytes;       /* Number of significant whole bytes */
+	unsigned int nbits;        /* Number of significant leftover bits */
 
 	REQUIRE(a != NULL && b != NULL);
 
 	if (a->family != b->family)
 		return (ISC_FALSE);
 
-	if (a->zone != b->zone)
+	if (a->zone != b->zone && b->zone != 0)
 		return (ISC_FALSE);
 
 	switch (a->family) {
@@ -94,8 +91,6 @@ isc_netaddr_eqprefix(const isc_netaddr_t *a, const isc_netaddr_t *b,
 		ipabytes = 16;
 		break;
 	default:
-		pa = pb = NULL; /* Avoid silly compiler warning. */
-		ipabytes = 0; /* Ditto. */
 		return (ISC_FALSE);
 	}
 
@@ -143,7 +138,6 @@ isc_netaddr_totext(const isc_netaddr_t *netaddr, isc_buffer_t *target) {
 	case AF_INET6:
 		type = &netaddr->type.in6;
 		break;
-#ifdef ISC_PLATFORM_HAVESYSUNH
 	case AF_UNIX:
 		alen = strlen(netaddr->type.un);
 		if (alen > isc_buffer_availablelength(target))
@@ -152,7 +146,6 @@ isc_netaddr_totext(const isc_netaddr_t *netaddr, isc_buffer_t *target) {
 				  (const unsigned char *)(netaddr->type.un),
 				  alen);
 		return (ISC_R_SUCCESS);
-#endif
 	default:
 		return (ISC_R_FAILURE);
 	}
@@ -188,6 +181,9 @@ isc_netaddr_format(const isc_netaddr_t *na, char *array, unsigned int size) {
 	isc_buffer_init(&buf, array, size);
 	result = isc_netaddr_totext(na, &buf);
 
+	if (size == 0)
+		return;
+
 	/*
 	 * Null terminate.
 	 */
@@ -199,10 +195,7 @@ isc_netaddr_format(const isc_netaddr_t *na, char *array, unsigned int size) {
 	}
 
 	if (result != ISC_R_SUCCESS) {
-		snprintf(array, size,
-			 isc_msgcat_get(isc_msgcat, ISC_MSGSET_NETADDR,
-					ISC_MSG_UNKNOWNADDR,
-					"<unknown address, family %u>"),
+		snprintf(array, size, "<unknown address, family %u>",
 			 na->family);
 		array[size - 1] = '\0';
 	}
@@ -212,7 +205,7 @@ isc_netaddr_format(const isc_netaddr_t *na, char *array, unsigned int size) {
 isc_result_t
 isc_netaddr_prefixok(const isc_netaddr_t *na, unsigned int prefixlen) {
 	static const unsigned char zeros[16];
-	unsigned int nbits, nbytes, ipbytes;
+	unsigned int nbits, nbytes, ipbytes = 0;
 	const unsigned char *p;
 
 	switch (na->family) {
@@ -229,24 +222,24 @@ isc_netaddr_prefixok(const isc_netaddr_t *na, unsigned int prefixlen) {
 			return (ISC_R_RANGE);
 		break;
 	default:
-		ipbytes = 0;
 		return (ISC_R_NOTIMPLEMENTED);
 	}
 	nbytes = prefixlen / 8;
 	nbits = prefixlen % 8;
 	if (nbits != 0) {
+		INSIST(nbytes < ipbytes);
 		if ((p[nbytes] & (0xff>>nbits)) != 0U)
 			return (ISC_R_FAILURE);
 		nbytes++;
 	}
-	if (memcmp(p + nbytes, zeros, ipbytes - nbytes) != 0)
+	if (nbytes < ipbytes && memcmp(p + nbytes, zeros, ipbytes - nbytes) != 0)
 		return (ISC_R_FAILURE);
 	return (ISC_R_SUCCESS);
 }
 
 isc_result_t
 isc_netaddr_masktoprefixlen(const isc_netaddr_t *s, unsigned int *lenp) {
-	unsigned int nbits, nbytes, ipbytes, i;
+	unsigned int nbits = 0, nbytes = 0, ipbytes = 0, i;
 	const unsigned char *p;
 
 	switch (s->family) {
@@ -259,10 +252,8 @@ isc_netaddr_masktoprefixlen(const isc_netaddr_t *s, unsigned int *lenp) {
 		ipbytes = 16;
 		break;
 	default:
-		ipbytes = 0;
 		return (ISC_R_NOTIMPLEMENTED);
 	}
-	nbytes = nbits = 0;
 	for (i = 0; i < ipbytes; i++) {
 		if (p[i] != 0xFF)
 			break;
@@ -280,7 +271,6 @@ isc_netaddr_masktoprefixlen(const isc_netaddr_t *s, unsigned int *lenp) {
 	for (; i < ipbytes; i++) {
 		if (p[i] != 0)
 			return (ISC_R_MASKNONCONTIG);
-		i++;
 	}
 	*lenp = nbytes * 8 + nbits;
 	return (ISC_R_SUCCESS);
@@ -302,32 +292,26 @@ isc_netaddr_fromin6(isc_netaddr_t *netaddr, const struct in6_addr *ina6) {
 
 isc_result_t
 isc_netaddr_frompath(isc_netaddr_t *netaddr, const char *path) {
-#ifdef ISC_PLATFORM_HAVESYSUNH
-        if (strlen(path) > sizeof(netaddr->type.un) - 1)
-                return (ISC_R_NOSPACE);
+	if (strlen(path) > sizeof(netaddr->type.un) - 1)
+		return (ISC_R_NOSPACE);
 
-        memset(netaddr, 0, sizeof(*netaddr));
-        netaddr->family = AF_UNIX;
-        strlcpy(netaddr->type.un, path, sizeof(netaddr->type.un));
-        netaddr->zone = 0;
-        return (ISC_R_SUCCESS);
-#else 
-	UNUSED(netaddr);
-	UNUSED(path);
-        return (ISC_R_NOTIMPLEMENTED);
-#endif
+	memset(netaddr, 0, sizeof(*netaddr));
+	netaddr->family = AF_UNIX;
+	strlcpy(netaddr->type.un, path, sizeof(netaddr->type.un));
+	netaddr->zone = 0;
+	return (ISC_R_SUCCESS);
 }
 
 
 void
-isc_netaddr_setzone(isc_netaddr_t *netaddr, isc_uint32_t zone) {
+isc_netaddr_setzone(isc_netaddr_t *netaddr, uint32_t zone) {
 	/* we currently only support AF_INET6. */
 	REQUIRE(netaddr->family == AF_INET6);
 
 	netaddr->zone = zone;
 }
 
-isc_uint32_t
+uint32_t
 isc_netaddr_getzone(const isc_netaddr_t *netaddr) {
 	return (netaddr->zone);
 }
@@ -342,19 +326,13 @@ isc_netaddr_fromsockaddr(isc_netaddr_t *t, const isc_sockaddr_t *s) {
 		t->zone = 0;
 		break;
 	case AF_INET6:
-		memcpy(&t->type.in6, &s->type.sin6.sin6_addr, 16);
-#ifdef ISC_PLATFORM_HAVESCOPEID
+		memmove(&t->type.in6, &s->type.sin6.sin6_addr, 16);
 		t->zone = s->type.sin6.sin6_scope_id;
-#else
-		t->zone = 0;
-#endif
 		break;
-#ifdef ISC_PLATFORM_HAVESYSUNH
 	case AF_UNIX:
-		memcpy(t->type.un, s->type.sunix.sun_path, sizeof(t->type.un));
+		memmove(t->type.un, s->type.sunix.sun_path, sizeof(t->type.un));
 		t->zone = 0;
 		break;
-#endif
 	default:
 		INSIST(0);
 	}
@@ -420,6 +398,22 @@ isc_netaddr_issitelocal(isc_netaddr_t *na) {
 	}
 }
 
+#define ISC_IPADDR_ISNETZERO(i) \
+	       (((uint32_t)(i) & ISC__IPADDR(0xff000000)) \
+		== ISC__IPADDR(0x00000000))
+
+isc_boolean_t
+isc_netaddr_isnetzero(isc_netaddr_t *na) {
+	switch (na->family) {
+	case AF_INET:
+		return (ISC_TF(ISC_IPADDR_ISNETZERO(na->type.in.s_addr)));
+	case AF_INET6:
+		return (ISC_FALSE);
+	default:
+		return (ISC_FALSE);
+	}
+}
+
 void
 isc_netaddr_fromv4mapped(isc_netaddr_t *t, const isc_netaddr_t *s) {
 	isc_netaddr_t *src;
@@ -431,6 +425,19 @@ isc_netaddr_fromv4mapped(isc_netaddr_t *t, const isc_netaddr_t *s) {
 
 	memset(t, 0, sizeof(*t));
 	t->family = AF_INET;
-	memcpy(&t->type.in, (char *)&src->type.in6 + 12, 4);
+	memmove(&t->type.in, (char *)&src->type.in6 + 12, 4);
 	return;
+}
+
+isc_boolean_t
+isc_netaddr_isloopback(const isc_netaddr_t *na) {
+	switch (na->family) {
+	case AF_INET:
+		return (ISC_TF((ntohl(na->type.in.s_addr) & 0xff000000U) ==
+			       0x7f000000U));
+	case AF_INET6:
+		return (IN6_IS_ADDR_LOOPBACK(&na->type.in6));
+	default:
+		return (ISC_FALSE);
+	}
 }
