@@ -42,7 +42,7 @@
 #include <dev/pv/virtioreg.h>
 #include <dev/pv/virtiovar.h>
 
-struct uvmexp uvmexp, ouvmexp;
+extern struct uvmexp uvmexp, ouvmexp;
 
 #if VIRTIO_PAGE_SIZE!=PAGE_SIZE
 #error non-4K page sizes are not supported yet
@@ -81,7 +81,7 @@ struct uvmexp uvmexp, ouvmexp;
 #define VIRTIO_BALLOON_S_MINFLT		3 /* Number of minor faults */
 #define VIRTIO_BALLOON_S_MEMFREE	4 /* Total amount of free memory */
 
-#define VIOMB_STATS_MAX			8 /* Maximum number of tags */
+#define VIOMB_STATS_MAX			4 /* Maximum number of tags */
 
 #define VIRTIO_BALLOON_S_MEMTOT   5   /* Total amount of memory */
 #define VIRTIO_BALLOON_S_AVAIL    6   /* */
@@ -125,20 +125,6 @@ struct virtio_balloon_stat {
 } __attribute__((packed));
 
 /*
- * This struct will be viewed by host and driver
- *
- */
-struct stats_req {
-	struct virtio_balloon_stat swap_in;
-	struct virtio_balloon_stat swap_out;
-	struct virtio_balloon_stat majflt;
-	struct virtio_balloon_stat minflt;
-	struct virtio_balloon_stat memfree;
-	struct virtio_balloon_stat memtot;
-	struct virtio_balloon_stat avail;
-};
-
-/*
  * Holds the global state of the viomb driver
  * Just for driver
  */
@@ -150,24 +136,26 @@ struct viomb_softc {
 	u_int32_t			sc_actual;
 	struct balloon_req		sc_req;
 	struct taskq			*sc_taskq;
+	struct taskq			*sc_stats_taskq;
 	struct task			sc_task;
+	struct task			sc_stats_task;
 	struct pglist			sc_balloon_pages;
 	struct ksensor			sc_sens[2];
 	struct ksensordev		sc_sensdev;
 	bus_dmamap_t        		sc_stats_dmamap;
 	struct virtio_balloon_stat 	*sc_stats_buf;
-	int 						sc_stats_needs_update;
 };
 
 int	viomb_match(struct device *, void *, void *);
 void	viomb_attach(struct device *, struct device *, void *);
 void	viomb_worker(void *);
+void	viomb_stats_worker(void *);
 void	viomb_inflate(struct viomb_softc *);
 void	viomb_deflate(struct viomb_softc *);
 
 void    viomb_stats(struct viomb_softc *);
 
-int		viomb_config_change(struct virtio_softc *);
+int	viomb_config_change(struct virtio_softc *);
 void	viomb_read_config(struct viomb_softc *);
 int	viomb_vq_dequeue(struct virtqueue *);
 int	viomb_vq_dequeue(struct virtqueue *);
@@ -175,8 +163,10 @@ int	viomb_inflate_intr(struct virtqueue *);
 int	viomb_deflate_intr(struct virtqueue *);
 int	viomb_stats_intr(struct virtqueue *);
 
-int viomb_stats_intr(struct virtqueue *);
-int get_memory_stats_for_free(struct viomb_softc *);
+int	viomb_stats_intr(struct virtqueue *);
+void	get_memory_stats(struct viomb_softc *);
+
+int viomb_stats_done_first;
 
 struct cfattach viomb_ca = {
 	sizeof(struct viomb_softc), viomb_match, viomb_attach
@@ -294,8 +284,14 @@ viomb_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_taskq = taskq_create("viomb", 1, IPL_BIO, 0);
 	if (sc->sc_taskq == NULL)
-		goto err_dmamap;
+		goto err_dmamap2;
 	task_set(&sc->sc_task, viomb_worker, sc);
+
+	sc->sc_stats_taskq = taskq_create("viomb_stats", 1, IPL_BIO, 0);
+	if (sc->sc_stats_taskq == NULL)
+		goto err_dmamap2;
+	task_set(&sc->sc_stats_task, viomb_stats_worker, sc);
+	task_add(sc->sc_stats_taskq, &sc->sc_stats_task);
 
 	strlcpy(sc->sc_sensdev.xname, DEVNAME(sc),
 	    sizeof(sc->sc_sensdev.xname));
@@ -314,7 +310,6 @@ viomb_attach(struct device *parent, struct device *self, void *aux)
 	sensordev_install(&sc->sc_sensdev);
 
 	printf("\n");
-//	viombh_vq_dequeue();
 	return;
 
 err_dmamap2:
@@ -331,6 +326,7 @@ err:
 		virtio_free_vq(vsc, &sc->sc_vq[i]);
 	vsc->sc_nvqs = 0;
 	vsc->sc_child = VIRTIO_CHILD_ERROR;
+
 	return;
 }
 
@@ -348,17 +344,11 @@ viomb_config_change(struct virtio_softc *vsc)
 	return (1);
 }
 
-/*
- * CMPE
- *
- *
- */
-
 void
 viomb_worker(void *arg1)
 {
 	struct viomb_softc *sc = (struct viomb_softc *)arg1;
-	int s, i;
+	int s;
 
 	s = splbio();
 	viomb_read_config(sc);
@@ -376,16 +366,26 @@ viomb_worker(void *arg1)
 	sc->sc_sens[0].value = sc->sc_npages << PAGE_SHIFT;
 	sc->sc_sens[1].value = sc->sc_actual << PAGE_SHIFT;
 
-	if (sc->sc_stats_needs_update) {
-		sc->sc_stats_needs_update = 0;
-		for (i = 0; i < VIOMB_STATS_MAX; i++)
-			printf("%s: stats[%d]: tag=0x%x\n", __func__, i,
-			    sc->sc_stats_buf[i].tag);
+	splx(s);
+}
 
-		VIOMBDEBUG(sc, "getting memory statistics\n");
-        	viomb_stats(sc);
-	}
+void
+viomb_stats_worker(void *arg1)
+{
+	struct viomb_softc *sc = (struct viomb_softc *)arg1;
+	int s, i;
 
+	s = splbio();
+	printf("%s: entered\n", __func__);
+
+	printf("%s: getting memory statistics\n", __func__);
+	viomb_stats(sc);
+	for (i = 0; i < VIOMB_STATS_MAX; i++)
+		printf("%s: stats[%d]: tag=0x%x val=0x%llx\n", __func__, i,
+		    sc->sc_stats_buf[i].tag,
+		    sc->sc_stats_buf[i].val);
+
+	printf("%s: leaving\n", __func__);
 	splx(s);
 }
 
@@ -398,15 +398,15 @@ viomb_worker(void *arg1)
 void
 viomb_inflate(struct viomb_softc *sc)
 {
-	struct virtio_softc *vsc = (struct virtio_softc *)sc->sc_virtio;// casting sc to vsc
-	struct balloon_req *b;											// defined in viomb.c
+	struct virtio_softc *vsc = (struct virtio_softc *)sc->sc_virtio;
+	struct balloon_req *b;
 	struct vm_page *p;
 	struct virtqueue *vq = &sc->sc_vq[VQ_INFLATE];
-	u_int32_t nvpages;			// # pages that driver will give in this go
+	u_int32_t nvpages;
 	int slot, error, i = 0;
 
-	nvpages = sc->sc_npages - sc->sc_actual; //calculate the total remaining pages host still needs
-	if (nvpages > PGS_PER_REQ)	//caps the next amount
+	nvpages = sc->sc_npages - sc->sc_actual;
+	if (nvpages > PGS_PER_REQ)
 		nvpages = PGS_PER_REQ;
 	b = &sc->sc_req;
 
@@ -427,19 +427,11 @@ viomb_inflate(struct viomb_softc *sc)
 
 	b->bl_nentries = nvpages;
 
-	/*
-	 * (var) p: vm_page struct
-	 * (head) &b->bl_pglist:
-	 * (field)
-	 *
-	 * foreach page in bl_pglist, convert the physical address to an index and store in bl_pages
-	 */
 	TAILQ_FOREACH(p, &b->bl_pglist, pageq)
 		b->bl_pages[i++] = p->phys_addr / VIRTIO_PAGE_SIZE;
 
 	KASSERT(i == nvpages);
 
-	// checks to see if slot available and gets the slot
 	if ((virtio_enqueue_prep(vq, &slot)) > 0) {
 		printf("%s:virtio_enqueue_prep() vq_num %d\n",
 		       DEVNAME(sc), vq->vq_num);
@@ -451,14 +443,11 @@ viomb_inflate(struct viomb_softc *sc)
 		goto err;
 	}
 
-	// memory barrier
 	bus_dmamap_sync(vsc->sc_dmat, b->bl_dmamap, 0,
 			sizeof(u_int32_t) * nvpages, BUS_DMASYNC_PREWRITE);
-	// updates descriptor table
 	virtio_enqueue_p(vq, slot, b->bl_dmamap, 0,
 			 sizeof(u_int32_t) * nvpages, VRING_READ);
 
-	// notifies device
 	virtio_enqueue_commit(vsc, vq, slot, VRING_NOTIFY);
 	return;
 err:
@@ -505,13 +494,13 @@ viomb_deflate(struct viomb_softc *sc)
 		goto err;
 	}
 	bus_dmamap_sync(vsc->sc_dmat, b->bl_dmamap, 0,
-		    sizeof(u_int32_t) * nvpages,
-		    BUS_DMASYNC_PREWRITE);
+	    sizeof(u_int32_t) * nvpages, BUS_DMASYNC_PREWRITE);
 	virtio_enqueue_p(vq, slot, b->bl_dmamap, 0,
-			 sizeof(u_int32_t) * nvpages, VRING_READ);
+	    sizeof(u_int32_t) * nvpages, VRING_READ);
 
 	if (!virtio_has_feature(vsc, VIRTIO_BALLOON_F_MUST_TELL_HOST))
 		uvm_pglistfree(&b->bl_pglist);
+
 	virtio_enqueue_commit(vsc, vq, slot, VRING_NOTIFY);
 	return;
 err:
@@ -522,13 +511,6 @@ err:
 	return;
 }
 
-
- /* CMPE
-  *
-  * viomb_softc defined in viomb.c
-  *
-  * Parameter: sc is a global reference to the viomb driver state
-  */
 void
 viomb_stats(struct viomb_softc *sc)
 {
@@ -536,41 +518,49 @@ viomb_stats(struct viomb_softc *sc)
 	struct virtqueue *vq = &sc->sc_vq[VQ_STATS];
 	int slot;
 
+	printf("%s: entered\n", __func__);
+
 	if ((virtio_enqueue_prep(vq, &slot)) > 0) {
 		printf("%s:virtio_enqueue_prep() vq_num %d\n",
 		       DEVNAME(sc), vq->vq_num);
-		goto err;
+		return;
 	}
+
 	if (virtio_enqueue_reserve(vq, slot, 1)) {
 		printf("%s:virtio_enqueue_reserve vq_num %d\n",
 		       DEVNAME(sc), vq->vq_num);
-		goto err;
+		return;
 	}
 
-	//from viornd "tick" function
-	// bus_dmamap_sync(vsc->sc_dmat, s, 0, VIOMB_BUFSIZE,
-	//     BUS_DMASYNC_PREREAD);
+	printf("%s: got slot=%d\n", __func__, slot);
 
-	//from our "inflate" function
+	if (viomb_stats_done_first) {
+		get_memory_stats(sc);
+		bus_dmamap_sync(vsc->sc_dmat, sc->sc_stats_dmamap, 0,
+		    VIOMB_STATS_MAX * sizeof(struct virtio_balloon_stat),
+		    BUS_DMASYNC_PREWRITE);
 
-	//sc->sc_stats_buf->tag = 1;
-	//sc->sc_stats_buf->val = 45;
-	if (get_memory_stats_for_free(sc) == -1)
-	{
-		goto err;
+		virtio_enqueue_p(vq, slot,  sc->sc_stats_dmamap, 0,
+		    VIOMB_STATS_MAX * sizeof(struct virtio_balloon_stat),
+		    VRING_WRITE);
+	} else {
+		viomb_stats_done_first = 1;
+		printf("%s: empty buf (first time)\n", __func__);
+		memset(sc->sc_stats_buf, 0,
+		    VIOMB_STATS_MAX * sizeof(struct virtio_balloon_stat));
+
+		bus_dmamap_sync(vsc->sc_dmat, sc->sc_stats_dmamap, 0,
+		    VIOMB_STATS_MAX * sizeof(struct virtio_balloon_stat),
+		    BUS_DMASYNC_PREWRITE);
+
+		virtio_enqueue_p(vq, slot,  sc->sc_stats_dmamap, 0,
+		    VIOMB_STATS_MAX * sizeof(struct virtio_balloon_stat),
+		    VRING_WRITE);
 	}
 
-	bus_dmamap_sync(vsc->sc_dmat, sc->sc_stats_dmamap, 0,
-			VIOMB_STATS_MAX * sizeof(struct virtio_balloon_stat),
-			BUS_DMASYNC_PREWRITE);
-
-	virtio_enqueue_p(vq, slot,  sc->sc_stats_dmamap, 0,
-			 VIOMB_STATS_MAX * sizeof(struct virtio_balloon_stat), VRING_READ);
 	virtio_enqueue_commit(vsc, vq, slot, VRING_NOTIFY);
-	return;
-err:
-	printf("Error");
-	return;
+
+	printf("%s: leaving\n", __func__);
 }
 
 void
@@ -604,9 +594,6 @@ viomb_vq_dequeue(struct virtqueue *vq)
 	return(0);
 }
 
-/*
- * Device calls this interrupt
- */
 int
 viomb_inflate_intr(struct virtqueue *vq)
 {
@@ -616,30 +603,25 @@ viomb_inflate_intr(struct virtqueue *vq)
 	struct vm_page *p;
 	u_int64_t nvpages;
 
-	// removes request vq from the virtqueue
 	if (viomb_vq_dequeue(vq))
 		return(1);
 
 	b = &sc->sc_req;
 	nvpages = b->bl_nentries;
-	// Sync memory barrier
 	bus_dmamap_sync(vsc->sc_dmat, b->bl_dmamap, 0,
 			sizeof(u_int32_t) * nvpages,
 			BUS_DMASYNC_POSTWRITE);
-	/*
-	 * copy contents from bl_pglist to sc_balloon_pages
-	 */
-	while (!TAILQ_EMPTY(&b->bl_pglist)) { //while the queue is not empty
-		p = TAILQ_FIRST(&b->bl_pglist);  // get first page "p" from bl_pglist
-		TAILQ_REMOVE(&b->bl_pglist, p, pageq); //remove "p" from queue "bl_pglist" and
-		TAILQ_INSERT_TAIL(&sc->sc_balloon_pages, p, pageq); //add "p" to local Linked List "sc_balloon_pages"
+	while (!TAILQ_EMPTY(&b->bl_pglist)) {
+		p = TAILQ_FIRST(&b->bl_pglist);
+		TAILQ_REMOVE(&b->bl_pglist, p, pageq);
+		TAILQ_INSERT_TAIL(&sc->sc_balloon_pages, p, pageq);
  	}
 	VIOMBDEBUG(sc, "updating sc->sc_actual from %u to %llu\n",
 		   sc->sc_actual, sc->sc_actual + nvpages);
-	// write to a register what the current tally of returned pages is
+
 	virtio_write_device_config_4(vsc, VIRTIO_BALLOON_CONFIG_ACTUAL,
 				     sc->sc_actual + nvpages);
-	// clears the interrupt ?
+
 	viomb_read_config(sc);
 
 	/* if we have more work to do, add it to the task list */
@@ -686,10 +668,6 @@ viomb_deflate_intr(struct virtqueue *vq)
  * viomb_stats_intr
  *
  * Interrupt handler for when device wants memory statistics from driver
- *
- * Device filled the empty buffer with the tags of the memory statistics it wants
- * It places the buffer in the used queue and triggers an interrupt
- *
  */
 int
 viomb_stats_intr(struct virtqueue *vq)
@@ -704,43 +682,31 @@ viomb_stats_intr(struct virtqueue *vq)
 			VIOMB_STATS_MAX * sizeof(struct virtio_balloon_stat),
 			BUS_DMASYNC_POSTWRITE);
 
-	sc->sc_stats_needs_update = 1;
-
-	task_add(sc->sc_taskq, &sc->sc_task);
+	task_add(sc->sc_stats_taskq, &sc->sc_stats_task);
 
 	return(1);
 }
 
-/*
- * get_memory_stats_for_free
- *
- * Parameters:
- *
- * Returns:
- *   -1: Error
- *    1: Success
- *
- */
-
-int
-get_memory_stats_for_free(struct viomb_softc *sc)
+void
+get_memory_stats(struct viomb_softc *sc)
 {
-	size_t size;
-	size = sizeof(struct uvmexp);
+	struct virtio_balloon_stat *s;
 
-	int mib[2];
+	s = (struct virtio_balloon_stat *)sc->sc_stats_buf;
 
-	mib[0] = CTL_VM;
-	mib[1] = VM_UVMEXP;
+	s[0].tag = VIRTIO_BALLOON_S_SWAP_IN;
+	s[0].val = uvmexp.pgswapin * PAGE_SIZE;
+	printf("%s: swapped in : %lld bytes\n", __func__, s[0].val);
 
-	/*if (sysctl(mib, 2, &uvmexp, &size, NULL, 0) == -1)
-	{
-		return -1;
-	}*/
+	s[1].tag = VIRTIO_BALLOON_S_SWAP_OUT;
+	s[1].val = uvmexp.swpginuse * PAGE_SIZE;
+	printf("%s: swapped out : %lld bytes\n", __func__, s[1].val);
 
-#define pgtok(a) ((a) * ((unsigned int)uvmexp.pagesize >> 10))
+	s[2].tag = VIRTIO_BALLOON_S_MAJFLT;
+	s[2].val = uvmexp.faults;
+	printf("%s: faults : %lld\n", __func__, s[2].val);
 
-	sc->sc_stats_buf->val = pgtok(uvmexp.free) / 1024;
-
-	return 1;
+	s[3].tag = VIRTIO_BALLOON_S_MEMFREE;
+	s[3].val = uvmexp.free * PAGE_SIZE;
+	printf("%s: free : %lld bytes\n", __func__, s[3].val);
 }

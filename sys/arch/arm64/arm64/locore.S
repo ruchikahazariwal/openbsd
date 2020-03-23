@@ -1,4 +1,4 @@
-/* $OpenBSD: locore.S,v 1.28 2020/02/02 18:55:46 deraadt Exp $ */
+/* $OpenBSD: locore.S,v 1.31 2020/03/13 00:14:38 kettenis Exp $ */
 /*-
  * Copyright (c) 2012-2014 Andrew Turner
  * All rights reserved.
@@ -109,6 +109,8 @@ drop_to_el1:
 	isb
 
 	eret
+	dsb	nsh
+	isb
 
 	.align 3
 .Lsctlr_res1:
@@ -344,21 +346,18 @@ _C_LABEL(sigcode):
 	mov	x0, sp
 	add	x0, x0, #SF_SC
 
-1:
 	mov	x8, #SYS_sigreturn
 	svc	0
+	dsb	nsh
+	isb
 	.globl  _C_LABEL(sigcoderet)
 _C_LABEL(sigcoderet):
-	nop
-	nop
 
 	/* sigreturn failed, exit */
 	mov	x8, #SYS_exit
 	svc	0
-	nop
-	nop
-
-	b	1b
+	dsb	nsh
+	isb
 END(sigcode)
 	/* This may be copied to the stack, keep it 16-byte aligned */
 	.align  3

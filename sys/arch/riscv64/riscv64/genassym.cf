@@ -91,7 +91,7 @@ endif
 
 struct	riscv_bootparams
 member	kern_l1pt
-member	kern_phys
+member	kern_delta
 member	kern_stack
 member	dtbp_virt
 member	dtbp_phys

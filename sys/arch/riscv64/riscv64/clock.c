@@ -18,22 +18,10 @@
 #include <sys/systm.h>
 #include <sys/timetc.h>
 #include <dev/clock_subr.h>
-#if 0
 #include <sys/malloc.h>
 
 #include <machine/cpu.h>
 #include <machine/intr.h>
-#endif
-
-void
-delay(u_int usec)
-{
-	int j;
-	/* Waste time in a loop. Good enough for now. */
-	for (; usec > 0; usec--)
-		for (j = 100; j > 0; j--)
-			;
-}
 
 todr_chip_handle_t todr_handle;
 
@@ -118,22 +106,4 @@ inittodr(time_t base)
 	}
  bad:
 	printf("WARNING: CHECK AND RESET THE DATE!\n");
-}
-
-void
-cpu_initclocks(void)
-{
-	panic("cpu_initclocks not implmeneted yet");
-}
-
-void
-cpu_startclock(void)
-{
-	panic("cpu_startclock not implemented yet");
-}
-
-void
-setstatclockrate(int arg)
-{
-	panic("setstatclockrate not implemented yet");
 }

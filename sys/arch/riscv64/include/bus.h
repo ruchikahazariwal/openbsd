@@ -314,7 +314,7 @@ static inline void
 bus_space_barrier(bus_space_tag_t t, bus_space_handle_t h, bus_size_t offset,
     bus_size_t length, int flags)
 {
-	__asm__ volatile ("dsb sy" ::: "memory");
+	__asm__ volatile ("sfence.vma" ::: "memory");//XXX What?? CMPE
 }
 #define BUS_SPACE_BARRIER_READ  0x01		/* force read barrier */
 #define BUS_SPACE_BARRIER_WRITE 0x02		/* force write barrier */

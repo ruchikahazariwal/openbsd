@@ -36,7 +36,8 @@ INCLUDES=	-nostdinc -I$S -I${.OBJDIR} -I$S/arch \
 		-I$S/dev/pci/drm/amd/display/dc/inc/hw \
 		-I$S/dev/pci/drm/amd/display/modules/inc
 CPPFLAGS=	${INCLUDES} ${IDENT} ${PARAM} -D_KERNEL -D__${_mach}__ -MD -MP
-CWARNFLAGS=	-Werror -Wall -Wimplicit-function-declaration \
+# XXX -Werror removed to relax compile errors while building with -O0
+CWARNFLAGS=	-Wall -Wimplicit-function-declaration \
 		-Wno-uninitialized -Wno-pointer-sign \
 		-Wno-constant-conversion -Wno-address-of-packed-member \
 		-Wframe-larger-than=2047
@@ -55,7 +56,7 @@ COPTS?=		-Oz
 .endif
 
 DEBUG?=		-g
-COPTS?=		-O2
+COPTS?=		-O0 # XXX Optimization Disabled for Debugging
 CFLAGS=		${DEBUG} ${CWARNFLAGS} ${CMACHFLAGS} ${COPTS} ${PIPE}
 AFLAGS=		-D_LOCORE -x assembler-with-cpp ${CWARNFLAGS} ${CMACHFLAGS}
 LINKFLAGS=	-T ld.script -X --warn-common -no-pie

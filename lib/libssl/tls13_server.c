@@ -1,4 +1,4 @@
-/* $OpenBSD: tls13_server.c,v 1.22 2020/01/30 17:09:23 jsing Exp $ */
+/* $OpenBSD: tls13_server.c,v 1.28 2020/03/10 17:23:25 jsing Exp $ */
 /*
  * Copyright (c) 2019, 2020 Joel Sing <jsing@openbsd.org>
  * Copyright (c) 2020 Bob Beck <beck@openbsd.org>
@@ -15,8 +15,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-
-#include <openssl/curve25519.h>
 
 #include "ssl_locl.h"
 #include "ssl_tlsext.h"
@@ -295,13 +293,7 @@ tls13_client_hello_recv(struct tls13_ctx *ctx, CBS *cbs)
 }
 
 int
-tls13_client_hello_retry_send(struct tls13_ctx *ctx, CBB *cbb)
-{
-	return 0;
-}
-
-int
-tls13_server_hello_retry_recv(struct tls13_ctx *ctx, CBS *cbs)
+tls13_client_hello_retry_recv(struct tls13_ctx *ctx, CBS *cbs)
 {
 	return 0;
 }
@@ -496,18 +488,6 @@ tls13_client_certificate_verify_recv(struct tls13_ctx *ctx, CBS *cbs)
 	return ret;
 }
 
-int
-tls13_client_key_update_send(struct tls13_ctx *ctx, CBB *cbb)
-{
-	return 0;
-}
-
-int
-tls13_client_key_update_recv(struct tls13_ctx *ctx, CBS *cbs)
-{
-	return 0;
-}
-
 static int
 tls13_server_hello_build(struct tls13_ctx *ctx, CBB *cbb)
 {
@@ -581,11 +561,12 @@ tls13_server_hello_sent(struct tls13_ctx *ctx)
 
 	if ((secrets = tls13_secrets_create(ctx->hash, 0)) == NULL)
 		goto err;
-	S3I(ctx->ssl)->hs_tls13.secrets = secrets;
+	ctx->hs->secrets = secrets;
 
 	/* XXX - pass in hash. */
 	if (!tls1_transcript_hash_init(s))
 		goto err;
+	tls1_transcript_free(s);
 	if (!tls1_transcript_hash_value(s, buf, sizeof(buf), &hash_len))
 		goto err;
 	context.data = buf;
@@ -900,7 +881,7 @@ tls13_client_finished_recv(struct tls13_ctx *ctx, CBS *cbs)
 		goto err;
 
 	if (!CBS_mem_equal(cbs, verify_data, verify_data_len)) {
-		ctx->alert = TLS1_AD_DECRYPTION_FAILED;
+		ctx->alert = TLS1_AD_DECRYPT_ERROR;
 		goto err;
 	}
 

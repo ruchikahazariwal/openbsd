@@ -49,8 +49,6 @@
 #define PAGE_SIZE	(1 << PAGE_SHIFT)
 #define PAGE_MASK	(PAGE_SIZE - 1)
 
-#define KERNBASE	0xffffffc000000000ULL	/* start of kernel virtual space */
-
 #ifdef _KERNEL
 
 #define NBPG		PAGE_SIZE		/* bytes/page */

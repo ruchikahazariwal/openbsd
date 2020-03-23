@@ -23,6 +23,8 @@
 #include <sys/syscall.h>
 #include <sys/syscall_mi.h>
 
+#include <machine/riscvreg.h>
+
 /* Called from exception.S */
 void do_trap_supervisor(struct trapframe *);
 void do_trap_user(struct trapframe *);
@@ -52,25 +54,24 @@ dump_regs(struct trapframe *frame)
 void
 do_trap_supervisor(struct trapframe *frame)
 {
-//XXX TODO: just panic for now
-	dump_regs(frame);
-	uint64_t exception;
-	exception = (frame->tf_scause & EXCP_MASK);
-	panic("Unknown kernel exception %x trap value %lx\n",
-	    exception, frame->tf_stval);
-#if 0
 	uint64_t exception;
 
 	/* Ensure we came from supervisor mode, interrupts disabled */
-	KASSERT((csr_read(sstatus) & (SSTATUS_SPP | SSTATUS_SIE)) ==
-	    SSTATUS_SPP, ("Came from S mode with interrupts enabled"));
+	KASSERTMSG((csr_read(sstatus) & (SSTATUS_SPP | SSTATUS_SIE)) ==
+	    SSTATUS_SPP, "Came from S mode with interrupts enabled");
 
-	exception = (frame->tf_scause & EXCP_MASK);
 	if (frame->tf_scause & EXCP_INTR) {
 		/* Interrupt */
 		riscv_cpu_intr(frame);
 		return;
 	}
+
+//XXX TODO: just panic for now
+	exception = (frame->tf_scause & EXCP_MASK);
+	dump_regs(frame);
+	panic("Unknown kernel exception %x trap value %lx\n",
+	    exception, frame->tf_stval);
+#if 0
 
 #ifdef KDTRACE_HOOKS
 	if (dtrace_trap_func != NULL && (*dtrace_trap_func)(frame, exception))

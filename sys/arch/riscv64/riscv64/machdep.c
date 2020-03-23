@@ -42,6 +42,7 @@
 #include <machine/bootconfig.h>
 #include <machine/bus.h>
 #include <machine/riscv64var.h>
+#include <machine/sbi.h>
 
 #include <machine/db_machdep.h>
 #include <ddb/db_extern.h>
@@ -92,13 +93,88 @@ int safepri = 0;
 struct cpu_info cpu_info_primary;
 struct cpu_info *cpu_info[MAXCPUS] = { &cpu_info_primary };
 
-//copied from arm64 directly
-#if 0
-extern void	com_fdt_init_cons(void);
+static int
+atoi(const char *s)
+{
+	int n, neg;
+
+	n = 0;
+	neg = 0;
+
+	while (*s == '-') {
+		s++;
+		neg = !neg;
+	}
+
+	while (*s != '\0') {
+		if (*s < '0' || *s > '9')
+			break;
+
+		n = (10 * n) + (*s - '0');
+		s++;
+	}
+
+	return (neg ? -n : n);
+}
+
+
+void *
+fdt_find_cons(const char *name)
+{
+	char *alias = "serial0";
+	char buf[128];
+	char *stdout = NULL;
+	char *p;
+	void *node;
+
+	/* First check if "stdout-path" is set. */
+	node = fdt_find_node("/chosen");
+	if (node) {
+		if (fdt_node_property(node, "stdout-path", &stdout) > 0) {
+			if (strchr(stdout, ':') != NULL) {
+				strlcpy(buf, stdout, sizeof(buf));
+				if ((p = strchr(buf, ':')) != NULL) {
+					*p++ = '\0';
+					stdout_speed = atoi(p);
+				}
+				stdout = buf;
+			}
+			if (stdout[0] != '/') {
+				/* It's an alias. */
+				alias = stdout;
+				stdout = NULL;
+			}
+		}
+	}
+
+	/* Perform alias lookup if necessary. */
+	if (stdout == NULL) {
+		node = fdt_find_node("/aliases");
+		if (node)
+			fdt_node_property(node, alias, &stdout);
+	}
+
+	/* Lookup the physical address of the interface. */
+	if (stdout) {
+		node = fdt_find_node(stdout);
+		if (node && fdt_is_compatible(node, name)) {
+			stdout_node = OF_finddevice(stdout);
+			return (node);
+		}
+	}
+
+	return (NULL);
+}
+
+#if 0	//	CMPE: not supporting following uarts
+extern void	amluart_init_cons(void);
 extern void	imxuart_init_cons(void);
+extern void	mvuart_init_cons(void);
 extern void	pluart_init_cons(void);
 extern void	simplefb_init_cons(bus_space_tag_t);
-#endif
+#endif 
+
+extern void	com_fdt_init_cons(void);
 
 void
 consinit(void)
@@ -109,17 +185,20 @@ consinit(void)
 		return;
 
 	consinit_called = 1;
-
-//XXX TODO: need to check how to reference them
-#if 0
+#if 0 //no support
+	amluart_init_cons();
 	com_fdt_init_cons();
 	imxuart_init_cons();
+	mvuart_init_cons();
 	pluart_init_cons();
 	simplefb_init_cons(&riscv64_bs_tag);
 #endif
+	com_fdt_init_cons();
 }
 
+
 //XXX TODO: need to populate console for qemu
+//maybe no longer needed, as already have cn_tab ??
 struct consdev constab[] = {
 	{ NULL }
 };
@@ -354,6 +433,19 @@ cpu_dumpsize(void)
 	return (1);
 }
 
+int64_t dcache_line_size;	/* The minimum D cache line size */
+int64_t icache_line_size;	/* The minimum I cache line size */
+int64_t idcache_line_size;	/* The minimum cache line size */
+
+void
+cache_setup(void)
+{
+// XXX TODO CMPE, following freebsd
+	dcache_line_size = 0;
+	icache_line_size = 0;
+	idcache_line_size = 0;
+}
+
 u_long
 cpu_dump_mempagecnt()
 {
@@ -432,31 +524,47 @@ void	process_kernel_args(void);
 void
 initriscv(struct riscv_bootparams *rbp)
 {
-#if 0	// XXX not yet used
-	// vaddr_t vstart, vend;
-	// struct cpu_info *pcpup;
-	// long kvo = 0x0; // XXX VA --> PA delta
-	// paddr_t memstart, memend;
-#endif  // 0
-#if 0
-	// XXX What?
+	vaddr_t vstart, vend;
+	struct cpu_info *pcpup;
+	long kvo = rbp->kern_delta;	//should be PA - VA 
+	paddr_t memstart, memend;
+
+	void *config = (void *) rbp->dtbp_virt;
+	void *fdt = NULL;
+
 	int (*map_func_save)(bus_space_tag_t, bus_addr_t, bus_size_t, int,
 	    bus_space_handle_t *);
-#endif  // 0
-	// NOTE: FDT is already mapped (rpb->dtbp_virt & rpb->dtbp_phys)
-	
-	// struct fdt_reg reg; // XXX not yet used
+
+	// NOTE that 1GB of ram is mapped in by default in
+	// the bootstrap memory config, so nothing is necessary
+	// until pmap_bootstrap_finalize is called??
+
+	//XXX NOTE: FDT is already mapped (rbp->dtbp_virt => rbp->dtbp_phys)
+	// pmap_map_early((paddr_t)config, PAGE_SIZE);
+
+	// Initialize the Flattened Device Tree
+	if (!fdt_init(config) || fdt_get_size(config) == 0)
+		panic("initriscv: no FDT");
+
+	// pmap_map_early((paddr_t)config, round_page(fdt_get_size(config)));
+
+	size_t fdt_size = fdt_get_size(config);
+	paddr_t fdt_start = (paddr_t) rbp->dtbp_phys;
+	paddr_t fdt_end = fdt_start + fdt_size;
+	struct fdt_reg reg;
 	void *node;
 
 	node = fdt_find_node("/chosen");
 	if (node != NULL) {
 		char *prop;
 		int len;
-		static uint8_t lladdr[6];
+		// static uint8_t lladdr[6]; //not yet used
 
 		len = fdt_node_property(node, "bootargs", &prop);
 		if (len > 0)
 			collect_kernel_args(prop);
+
+#if 0 //CMPE: yet not using these properties
 
 		len = fdt_node_property(node, "openbsd,bootduid", &prop);
 		if (len == sizeof(bootduid))
@@ -496,48 +604,79 @@ initriscv(struct riscv_bootparams *rbp)
 		len = fdt_node_property(node, "openbsd,uefi-mmap-desc-ver", &prop);
 		if (len == sizeof(mmap_desc_ver))
 			mmap_desc_ver = bemtoh32((uint32_t *)prop);
-
-#if 0
-		// XXX What?
 		len = fdt_node_property(node, "openbsd,uefi-system-table", &prop);
 		if (len == sizeof(system_table))
 			system_table = bemtoh64((uint64_t *)prop);
 #endif
 	}
 
-#if 0
 	/* Set the pcpu data, this is needed by pmap_bootstrap */
 	// smp
 	pcpup = &cpu_info_primary;
 
 	/*
-	 * Set the pcpu pointer with a backup in tpidr_el1 to be
-	 * loaded when entering the kernel from userland.
+	 * backup the pcpu pointer in tp to 
+	 * restore kernel context when entering the kernel from userland.
 	 */
-	__asm __volatile(
-	    "mov x18, %0 \n"
-	    "msr tpidr_el1, %0" :: "r"(pcpup));
+	__asm __volatile("mv tp, %0" :: "r"(pcpup));
 
-	cache_setup();
+	sbi_init();
+	cache_setup();//dummy for now
 
 	process_kernel_args();
 
 	void _start(void);
-	long kernbase = (long)&_start & ~0x00fff;
+	long kernbase = (long)&_start & ~(PAGE_SIZE-1); // page aligned
 
+#if 0	// Below we set memstart / memend based on entire physical address
+	// range based on information sourced from FDT.
 	/* The bootloader has loaded us into a 64MB block. */
-	memstart = KERNBASE + kvo;
-	memend = memstart + 64 * 1024 * 1024;
+	memstart = KERNBASE + kvo;		//va + (pa - va) ==> pa
+	memend = memstart + 64 * 1024 * 1024;	//XXX CMPE: size also 64M??
+#endif
+
+	node = fdt_find_node("/memory");
+	if (node == NULL)
+		panic("%s: no memory specified", __func__);
+
+	paddr_t start, end;
+	int i;
+
+	// Assume that the kernel was loaded at valid physical memory location
+	// Scan the FDT to identify the full physical address range for machine
+	// XXX Save physical memory segments to later allocate to UVM?
+	memstart = memend = kernbase + kvo;
+	for (i = 0; i < VM_PHYSSEG_MAX; i++) {
+		if (fdt_get_reg(node, i, &reg))
+			break;
+		if (reg.size == 0)
+			continue;
+
+		start = reg.addr;
+		end = reg.addr + reg.size;
+
+		if (start < memstart)
+			memstart = start;
+		if (end > memend)
+			memend = end;
+	}
+
+	// XXX At this point, OpenBSD/arm64 would have set memstart / memend
+	// to the range mapped by the bootloader (KERNBASE - KERNBASE + 64MiB).
+	// Instead, we have mapped memstart / memend to the full physical
+	// address range. What implications might this have?
 
 	/* Bootstrap enough of pmap to enter the kernel proper. */
 	vstart = pmap_bootstrap(kvo, rbp->kern_l1pt,
-	    kernbase, esym, memstart, memend);
+	    kernbase, esym, fdt_start, fdt_end, memstart, memend);
 
 	// XX correctly sized?
 	proc0paddr = (struct user *)rbp->kern_stack;
 
 	msgbufaddr = (caddr_t)vstart;
 	msgbufphys = pmap_steal_avail(round_page(MSGBUFSIZE), PAGE_SIZE, NULL);
+	// XXX should map this msgbuffphys to kernel pmap??
+
 	vstart += round_page(MSGBUFSIZE);
 
 	zero_page = vstart;
@@ -548,42 +687,19 @@ initriscv(struct riscv_bootparams *rbp)
 	vstart += MAXCPUS * PAGE_SIZE;
 
 	/* Relocate the FDT to safe memory. */
-	if (fdt_get_size(config) != 0) {
-		uint32_t csize, size = round_page(fdt_get_size(config));
+	if (fdt_size != 0) {
+		uint32_t csize, size = round_page(fdt_size);
 		paddr_t pa;
 		vaddr_t va;
 
 		pa = pmap_steal_avail(size, PAGE_SIZE, NULL);
-		memcpy((void *)pa, config, size); /* copy to physical */
+		memcpy((void *) PHYS_TO_DMAP(pa),
+		       (void *) PHYS_TO_DMAP(fdt_start), size);
 		for (va = vstart, csize = size; csize > 0;
 		    csize -= PAGE_SIZE, va += PAGE_SIZE, pa += PAGE_SIZE)
 			pmap_kenter_cache(va, pa, PROT_READ, PMAP_CACHE_WB);
 
 		fdt = (void *)vstart;
-		vstart += size;
-	}
-
-	/* Relocate the EFI memory map too. */
-	if (mmap_start != 0) {
-		uint32_t csize, size = round_page(mmap_size);
-		paddr_t pa, startpa, endpa;
-		vaddr_t va;
-
-		startpa = trunc_page(mmap_start);
-		endpa = round_page(mmap_start + mmap_size);
-		for (pa = startpa, va = vstart; pa < endpa;
-		    pa += PAGE_SIZE, va += PAGE_SIZE)
-			pmap_kenter_cache(va, pa, PROT_READ, PMAP_CACHE_WB);
-		pa = pmap_steal_avail(size, PAGE_SIZE, NULL);
-		memcpy((void *)pa, (caddr_t)vstart + (mmap_start - startpa),
-		    mmap_size); /* copy to physical */
-		pmap_kremove(vstart, endpa - startpa);
-
-		for (va = vstart, csize = size; csize > 0;
-		    csize -= PAGE_SIZE, va += PAGE_SIZE, pa += PAGE_SIZE)
-			pmap_kenter_cache(va, pa, PROT_READ | PROT_WRITE, PMAP_CACHE_WB);
-
-		mmap = (void *)vstart;
 		vstart += size;
 	}
 
@@ -603,21 +719,20 @@ initriscv(struct riscv_bootparams *rbp)
 	if (fdt)
 		fdt_init(fdt);
 
-	// XXX
 	int pmap_bootstrap_bs_map(bus_space_tag_t t, bus_addr_t bpa,
 	    bus_size_t size, int flags, bus_space_handle_t *bshp);
 
-	map_func_save = arm64_bs_tag._space_map;
-	arm64_bs_tag._space_map = pmap_bootstrap_bs_map;
+	map_func_save = riscv64_bs_tag._space_map;
+	riscv64_bs_tag._space_map = pmap_bootstrap_bs_map;
 
 	// cninit
 	consinit();
 
-	arm64_bs_tag._space_map = map_func_save;
+#ifdef	DEBUG_AUTOCONF
+	fdt_print_tree();
+#endif
 
-	/* Remap EFI runtime. */
-	if (mmap_start != 0 && system_table != 0)
-		remap_efi_runtime(system_table);
+	riscv64_bs_tag._space_map = map_func_save;
 
 	/* XXX */
 	pmap_avail_fixup();
@@ -628,6 +743,7 @@ initriscv(struct riscv_bootparams *rbp)
 	/* Make what's left of the initial 64MB block available to UVM. */
 	pmap_physload_avail();
 
+#if 0
 	/* Make all other physical memory available to UVM. */
 	if (mmap && mmap_desc_ver == EFI_MEMORY_DESCRIPTOR_VERSION) {
 		EFI_MEMORY_DESCRIPTOR *desc = mmap;
@@ -697,7 +813,7 @@ initriscv(struct riscv_bootparams *rbp)
 			}
 		}
 	}
-
+#endif
 	/*
 	 * Make sure that we have enough KVA to initialize UVM.  In
 	 * particular, we need enough KVA to be able to allocate the
@@ -705,7 +821,7 @@ initriscv(struct riscv_bootparams *rbp)
 	 */
 	pmap_growkernel(VM_MIN_KERNEL_ADDRESS + 1024 * 1024 * 1024 +
 	    physmem * sizeof(struct vm_page));
-
+#if 0
 #ifdef DDB
 	db_machine_init();
 
@@ -715,10 +831,9 @@ initriscv(struct riscv_bootparams *rbp)
 	if (boothowto & RB_KDB)
 		db_enter();
 #endif
-
+#endif
 	softintr_init();
 	splraise(IPL_IPI);
-#endif
 }
 
 char bootargs[256];
@@ -787,3 +902,37 @@ process_kernel_args(void)
 		boothowto |= fl;
 	}
 }
+
+/*
+ * allow bootstrap to steal KVA after machdep has given it back to pmap.
+ * XXX - need a mechanism to prevent this from being used too early or late.
+ */
+int
+pmap_bootstrap_bs_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size,
+    int flags, bus_space_handle_t *bshp)
+{
+	u_long startpa, pa, endpa;
+	vaddr_t va;
+
+	extern vaddr_t virtual_avail, virtual_end;
+
+	va = virtual_avail; // steal memory from virtual avail.
+
+	if (va == 0)
+		panic("pmap_bootstrap_bs_map, no virtual avail");
+
+	startpa = trunc_page(bpa);
+	endpa = round_page((bpa + size));
+
+	*bshp = (bus_space_handle_t)(va + (bpa - startpa));
+
+	for (pa = startpa; pa < endpa; pa += PAGE_SIZE, va += PAGE_SIZE)
+		pmap_kenter_cache(va, pa, PROT_READ | PROT_WRITE,
+		    PMAP_CACHE_DEV);
+
+	virtual_avail = va;
+
+	return 0;
+}
+
+

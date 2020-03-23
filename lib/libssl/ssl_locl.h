@@ -1,4 +1,4 @@
-/* $OpenBSD: ssl_locl.h,v 1.260 2020/02/01 11:38:35 jsing Exp $ */
+/* $OpenBSD: ssl_locl.h,v 1.270 2020/03/13 16:40:42 jsing Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -169,27 +169,8 @@ __BEGIN_HIDDEN_DECLS
 #define CTASSERT(x)	extern char  _ctassert[(x) ? 1 : -1 ]   \
 			    __attribute__((__unused__))
 
-#define l2n(l,c)	(*((c)++)=(unsigned char)(((l)>>24)&0xff), \
-			 *((c)++)=(unsigned char)(((l)>>16)&0xff), \
-			 *((c)++)=(unsigned char)(((l)>> 8)&0xff), \
-			 *((c)++)=(unsigned char)(((l)    )&0xff))
-
-#define l2n8(l,c)	(*((c)++)=(unsigned char)(((l)>>56)&0xff), \
-			 *((c)++)=(unsigned char)(((l)>>48)&0xff), \
-			 *((c)++)=(unsigned char)(((l)>>40)&0xff), \
-			 *((c)++)=(unsigned char)(((l)>>32)&0xff), \
-			 *((c)++)=(unsigned char)(((l)>>24)&0xff), \
-			 *((c)++)=(unsigned char)(((l)>>16)&0xff), \
-			 *((c)++)=(unsigned char)(((l)>> 8)&0xff), \
-			 *((c)++)=(unsigned char)(((l)    )&0xff))
-
-#define s2n(s,c)	((c[0]=(unsigned char)(((s)>> 8)&0xff), \
-			  c[1]=(unsigned char)(((s)    )&0xff)),c+=2)
-
-#if 0
 #ifndef LIBRESSL_HAS_TLS1_3_CLIENT
 #define LIBRESSL_HAS_TLS1_3_CLIENT
-#endif
 #endif
 
 #if defined(LIBRESSL_HAS_TLS1_3_CLIENT) || defined(LIBRESSL_HAS_TLS1_3_SERVER)
@@ -457,9 +438,13 @@ typedef struct ssl_handshake_tls13_st {
 	uint16_t max_version;
 	uint16_t version;
 
+	int use_legacy;
+	int hrr;
+
 	/* Version proposed by peer server. */
 	uint16_t server_version;
 
+	uint16_t server_group;
 	struct tls13_key_share *key_share;
 	struct tls13_secrets *secrets;
 
@@ -791,6 +776,25 @@ typedef struct ssl_internal_st {
 	int empty_record_count;
 } SSL_INTERNAL;
 
+typedef struct ssl3_record_internal_st {
+	int type;               /* type of record */
+	unsigned int length;    /* How many bytes available */
+	unsigned int padding_length; /* Number of padding bytes. */
+	unsigned int off;       /* read/write offset into 'buf' */
+	unsigned char *data;    /* pointer to the record data */
+	unsigned char *input;   /* where the decode bytes are */
+	unsigned long epoch;    /* epoch number, needed by DTLS1 */
+	unsigned char seq_num[8]; /* sequence number, needed by DTLS1 */
+} SSL3_RECORD_INTERNAL;
+
+typedef struct ssl3_buffer_internal_st {
+	unsigned char *buf;	/* at least SSL3_RT_MAX_PACKET_SIZE bytes,
+	                         * see ssl3_setup_buffers() */
+	size_t len;		/* buffer size */
+	int offset;		/* where to 'copy from' */
+	int left;		/* how many bytes left */
+} SSL3_BUFFER_INTERNAL;
+
 typedef struct ssl3_state_internal_st {
 	unsigned char read_sequence[SSL3_SEQUENCE_SIZE];
 	int read_mac_secret_size;
@@ -799,8 +803,8 @@ typedef struct ssl3_state_internal_st {
 	int write_mac_secret_size;
 	unsigned char write_mac_secret[EVP_MAX_MD_SIZE];
 
-	SSL3_BUFFER rbuf;	/* read IO goes into here */
-	SSL3_BUFFER wbuf;	/* write IO goes into here */
+	SSL3_BUFFER_INTERNAL rbuf;	/* read IO goes into here */
+	SSL3_BUFFER_INTERNAL wbuf;	/* write IO goes into here */
 
 	/* we allow one fatal and one warning alert to be outstanding,
 	 * send close alert via the warning alert */
@@ -811,8 +815,8 @@ typedef struct ssl3_state_internal_st {
 	int need_empty_fragments;
 	int empty_fragment_done;
 
-	SSL3_RECORD rrec;	/* each decoded record goes in here */
-	SSL3_RECORD wrec;	/* goes out from here */
+	SSL3_RECORD_INTERNAL rrec;	/* each decoded record goes in here */
+	SSL3_RECORD_INTERNAL wrec;	/* goes out from here */
 
 	/* storage for Alert/Handshake protocol data received but not
 	 * yet processed by ssl3_read_bytes: */
@@ -911,6 +915,13 @@ typedef struct ssl3_state_internal_st {
 	size_t alpn_selected_len;
 } SSL3_STATE_INTERNAL;
 #define S3I(s) (s->s3->internal)
+
+typedef struct dtls1_record_data_internal_st {
+	unsigned char *packet;
+	unsigned int packet_length;
+	SSL3_BUFFER_INTERNAL rbuf;
+	SSL3_RECORD_INTERNAL rrec;
+} DTLS1_RECORD_DATA_INTERNAL;
 
 typedef struct dtls1_state_internal_st {
 	unsigned int send_cookie;
@@ -1028,7 +1039,6 @@ typedef struct sess_cert_st {
 /*#define RSA_DEBUG	*/
 
 typedef struct ssl3_enc_method {
-	int (*enc)(SSL *, int);
 	unsigned int enc_flags;
 } SSL3_ENC_METHOD;
 
@@ -1296,7 +1306,6 @@ long dtls1_ctrl(SSL *s, int cmd, long larg, void *parg);
 long dtls1_get_message(SSL *s, int st1, int stn, int mt, long max, int *ok);
 int dtls1_get_record(SSL *s);
 int dtls1_dispatch_alert(SSL *s);
-int dtls1_enc(SSL *s, int snd);
 
 int ssl_init_wbio_buffer(SSL *s, int push);
 void ssl_free_wbio_buffer(SSL *s);
@@ -1313,6 +1322,7 @@ void tls1_transcript_reset(SSL *s);
 int tls1_transcript_append(SSL *s, const unsigned char *buf, size_t len);
 int tls1_transcript_data(SSL *s, const unsigned char **data, size_t *len);
 void tls1_transcript_freeze(SSL *s);
+void tls1_transcript_unfreeze(SSL *s);
 int tls1_transcript_record(SSL *s, const unsigned char *buf, size_t len);
 
 void tls1_cleanup_key_block(SSL *s);
@@ -1361,9 +1371,9 @@ long ssl_get_algorithm2(SSL *s);
 int tls1_check_ec_server_key(SSL *s);
 
 /* s3_cbc.c */
-void ssl3_cbc_copy_mac(unsigned char *out, const SSL3_RECORD *rec,
+void ssl3_cbc_copy_mac(unsigned char *out, const SSL3_RECORD_INTERNAL *rec,
     unsigned md_size, unsigned orig_len);
-int tls1_cbc_remove_padding(const SSL *s, SSL3_RECORD *rec,
+int tls1_cbc_remove_padding(const SSL *s, SSL3_RECORD_INTERNAL *rec,
     unsigned block_size, unsigned mac_size);
 char ssl3_cbc_record_digest_supported(const EVP_MD_CTX *ctx);
 int ssl3_cbc_digest_record(const EVP_MD_CTX *ctx, unsigned char *md_out,

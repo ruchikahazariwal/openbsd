@@ -74,15 +74,26 @@ struct cpu_info {
 	struct schedstate_percpu ci_schedstate; /* scheduler state */
 
 	u_int32_t		ci_cpuid;
+#if 0
+	uint64_t		ci_mpidr;
+	u_int			ci_acpi_proc_id;
+#endif
+	int			ci_node;
 	struct cpu_info		*ci_self;
 
 	struct proc		*ci_curproc;
 	struct pmap		*ci_curpm;
+#if 0
+	struct proc		*ci_fpuproc;
+#endif
 	u_int32_t		ci_randseed;
 
 	struct pcb		*ci_curpcb;
 	struct pcb		*ci_idle_pcb;
 
+	u_int32_t		ci_ctrl; /* The CPU control register */
+
+	uint32_t		ci_cpl;
 	uint32_t		ci_ipending;
 	uint32_t		ci_idepth;
 #ifdef DIAGNOSTIC
@@ -90,9 +101,22 @@ struct cpu_info {
 #endif
 	int			ci_want_resched;
 
+#if 0
+	void			(*ci_flush_bp)(void);
+
+	struct opp_table	*ci_opp_table;
+	volatile int		ci_opp_idx;
+	volatile int		ci_opp_max;
+	uint32_t		ci_cpu_supply;
+#endif
+
 #ifdef MULTIPROCESSOR
 	struct srp_hazard	ci_srp_hazards[SRP_HAZARD_NUM];
 	volatile int		ci_flags;
+#if 0
+	uint64_t		ci_ttbr1;
+	vaddr_t			ci_el1_stkend;
+#endif
 
 	volatile int		ci_ddb_paused;
 #define CI_DDB_RUNNING		0

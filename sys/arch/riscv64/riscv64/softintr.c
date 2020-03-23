@@ -68,7 +68,6 @@ softintr_init(void)
 	}
 }
 
-#if 0
 /*
  * softintr_dispatch:
  *
@@ -100,8 +99,6 @@ softintr_dispatch(int which)
 		(*fn)(arg);
 	}
 }
-#endif
-
 
 #ifdef MULTIPROCESSOR
 void
@@ -167,7 +164,6 @@ softintr_establish_flags(int ipl, void (*func)(void *), void *arg, int flags)
 	return (sih);
 }
 
-#if 0
 /*
  * softintr_disestablish:	[interface]
  *
@@ -188,7 +184,6 @@ softintr_disestablish(void *arg)
 
 	free(sih, M_DEVBUF, 0);
 }
-#endif
 
 void
 softintr(int intrq)

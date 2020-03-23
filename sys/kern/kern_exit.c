@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit.c,v 1.182 2019/12/19 17:40:10 mpi Exp $	*/
+/*	$OpenBSD: kern_exit.c,v 1.186 2020/03/13 09:25:21 mpi Exp $	*/
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -215,7 +215,7 @@ exit1(struct proc *p, int xexit, int xsig, int flags)
 		 * If parent has the SAS_NOCLDWAIT flag set, we're not
 		 * going to become a zombie.
 		 */
-		if (pr->ps_pptr->ps_sigacts->ps_flags & SAS_NOCLDWAIT)
+		if (pr->ps_pptr->ps_sigacts->ps_sigflags & SAS_NOCLDWAIT)
 			atomic_setbits_int(&pr->ps_flags, PS_NOZOMBIE);
 	}
 
@@ -584,7 +584,8 @@ proc_finish_wait(struct proc *waiter, struct proc *p)
 	 * we need to give it back to the old parent.
 	 */
 	pr = p->p_p;
-	if (pr->ps_oppid && (tr = prfind(pr->ps_oppid))) {
+	if (pr->ps_oppid != 0 && (pr->ps_oppid != pr->ps_pptr->ps_pid) &&
+	   (tr = prfind(pr->ps_oppid))) {
 		atomic_clearbits_int(&pr->ps_flags, PS_TRACED);
 		pr->ps_oppid = 0;
 		proc_reparent(pr, tr);

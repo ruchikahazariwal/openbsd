@@ -29,27 +29,81 @@
 #ifndef	_MACHINE_CPUFUNC_H_
 #define	_MACHINE_CPUFUNC_H_
 
+static __inline void
+breakpoint(void)
+{
+	__asm("ebreak");
+}
+
 #ifdef _KERNEL
 
 #include <machine/riscvreg.h>
 
+#define	rdcycle()			csr_read(cycle)
+#define	rdtime()			csr_read(time)
+#define	rdinstret()			csr_read(instret)
+#define	rdhpmcounter(n)			csr_read(hpmcounter##n)
+
+static __inline void
+fence_i(void)
+{
+	__asm __volatile("fence.i" ::: "memory");
+}
+
+static __inline void
+sfence_vma(void)
+{
+	__asm __volatile("sfence.vma" ::: "memory");
+}
+
+static __inline void
+sfence_vma_page(uintptr_t addr)
+{
+	__asm __volatile("sfence.vma %0"
+			:
+			: "r" (addr)
+			: "memory");
+}
+
+// XXX ASIDs in riscv64 are only 16 bits.
+static __inline void
+sfence_vma_asid(uint64_t asid)
+{
+	__asm __volatile("sfence.vma x0, %0"
+			:
+			: "r" (asid)
+			: "memory");
+}
+
+static __inline void
+sfence_vma_page_asid(uintptr_t addr, uint64_t asid)
+{
+	__asm __volatile("sfence.vma %0, %1"
+			 :
+			 : "r" (addr), "r" (asid)
+			 : "memory");
+}
+
 extern int64_t dcache_line_size;
 extern int64_t icache_line_size;
-extern int64_t idcache_line_size;
-extern int64_t dczva_line_size;
 
-void cpu_setttb(int, paddr_t);
-void cpu_tlb_flush(void);
-void cpu_tlb_flush_asid(vaddr_t);
-void cpu_tlb_flush_all_asid(vaddr_t);
-void cpu_tlb_flush_asid_all(vaddr_t);
-void cpu_icache_sync_range(vaddr_t, vsize_t);
-void cpu_idcache_wbinv_range(vaddr_t, vsize_t);
-void cpu_dcache_wbinv_range(vaddr_t, vsize_t);
-void cpu_dcache_inv_range(vaddr_t, vsize_t);
-void cpu_dcache_wb_range(vaddr_t, vsize_t);
+#define	cpu_dcache_wbinv_range(a, s)
+#define	cpu_dcache_inv_range(a, s)
+#define	cpu_dcache_wb_range(a, s)
 
-register_t smc_call(register_t, register_t, register_t, register_t);
+#define	cpu_idcache_wbinv_range(a, s)
+#define	cpu_icache_sync_range(a, s)
+#define	cpu_icache_sync_range_checked(a, s)
+
+static __inline void
+load_satp(uint64_t val)
+{
+	__asm __volatile("csrw satp, %0" :: "r"(val));
+}
+
+#define	cpufunc_nullop()		riscv_nullop()
+
+void riscv_nullop(void);
 
 #endif	/* _KERNEL */
 #endif	/* _MACHINE_CPUFUNC_H_ */

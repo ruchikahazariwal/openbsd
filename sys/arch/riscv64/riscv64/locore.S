@@ -56,10 +56,10 @@ _start_kern_bootstrap:
 
 	/* Get the physical address kernel loaded to */ 
 	lla	t0, virt_map	//virt_map is a phy addr where its own va is stored.
-	ld	t1, 0(t0)		//load Double-word data. XXX WHEN is (t0) filled
-	sub	t1, t1, t0		//t1 = t1 - t0 = va - pa, va<-->pa offset
+	ld	t1, 0(t0)	//load Double-word data. XXX WHEN is (t0) filled
+	sub	t1, t1, t0	//t1 = t1 - t0 = va - pa, va<-->pa offset
 	li	t2, KERNBASE	//load immediate, KERNBASE is virtual addr
-	sub	s9, t2, t1	/* s9 = physmem base of kernel*/ // s9 is callee saved
+	sub	s9, t2, t1	// s9 = physmem base of kernel
 
 	//registers passed by bbl.
 	/* 
@@ -92,7 +92,7 @@ _start_kern_bootstrap:
 	lla	s1, pagetable_l1	//phy addr
 	mv	s2, s9			//phy addr
 	srli	s2, s2, PAGE_SHIFT	//12, 4K page
-	slli	t5, s2, PTE_PPN0_S	/* (s2 << PTE_PPN0_S) *///10bit Phys Mem Attribute 
+	slli	t5, s2, PTE_PPN0_S	//10bit Phys Mem Attribute 
 	li	t4, (PTE_KERN | PTE_X)	//flag bit
 	or	t6, t4, t5		//t6 now is PTE for a 1 GiB gigapage
 
@@ -111,23 +111,23 @@ _start_kern_bootstrap:
 	/* step1) Add L1 entry for kernel */
 	
 	//calc PTE based on pa
-	lla	s1, pagetable_l1			//phy addr
-	lla	s2, pagetable_l2	/* Link to next level PN */
-	srli	s2, s2, PAGE_SHIFT		//12, 4K page
-	slli	t5, s2, PTE_PPN0_S	/* (s2 << PTE_PPN0_S) *///10bit Phys Mem Attribute 
-	li	t4, PTE_V				//PTE valid.
-	or	t6, t4, t5				//t6 now is the PTE for a level 2 page table
+	lla	s1, pagetable_l1	//phy addr
+	lla	s2, pagetable_l2	
+	srli	s2, s2, PAGE_SHIFT	//12, 4K page
+	slli	t5, s2, PTE_PPN0_S	//10bit Phys Mem Attribute 
+	li	t4, PTE_V		//PTE valid
+	or	t6, t4, t5		//t6 now is the PTE for a level 2 page table
 
 	//calc VPN[2] based on va
-	li	a5, KERNBASE									//va
-	srli	a5, a5, L1_SHIFT	/* >> L1_SHIFT */ 		//30,  remaining va[63:30]
-	andi	a5, a5, 0x1ff	/* & 0x1ff */	//only use va[38:30] as VPN[2], =0x100
+	li	a5, KERNBASE		//va
+	srli	a5, a5, L1_SHIFT	//30
+	andi	a5, a5, 0x1ff		//va[38:30] as VPN[2],==0x100
 
-	/* Store L1 PTE entry to position */ //still for the KERNBASE
+	/* Store L1 PTE entry */ 
 	li	a6, PTE_SIZE		//8 Bytes
 	mulw	a5, a5, a6		//distance in unit of bytes
-	add	t0, s1, a5			//s1 is L1 table base pa
-	sd	t6, (t0)			//PTE of a l2 page table is populated to l1 page table 
+	add	t0, s1, a5		//s1 is L1 table base pa
+	sd	t6, (t0)		//PTE of a l2 page table is populated to l1 page table 
 
 
 	/* step2)  Level 2 superpages (512 x 2MiB) */ 	//mega pages: two-level page table
@@ -138,15 +138,15 @@ _start_kern_bootstrap:
 	add	t3, t4, t2
 	li	t5, 0
 2:
-	li	t0, (PTE_KERN | PTE_X)	//flag bit
-	slli	t2, t4, PTE_PPN1_S	/* << PTE_PPN1_S == 19*/
-	or	t5, t0, t2				//PTE contructed
+	li	t0, (PTE_KERN | PTE_X)
+	slli	t2, t4, PTE_PPN1_S	//19
+	or	t5, t0, t2		//PTE contructed
 	sd	t5, (s1)		/* Store PTE entry to position */
 	
 	//iterating
 	addi	s1, s1, PTE_SIZE
 	addi	t4, t4, 1
-	bltu	t4, t3, 2b	//512 entries <-- while t4 (s9>>21 + it) < t3(s9>>21 + 512)
+	bltu	t4, t3, 2b		//512 entries 
 
 
 	/* step3)  Create an L1 entry for early devmap */
@@ -154,20 +154,20 @@ _start_kern_bootstrap:
 	
 	//calculate PTE based on pa: (PPN) + privilege/permission + ...
 	lla	s2, pagetable_l2_devmap	/* Link to next level PN */ //pa
-	srli	s2, s2, PAGE_SHIFT		//12, --> PPN
-	slli	t5, s2, PTE_PPN0_S	/* (s2 << PTE_PPN0_S) */	//10, PMA
+	srli	s2, s2, PAGE_SHIFT	//12, --> PPN
+	slli	t5, s2, PTE_PPN0_S	//10, PMA
 	li	t4, PTE_V
-	or	t6, t4, t5			//PTE contructed
+	or	t6, t4, t5		//PTE contructed
 	
 	//calculate VPN[2] index based on va
 	li	a5, (VM_MAX_KERNEL_ADDRESS - L2_SIZE)//devmap is at kernel mem top, va
-	srli	a5, a5, L1_SHIFT	/* >> L1_SHIFT == 30*/
-	andi	a5, a5, 0x1ff		/* & 0x1ff */	//index using va[38:30]
+	srli	a5, a5, L1_SHIFT	//30
+	andi	a5, a5, 0x1ff		//index using va[38:30]
 	
 	/* Store single level1 PTE entry to position */
 	li	a6, PTE_SIZE
 	mulw	a5, a5, a6		//offset in Bytes
-	add	t0, s1, a5			//find the physical add to write 
+	add	t0, s1, a5		//find the physical add to write 
 	sd	t6, (t0)
 
 
@@ -177,7 +177,7 @@ _start_kern_bootstrap:
 	//calc PTE based on pa
 	mv	s2, a1			//passed by bbl
 	srli	s2, s2, PAGE_SHIFT	//12
-	slli	t2, s2, PTE_PPN0_S	/* << PTE_PPN0_S */ //10,	
+	slli	t2, s2, PTE_PPN0_S	//10,	
 	li	t0, (PTE_KERN)
 	or	t0, t0, t2		//PTE contructed
 
@@ -188,9 +188,6 @@ _start_kern_bootstrap:
 	add	t1, s1, a5
 	sd	t0, (t1)
 
-	/* Create identity mapping for initial 1 GiB memory */
-	mv	t1, s9
-
 	/* Page tables END */
 
 
@@ -198,7 +195,7 @@ _start_kern_bootstrap:
 	lla	t0, va			//loading a physical addr, va defined below
 	sub	t0, t0, s9		//offset comparing to phymem base
 	li	t1, KERNBASE		//virt addr		
-	add	t0, t0, t1		//
+	add	t0, t0, t1		
 	csrw	stvec, t0		//virt addr
 	mv	s3, t0
 
@@ -222,6 +219,7 @@ va:					//XXX just a trampoline?
 	/* Unmap the identity mapped kernel gigapage */
 	sd	x0, (s8)	// s8 is addr of pte for identity mapped kernel
 	sfence.vma		// Flush the TLB. Goodbye identity mapped kernel!
+
 
 	/* Setup supervisor trap vector */
 	la	t0, cpu_exception_handler	//-->where the real setup happens
@@ -248,7 +246,7 @@ va:					//XXX just a trampoline?
 
 #ifdef SMP			//Symmetric Multiprocessing, XXX defined in /config/GENERIC?
 	/* Store boot hart id. */
-	la	t0, boot_hart	//XXX defined in machdep.c, the hart we booted on.
+	la	t0, boot_hart	//defined in machdep.c, the hart we booted on.
 	sw	a0, 0(t0)	//all above logic runs on this a0 hart.
 #endif
 
@@ -257,19 +255,23 @@ va:					//XXX just a trampoline?
 
 	la	t0, pagetable_l1
 	sd	t0, KERN_L1PT(sp)
-	sd	s9, KERN_PHYS(sp)
+
+	li	t0, KERNBASE
+	sub	t0, s9, t0	//offset: PA - VA, used in pmap_*
+	sd	t0, KERN_DELTA(sp)
 
 	la	t0, initstack
 	sd	t0, KERN_STACK(sp)
 
-	li	t0, (VM_MAX_KERNEL_ADDRESS - 2 * L2_SIZE) // XXX Why?
+	li	t0, (VM_MAX_KERNEL_ADDRESS - 2 * L2_SIZE) // XXX Why 2?
 	sd	t0, DTBP_VIRT(sp)
 	sd	a1, DTBP_PHYS(sp)
 
-	mv	a0, sp				//stack setup, can call C now!
-	call	_C_LABEL(initriscv)	/* Off we go */	//XXX defined in machdep.c
-	call	_C_LABEL(main)			//defined in openbsd/kern/init_main.c
+	mv	a0, sp			//stack setup, can call C now!
+	call	_C_LABEL(initriscv)	// Off we go, defined in machdep.c
+	call	_C_LABEL(main)		//defined in openbsd/kern/init_main.c
 
+	.data//XXX otherwise would fall into text region
 	.align  4
 initstack:
 	.space  (PAGE_SIZE * KSTACK_PAGES)
@@ -284,6 +286,7 @@ sigfillsiz:
 	.data
 	.quad	esigfill - sigfill
 
+	.text//XXX right place to restart text
 ENTRY(sigcode)
        mv      a0, sp
        addi    a0, a0, SF_SC //actual saved context
@@ -319,6 +322,7 @@ _C_LABEL(esym): .quad	_C_LABEL(end)
 	.align	12
 pagetable_l1:
 	.space	PAGE_SIZE
+	.globl	pagetable_l2	// Used in pmap.c
 pagetable_l2:
 	.space	PAGE_SIZE
 pagetable_l2_devmap:
@@ -326,7 +330,7 @@ pagetable_l2_devmap:
 
 	.align 3
 virt_map:
-	.quad   virt_map	//64-bit comma separated words
+	.quad   virt_map	
 hart_lottery:
 	.space	4
 
@@ -396,7 +400,7 @@ mpva:
 .option pop
 
 	/* Setup supervisor trap vector */
-	la	t0, cpu_exception_handler	//XXX defined in freebsd/machine/excpetion.S
+	la	t0, cpu_exception_handler
 	csrw	stvec, t0
 
 	/* Ensure sscratch is zero */

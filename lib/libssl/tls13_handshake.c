@@ -1,4 +1,4 @@
-/*	$OpenBSD: tls13_handshake.c,v 1.49 2020/01/29 13:44:42 tb Exp $	*/
+/*	$OpenBSD: tls13_handshake.c,v 1.52 2020/03/10 17:15:02 jsing Exp $	*/
 /*
  * Copyright (c) 2018-2019 Theo Buehler <tb@openbsd.org>
  * Copyright (c) 2019 Joel Sing <jsing@openbsd.org>
@@ -88,12 +88,6 @@ struct tls13_handshake_action state_machine[] = {
 		.send = tls13_client_finished_send,
 		.sent = tls13_client_finished_sent,
 		.recv = tls13_client_finished_recv,
-	},
-	[CLIENT_KEY_UPDATE] = {
-		.handshake_type = TLS13_MT_KEY_UPDATE,
-		.sender = TLS13_HS_CLIENT,
-		.send = tls13_client_key_update_send,
-		.recv = tls13_client_key_update_recv,
 	},
 	[SERVER_HELLO] = {
 		.handshake_type = TLS13_MT_SERVER_HELLO,
@@ -285,6 +279,15 @@ tls13_handshake_advance_state_machine(struct tls13_ctx *ctx)
 }
 
 int
+tls13_handshake_msg_record(struct tls13_ctx *ctx)
+{
+	CBS cbs;
+
+	tls13_handshake_msg_data(ctx->hs_msg, &cbs);
+	return tls1_transcript_record(ctx->ssl, CBS_data(&cbs), CBS_len(&cbs));
+}
+
+int
 tls13_handshake_perform(struct tls13_ctx *ctx)
 {
 	struct tls13_handshake_action *action;
@@ -322,7 +325,6 @@ tls13_handshake_send_action(struct tls13_ctx *ctx,
 {
 	ssize_t ret;
 	CBB cbb;
-	CBS cbs;
 
 	/* If we have no handshake message, we need to build one. */
 	if (ctx->hs_msg == NULL) {
@@ -343,8 +345,7 @@ tls13_handshake_send_action(struct tls13_ctx *ctx,
 	if ((ret = tls13_handshake_msg_send(ctx->hs_msg, ctx->rl)) <= 0)
 		return ret;
 
-	tls13_handshake_msg_data(ctx->hs_msg, &cbs);
-	if (!tls1_transcript_record(ctx->ssl, CBS_data(&cbs), CBS_len(&cbs)))
+	if (!tls13_handshake_msg_record(ctx))
 		return TLS13_IO_FAILURE;
 
 	if (action->send_preserve_transcript_hash) {
@@ -355,7 +356,7 @@ tls13_handshake_send_action(struct tls13_ctx *ctx,
 	}
 
 	if (ctx->handshake_message_sent_cb != NULL)
-		ctx->handshake_message_sent_cb(ctx, &cbs);
+		ctx->handshake_message_sent_cb(ctx);
 
 	tls13_handshake_msg_free(ctx->hs_msg);
 	ctx->hs_msg = NULL;
@@ -389,12 +390,11 @@ tls13_handshake_recv_action(struct tls13_ctx *ctx,
 			return TLS13_IO_FAILURE;
 	}
 
-	tls13_handshake_msg_data(ctx->hs_msg, &cbs);
-	if (!tls1_transcript_record(ctx->ssl, CBS_data(&cbs), CBS_len(&cbs)))
+	if (!tls13_handshake_msg_record(ctx))
 		return TLS13_IO_FAILURE;
 
 	if (ctx->handshake_message_recv_cb != NULL)
-		ctx->handshake_message_recv_cb(ctx, &cbs);
+		ctx->handshake_message_recv_cb(ctx);
 
 	/*
 	 * In TLSv1.3 there is no way to know if you're going to receive a

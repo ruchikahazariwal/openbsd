@@ -1,4 +1,4 @@
-/* $OpenBSD: ssl_tlsext.c,v 1.59 2020/02/01 12:41:58 jsing Exp $ */
+/* $OpenBSD: ssl_tlsext.c,v 1.62 2020/02/18 16:12:14 tb Exp $ */
 /*
  * Copyright (c) 2016, 2017, 2019 Joel Sing <jsing@openbsd.org>
  * Copyright (c) 2017 Doug Hogan <doug@openbsd.org>
@@ -17,7 +17,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <openssl/curve25519.h>
 #include <openssl/ocsp.h>
 
 #include "ssl_locl.h"
@@ -1338,10 +1337,19 @@ tlsext_keyshare_client_parse(SSL *s, CBS *cbs, int *alert)
 	/* Unpack server share. */
 	if (!CBS_get_u16(cbs, &group))
 		goto err;
+
+	if (CBS_len(cbs) == 0) {
+		/* HRR does not include an actual key share. */
+		/* XXX - we should know that we are in a HRR... */
+		S3I(s)->hs_tls13.server_group = group;
+		return 1;
+	}
+
 	if (!CBS_get_u16_length_prefixed(cbs, &key_exchange))
 		return 0;
 
-	/* XXX - Handle other groups and verify that they're valid. */
+	if (S3I(s)->hs_tls13.key_share == NULL)
+		return 0;
 
 	if (!tls13_key_share_peer_public(S3I(s)->hs_tls13.key_share,
 	    group, &key_exchange))
