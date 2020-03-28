@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldomctl.h,v 1.9 2019/08/05 19:27:47 kettenis Exp $	*/
+/*	$OpenBSD: ldomctl.h,v 1.14 2020/02/21 19:39:28 kn Exp $	*/
 
 /*
  * Copyright (c) 2012 Mark Kettenis
@@ -15,6 +15,8 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+
+#define LDOMCTL_CU	"/usr/bin/cu"
 
 struct core;
 struct guest;
@@ -156,12 +158,14 @@ extern uint64_t hv_memsize;
 struct vdisk {
 	SIMPLEQ_ENTRY(vdisk)	entry;
 	const char		*path;
+	const char		*devalias;
 };
 
 struct vnet {
 	SIMPLEQ_ENTRY(vnet)	entry;
 	uint64_t		mac_addr;
 	uint64_t		mtu;
+	const char		*devalias;
 };
 
 struct var {
@@ -191,4 +195,5 @@ struct ldom_config {
 };
 
 int parse_config(const char *, struct ldom_config *);
-void build_config(const char *);
+void build_config(const char *, int);
+void list_components(void);

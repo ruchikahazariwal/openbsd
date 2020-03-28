@@ -1,4 +1,4 @@
-/* $OpenBSD: fuse_vnops.c,v 1.55 2019/08/05 08:35:59 anton Exp $ */
+/* $OpenBSD: fuse_vnops.c,v 1.58 2020/02/20 16:56:52 visa Exp $ */
 /*
  * Copyright (c) 2012-2013 Sylvestre Gallon <ccna.syl@gmail.com>
  *
@@ -74,7 +74,7 @@ int	filt_fusefswrite(struct knote *, long);
 int	filt_fusefsvnode(struct knote *, long);
 void	filt_fusefsdetach(struct knote *);
 
-struct vops fusefs_vops = {
+const struct vops fusefs_vops = {
 	.vop_lookup	= fusefs_lookup,
 	.vop_create	= fusefs_create,
 	.vop_mknod	= fusefs_mknod,
@@ -110,12 +110,26 @@ struct vops fusefs_vops = {
 	.vop_advlock	= fusefs_advlock,
 };
 
-struct filterops fusefsread_filtops =
-	{ 1, NULL, filt_fusefsdetach, filt_fusefsread };
-struct filterops fusefswrite_filtops =
-	{ 1, NULL, filt_fusefsdetach, filt_fusefswrite };
-struct filterops fusefsvnode_filtops =
-	{ 1, NULL, filt_fusefsdetach, filt_fusefsvnode };
+const struct filterops fusefsread_filtops = {
+	.f_flags	= FILTEROP_ISFD,
+	.f_attach	= NULL,
+	.f_detach	= filt_fusefsdetach,
+	.f_event	= filt_fusefsread,
+};
+
+const struct filterops fusefswrite_filtops = {
+	.f_flags	= FILTEROP_ISFD,
+	.f_attach	= NULL,
+	.f_detach	= filt_fusefsdetach,
+	.f_event	= filt_fusefswrite,
+};
+
+const struct filterops fusefsvnode_filtops = {
+	.f_flags	= FILTEROP_ISFD,
+	.f_attach	= NULL,
+	.f_detach	= filt_fusefsdetach,
+	.f_event	= filt_fusefsvnode,
+};
 
 int
 fusefs_kqfilter(void *v)

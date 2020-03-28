@@ -75,13 +75,58 @@
 #define	IST_EDGE_RISING		5
 #define	IST_EDGE_BOTH		6
 
+/* RISCV interrupt mcause, from freebsd */
+#define	RISCV_NIRQ		1024
+
+#ifndef	NIRQ
+#define	NIRQ			RISCV_NIRQ
+#endif
+
+enum {
+	IRQ_SOFTWARE_USER,
+	IRQ_SOFTWARE_SUPERVISOR,
+	IRQ_SOFTWARE_HYPERVISOR,
+	IRQ_SOFTWARE_MACHINE,
+	IRQ_TIMER_USER,
+	IRQ_TIMER_SUPERVISOR,
+	IRQ_TIMER_HYPERVISOR,
+	IRQ_TIMER_MACHINE,
+	IRQ_EXTERNAL_USER,
+	IRQ_EXTERNAL_SUPERVISOR,
+	IRQ_EXTERNAL_HYPERVISOR,
+	IRQ_EXTERNAL_MACHINE,
+	INTC_NIRQS
+};
+
 #ifndef _LOCORE
 #include <sys/device.h>
 #include <sys/queue.h>
 
+#include <machine/frame.h>
+
 int	 splraise(int);
 int	 spllower(int);
 void	 splx(int);
+
+void	 riscv_cpu_intr(void *);
+void	 riscv_do_pending_intr(int);
+void	 riscv_set_intr_handler(int (*raise)(int), int (*lower)(int),
+    void (*x)(int), void (*setipl)(int),
+    void (*intr_handle)(void *));
+
+struct riscv_intr_func {
+	int (*raise)(int);
+	int (*lower)(int);
+	void (*x)(int);
+	void (*setipl)(int);
+};
+
+extern struct riscv_intr_func riscv_intr_func;
+
+#define	splraise(cpl)		(riscv_intr_func.raise(cpl))
+#define	_splraise(cpl)		(riscv_intr_func.raise(cpl))
+#define	spllower(cpl)		(riscv_intr_func.lower(cpl))
+#define	splx(cpl)		(riscv_intr_func.x(cpl))
 
 #define	splsoft()	splraise(IPL_SOFT)
 #define	splsoftclock()	splraise(IPL_SOFTCLOCK)
@@ -99,11 +144,86 @@ void	 splx(int);
 
 #define	spl0()		spllower(IPL_NONE)
 
+#include <machine/riscvreg.h>
+
 void	 intr_barrier(void *);
+
+static inline void
+enable_interrupts(void)
+{
+	__asm volatile(
+		"csrsi sstatus, %0"
+		:: "i" (SSTATUS_SIE)
+	);
+}
+
+static inline uint64_t
+disable_interrupts(void)
+{
+	uint64_t ret;
+
+	__asm volatile(
+		"csrrci %0, sstatus, %1"
+		: "=&r" (ret) : "i" (SSTATUS_SIE)
+	);
+
+	return (ret & (SSTATUS_SIE));
+}
+
+static inline void
+restore_interrupts(uint64_t s)
+{
+	__asm volatile(
+		"csrs sstatus, %0"
+		:: "r" (s)
+	);
+}
+
+void	 riscv_init_smask(void); /* XXX */
+extern uint32_t riscv_smask[NIPL];
 
 #include <machine/softintr.h>
 
+void 	riscv_clock_register(void (*)(void), void (*)(u_int), void (*)(int),
+    void (*)(void));
+
+/*
+ **** interrupt controller structure and routines ****
+ */
 struct cpu_info;
+struct interrupt_controller {
+	int	ic_node;
+	void	*ic_cookie;
+	void	*(*ic_establish)(void *, int *, int, int (*)(void *),
+		    void *, char *);
+	void	 (*ic_disestablish)(void *);
+	void	 (*ic_enable)(void *);
+	void	 (*ic_disable)(void *);
+	void	 (*ic_route)(void *, int, struct cpu_info *);
+	void	 (*ic_cpu_enable)(void);
+
+	LIST_ENTRY(interrupt_controller) ic_list;
+	uint32_t ic_phandle;
+	uint32_t ic_cells;
+};
+
+void	 riscv_intr_init_fdt(void);
+void	 riscv_intr_register_fdt(struct interrupt_controller *);
+void	*riscv_intr_establish_fdt(int, int, int (*)(void *),
+	    void *, char *);
+void	*riscv_intr_establish_fdt_idx(int, int, int, int (*)(void *),
+	    void *, char *);
+void	 riscv_intr_disestablish_fdt(void *);
+void	 riscv_intr_enable(void *);
+void	 riscv_intr_disable(void *);
+void	 riscv_intr_route(void *, int, struct cpu_info *);
+void	 riscv_intr_cpu_enable(void);
+
+void	 riscv_send_ipi(struct cpu_info *, int);
+extern void (*intr_send_ipi_func)(struct cpu_info *, int);
+
+#define riscv_IPI_NOP	0
+#define riscv_IPI_DDB	1
 
 #ifdef DIAGNOSTIC
 /*
@@ -112,10 +232,10 @@ struct cpu_info;
  */
 void splassert_fail(int, int, const char *);
 extern int splassert_ctl;
-void arm_splassert_check(int, const char *);
+void riscv_splassert_check(int, const char *);
 #define splassert(__wantipl) do {				\
 	if (splassert_ctl > 0) {				\
-		arm_splassert_check(__wantipl, __func__);	\
+		riscv_splassert_check(__wantipl, __func__);	\
 	}							\
 } while (0)
 #define	splsoftassert(wantipl)	splassert(wantipl)

@@ -26,6 +26,7 @@
 ./usr/share/man/man1/basename.1
 ./usr/share/man/man1/bc.1
 ./usr/share/man/man1/biff.1
+./usr/share/man/man1/build-debug-info.1
 ./usr/share/man/man1/cal.1
 ./usr/share/man/man1/calendar.1
 ./usr/share/man/man1/cap_mkdb.1
@@ -242,6 +243,7 @@
 ./usr/share/man/man1/perl5280delta.1
 ./usr/share/man/man1/perl5281delta.1
 ./usr/share/man/man1/perl5282delta.1
+./usr/share/man/man1/perl5300delta.1
 ./usr/share/man/man1/perl561delta.1
 ./usr/share/man/man1/perl56delta.1
 ./usr/share/man/man1/perl581delta.1
@@ -432,6 +434,7 @@
 ./usr/share/man/man1/skeyinit.1
 ./usr/share/man/man1/sleep.1
 ./usr/share/man/man1/smtp.1
+./usr/share/man/man1/sndioctl.1
 ./usr/share/man/man1/snmp.1
 ./usr/share/man/man1/sort.1
 ./usr/share/man/man1/sparc64/fdformat.1
@@ -524,7 +527,6 @@
 ./usr/share/man/man3p/AutoSplit.3p
 ./usr/share/man/man3p/B.3p
 ./usr/share/man/man3p/B::Concise.3p
-./usr/share/man/man3p/B::Debug.3p
 ./usr/share/man/man3p/B::Deparse.3p
 ./usr/share/man/man3p/B::Op_private.3p
 ./usr/share/man/man3p/B::Showlex.3p
@@ -747,32 +749,17 @@
 ./usr/share/man/man3p/JSON::PP::Boolean.3p
 ./usr/share/man/man3p/List::Util.3p
 ./usr/share/man/man3p/List::Util::XS.3p
-./usr/share/man/man3p/Locale::Codes.3p
-./usr/share/man/man3p/Locale::Codes::Changes.3p
-./usr/share/man/man3p/Locale::Codes::Country.3p
-./usr/share/man/man3p/Locale::Codes::Currency.3p
-./usr/share/man/man3p/Locale::Codes::LangExt.3p
-./usr/share/man/man3p/Locale::Codes::LangFam.3p
-./usr/share/man/man3p/Locale::Codes::LangVar.3p
-./usr/share/man/man3p/Locale::Codes::Language.3p
-./usr/share/man/man3p/Locale::Codes::Script.3p
-./usr/share/man/man3p/Locale::Codes::Types.3p
-./usr/share/man/man3p/Locale::Country.3p
-./usr/share/man/man3p/Locale::Currency.3p
-./usr/share/man/man3p/Locale::Language.3p
 ./usr/share/man/man3p/Locale::Maketext.3p
 ./usr/share/man/man3p/Locale::Maketext::Cookbook.3p
 ./usr/share/man/man3p/Locale::Maketext::Guts.3p
 ./usr/share/man/man3p/Locale::Maketext::GutsLoader.3p
 ./usr/share/man/man3p/Locale::Maketext::Simple.3p
 ./usr/share/man/man3p/Locale::Maketext::TPJ13.3p
-./usr/share/man/man3p/Locale::Script.3p
 ./usr/share/man/man3p/MIME::Base64.3p
 ./usr/share/man/man3p/MIME::QuotedPrint.3p
 ./usr/share/man/man3p/Math::BigFloat.3p
 ./usr/share/man/man3p/Math::BigInt.3p
 ./usr/share/man/man3p/Math::BigInt::Calc.3p
-./usr/share/man/man3p/Math::BigInt::CalcEmu.3p
 ./usr/share/man/man3p/Math::BigInt::FastCalc.3p
 ./usr/share/man/man3p/Math::BigInt::Lib.3p
 ./usr/share/man/man3p/Math::BigRat.3p
@@ -830,6 +817,7 @@
 ./usr/share/man/man3p/OpenBSD::Ustar.3p
 ./usr/share/man/man3p/OpenBSD::Vstat.3p
 ./usr/share/man/man3p/OpenBSD::md5.3p
+./usr/share/man/man3p/OpenBSD::style.3p
 ./usr/share/man/man3p/POSIX.3p
 ./usr/share/man/man3p/Params::Check.3p
 ./usr/share/man/man3p/Parse::CPAN::Meta.3p
@@ -982,7 +970,9 @@
 ./usr/share/man/man3p/Test2::EventFacet::Assert.3p
 ./usr/share/man/man3p/Test2::EventFacet::Control.3p
 ./usr/share/man/man3p/Test2::EventFacet::Error.3p
+./usr/share/man/man3p/Test2::EventFacet::Hub.3p
 ./usr/share/man/man3p/Test2::EventFacet::Info.3p
+./usr/share/man/man3p/Test2::EventFacet::Info::Table.3p
 ./usr/share/man/man3p/Test2::EventFacet::Meta.3p
 ./usr/share/man/man3p/Test2::EventFacet::Parent.3p
 ./usr/share/man/man3p/Test2::EventFacet::Plan.3p
@@ -1061,7 +1051,6 @@
 ./usr/share/man/man3p/XS::APItest.3p
 ./usr/share/man/man3p/XS::Typemap.3p
 ./usr/share/man/man3p/XSLoader.3p
-./usr/share/man/man3p/arybase.3p
 ./usr/share/man/man3p/attributes.3p
 ./usr/share/man/man3p/autodie.3p
 ./usr/share/man/man3p/autodie::Scope::Guard.3p
@@ -1207,6 +1196,7 @@
 ./usr/share/man/man4/amd64/skgpio.4
 ./usr/share/man/man4/amd64/tcpcib.4
 ./usr/share/man/man4/amd64/vmm.4
+./usr/share/man/man4/amdgpio.4
 ./usr/share/man/man4/amdiic.4
 ./usr/share/man/man4/amdpm.4
 ./usr/share/man/man4/ami.4
@@ -1219,6 +1209,8 @@
 ./usr/share/man/man4/amlpwm.4
 ./usr/share/man/man4/amlreset.4
 ./usr/share/man/man4/amlrng.4
+./usr/share/man/man4/amlsm.4
+./usr/share/man/man4/amltemp.4
 ./usr/share/man/man4/amluart.4
 ./usr/share/man/man4/amlusbphy.4
 ./usr/share/man/man4/amphy.4
@@ -1256,7 +1248,6 @@
 ./usr/share/man/man4/armv7/omwugen.4
 ./usr/share/man/man4/armv7/prcm.4
 ./usr/share/man/man4/armv7/sitaracm.4
-./usr/share/man/man4/armv7/sxidog.4
 ./usr/share/man/man4/armv7/sxie.4
 ./usr/share/man/man4/armv7/sxiintc.4
 ./usr/share/man/man4/armv7/sxitimer.4
@@ -1332,8 +1323,8 @@
 ./usr/share/man/man4/de.4
 ./usr/share/man/man4/diskmap.4
 ./usr/share/man/man4/divert.4
-./usr/share/man/man4/dpt.4
 ./usr/share/man/man4/drm.4
+./usr/share/man/man4/dt.4
 ./usr/share/man/man4/dwctwo.4
 ./usr/share/man/man4/dwdog.4
 ./usr/share/man/man4/dwge.4
@@ -1371,6 +1362,7 @@
 ./usr/share/man/man4/fd.4
 ./usr/share/man/man4/fdc.4
 ./usr/share/man/man4/fec.4
+./usr/share/man/man4/fido.4
 ./usr/share/man/man4/fins.4
 ./usr/share/man/man4/fintek.4
 ./usr/share/man/man4/fms.4
@@ -1388,7 +1380,6 @@
 ./usr/share/man/man4/gpiodcf.4
 ./usr/share/man/man4/gpioiic.4
 ./usr/share/man/man4/gpioow.4
-./usr/share/man/man4/gpr.4
 ./usr/share/man/man4/gre.4
 ./usr/share/man/man4/gscsio.4
 ./usr/share/man/man4/hds.4
@@ -1460,7 +1451,6 @@
 ./usr/share/man/man4/i386/pas.4
 ./usr/share/man/man4/i386/pcibios.4
 ./usr/share/man/man4/i386/pctr.4
-./usr/share/man/man4/i386/piixpcib.4
 ./usr/share/man/man4/i386/sb.4
 ./usr/share/man/man4/i386/skgpio.4
 ./usr/share/man/man4/i386/tcpcib.4
@@ -1512,6 +1502,7 @@
 ./usr/share/man/man4/iwi.4
 ./usr/share/man/man4/iwm.4
 ./usr/share/man/man4/iwn.4
+./usr/share/man/man4/iwx.4
 ./usr/share/man/man4/ix.4
 ./usr/share/man/man4/ixgb.4
 ./usr/share/man/man4/ixl.4
@@ -1579,7 +1570,6 @@
 ./usr/share/man/man4/macppc/bm.4
 ./usr/share/man/man4/macppc/daca.4
 ./usr/share/man/man4/macppc/dfs.4
-./usr/share/man/man4/macppc/esp.4
 ./usr/share/man/man4/macppc/fcu.4
 ./usr/share/man/man4/macppc/hpb.4
 ./usr/share/man/man4/macppc/ht.4
@@ -1592,7 +1582,6 @@
 ./usr/share/man/man4/macppc/mediabay.4
 ./usr/share/man/man4/macppc/mem.4
 ./usr/share/man/man4/macppc/memc.4
-./usr/share/man/man4/macppc/mesh.4
 ./usr/share/man/man4/macppc/mpcpcibr.4
 ./usr/share/man/man4/macppc/onyx.4
 ./usr/share/man/man4/macppc/openpic.4
@@ -1618,7 +1607,6 @@
 ./usr/share/man/man4/midi.4
 ./usr/share/man/man4/mii.4
 ./usr/share/man/man4/mlphy.4
-./usr/share/man/man4/mobileip.4
 ./usr/share/man/man4/mos.4
 ./usr/share/man/man4/moscom.4
 ./usr/share/man/man4/mpath.4
@@ -1684,6 +1672,8 @@
 ./usr/share/man/man4/octeon/octsmi.4
 ./usr/share/man/man4/octeon/octuctl.4
 ./usr/share/man/man4/octeon/octxctl.4
+./usr/share/man/man4/octeon/ogx.4
+./usr/share/man/man4/octeon/ogxnexus.4
 ./usr/share/man/man4/ohci.4
 ./usr/share/man/man4/onewire.4
 ./usr/share/man/man4/oosiop.4
@@ -1736,6 +1726,8 @@
 ./usr/share/man/man4/pvbus.4
 ./usr/share/man/man4/pvclock.4
 ./usr/share/man/man4/pwdog.4
+./usr/share/man/man4/pwmbl.4
+./usr/share/man/man4/pwmfan.4
 ./usr/share/man/man4/pwmreg.4
 ./usr/share/man/man4/qla.4
 ./usr/share/man/man4/qle.4
@@ -1749,22 +1741,28 @@
 ./usr/share/man/man4/rdcphy.4
 ./usr/share/man/man4/rdomain.4
 ./usr/share/man/man4/re.4
+./usr/share/man/man4/rge.4
 ./usr/share/man/man4/rgephy.4
 ./usr/share/man/man4/ricohrtc.4
+./usr/share/man/man4/rkanxdp.4
 ./usr/share/man/man4/rkclock.4
+./usr/share/man/man4/rkdrm.4
+./usr/share/man/man4/rkdwhdmi.4
 ./usr/share/man/man4/rkdwusb.4
+./usr/share/man/man4/rkemmcphy.4
 ./usr/share/man/man4/rkgpio.4
 ./usr/share/man/man4/rkgrf.4
 ./usr/share/man/man4/rkiic.4
 ./usr/share/man/man4/rkpcie.4
 ./usr/share/man/man4/rkpinctrl.4
 ./usr/share/man/man4/rkpmic.4
+./usr/share/man/man4/rkpwm.4
 ./usr/share/man/man4/rktemp.4
+./usr/share/man/man4/rkvop.4
 ./usr/share/man/man4/rl.4
 ./usr/share/man/man4/rlphy.4
 ./usr/share/man/man4/route.4
 ./usr/share/man/man4/rsu.4
-./usr/share/man/man4/rtfps.4
 ./usr/share/man/man4/rtsx.4
 ./usr/share/man/man4/rtw.4
 ./usr/share/man/man4/rtwn.4
@@ -1817,7 +1815,6 @@
 ./usr/share/man/man4/siop.4
 ./usr/share/man/man4/sis.4
 ./usr/share/man/man4/sk.4
-./usr/share/man/man4/sli.4
 ./usr/share/man/man4/sm.4
 ./usr/share/man/man4/smsc.4
 ./usr/share/man/man4/softraid.4
@@ -1910,10 +1907,13 @@
 ./usr/share/man/man4/sv.4
 ./usr/share/man/man4/switch.4
 ./usr/share/man/man4/sxiccmu.4
+./usr/share/man/man4/sxidog.4
 ./usr/share/man/man4/sximmc.4
 ./usr/share/man/man4/sxipio.4
+./usr/share/man/man4/sxipwm.4
 ./usr/share/man/man4/sxirsb.4
 ./usr/share/man/man4/sxirtc.4
+./usr/share/man/man4/sxisid.4
 ./usr/share/man/man4/sxisyscon.4
 ./usr/share/man/man4/sxitemp.4
 ./usr/share/man/man4/sxitwi.4
@@ -2466,7 +2466,6 @@
 ./usr/share/man/man8/rdate.8
 ./usr/share/man/man8/rdsetroot.8
 ./usr/share/man/man8/reboot.8
-./usr/share/man/man8/rebound.8
 ./usr/share/man/man8/relayctl.8
 ./usr/share/man/man8/relayd.8
 ./usr/share/man/man8/release.8
@@ -2488,6 +2487,7 @@
 ./usr/share/man/man8/rpc.rwalld.8
 ./usr/share/man/man8/rpc.statd.8
 ./usr/share/man/man8/rpcinfo.8
+./usr/share/man/man8/rpki-client.8
 ./usr/share/man/man8/sa.8
 ./usr/share/man/man8/sasyncd.8
 ./usr/share/man/man8/savecore.8
@@ -2522,6 +2522,7 @@
 ./usr/share/man/man8/sparc64/ldomd.8
 ./usr/share/man/man8/ssh-keysign.8
 ./usr/share/man/man8/ssh-pkcs11-helper.8
+./usr/share/man/man8/ssh-sk-helper.8
 ./usr/share/man/man8/sshd.8
 ./usr/share/man/man8/ssl.8
 ./usr/share/man/man8/starttls.8

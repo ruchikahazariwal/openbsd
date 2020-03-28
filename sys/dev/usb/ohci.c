@@ -1,4 +1,4 @@
-/*	$OpenBSD: ohci.c,v 1.156 2019/03/11 17:50:08 mpi Exp $ */
+/*	$OpenBSD: ohci.c,v 1.158 2020/02/22 14:01:34 jasper Exp $ */
 /*	$NetBSD: ohci.c,v 1.139 2003/02/22 05:24:16 tsutsui Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ohci.c,v 1.22 1999/11/17 22:33:40 n_hibma Exp $	*/
 
@@ -1866,7 +1866,7 @@ ohci_open(struct usbd_pipe *pipe)
 	struct ohci_softc *sc = (struct ohci_softc *)pipe->device->bus;
 	usb_endpoint_descriptor_t *ed = pipe->endpoint->edesc;
 	struct ohci_pipe *opipe = (struct ohci_pipe *)pipe;
-	u_int8_t xfertype = ed->bmAttributes & UE_XFERTYPE;
+	u_int8_t xfertype = UE_GET_XFERTYPE(ed->bmAttributes);
 	struct ohci_soft_ed *sed = NULL;
 	struct ohci_soft_td *std = NULL;
 	struct ohci_soft_itd *sitd;
@@ -2105,7 +2105,7 @@ ohci_abort_xfer(struct usbd_xfer *xfer, usbd_status status)
 	s = splusb();
 	sc->sc_softwake = 1;
 	usb_schedsoftintr(&sc->sc_bus);
-	tsleep(&sc->sc_softwake, PZERO, "ohciab", 0);
+	tsleep_nsec(&sc->sc_softwake, PZERO, "ohciab", INFSLP);
 	splx(s);
 
 	/*

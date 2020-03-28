@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmm.c,v 1.254 2019/09/22 08:47:54 mlarkin Exp $	*/
+/*	$OpenBSD: vmm.c,v 1.267 2020/03/12 22:14:20 tobhe Exp $	*/
 /*
  * Copyright (c) 2014 Mike Larkin <mlarkin@openbsd.org>
  *
@@ -28,7 +28,6 @@
 #include <sys/rwlock.h>
 #include <sys/pledge.h>
 #include <sys/memrange.h>
-#include <sys/timetc.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -66,6 +65,7 @@ void *l1tf_flush_region;
     (VMX_EXIT_INFO_HAVE_RIP | VMX_EXIT_INFO_HAVE_REASON)
 
 struct vm {
+	struct vmspace		 *vm_vmspace;
 	vm_map_t		 vm_map;
 	uint32_t		 vm_id;
 	pid_t			 vm_creator_pid;
@@ -125,6 +125,7 @@ int vm_resetcpu(struct vm_resetcpu_params *);
 int vm_intr_pending(struct vm_intr_params *);
 int vm_rwregs(struct vm_rwregs_params *, int);
 int vm_rwvmparams(struct vm_rwvmparams_params *, int);
+int vm_get_balloon_info(struct vm_inswap_balloon *);
 int vm_find(uint32_t, struct vm **);
 int vcpu_readregs_vmx(struct vcpu *, uint64_t, struct vcpu_reg_state *);
 int vcpu_readregs_svm(struct vcpu *, uint64_t, struct vcpu_reg_state *);
@@ -177,7 +178,6 @@ void vmx_handle_intr(struct vcpu *);
 void vmx_handle_intwin(struct vcpu *);
 void vmx_handle_misc_enable_msr(struct vcpu *);
 int vmm_get_guest_memtype(struct vm *, paddr_t);
-int vmm_get_guest_faulttype(void);
 int vmx_get_guest_faulttype(void);
 int svm_get_guest_faulttype(struct vmcb *);
 int vmx_get_exit_qualification(uint64_t *);
@@ -202,6 +202,7 @@ void vmx_setmsrbrw(struct vcpu *, uint32_t);
 void svm_set_clean(struct vcpu *, uint32_t);
 void svm_set_dirty(struct vcpu *, uint32_t);
 
+int vmm_gpa_is_valid(struct vcpu *vcpu, paddr_t gpa, size_t obj_size);
 void vmm_init_pvclock(struct vcpu *, paddr_t);
 int vmm_update_pvclock(struct vcpu *);
 
@@ -500,6 +501,9 @@ vmmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	case VMM_IOC_WRITEVMPARAMS:
 		ret = vm_rwvmparams((struct vm_rwvmparams_params *)data, 1);
 		break;
+	case VMM_IOC_BALLOON:
+		ret = vm_get_balloon_info((struct vm_inswap_balloon *)data);
+		break;
 
 	default:
 		DPRINTF("%s: unknown ioctl code 0x%lx\n", __func__, cmd);
@@ -509,6 +513,13 @@ vmmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	return (ret);
 }
 
+int
+vm_get_balloon_info(struct vm_inswap_balloon *vib)
+{
+	vib->vib_host_is_swapping = uvmexp.inswap;
+
+	return vib->vib_host_is_swapping;
+}
 /*
  * pledge_ioctl_vmm
  *
@@ -534,6 +545,7 @@ pledge_ioctl_vmm(struct proc *p, long com)
 	case VMM_IOC_WRITEREGS:
 	case VMM_IOC_READVMPARAMS:
 	case VMM_IOC_WRITEVMPARAMS:
+	case VMM_IOC_BALLOON:
 		return (0);
 	}
 
@@ -1167,7 +1179,7 @@ vm_create(struct vm_create_params *vcp, struct proc *p)
 	memcpy(vm->vm_memranges, vcp->vcp_memranges,
 	    vm->vm_nmemranges * sizeof(vm->vm_memranges[0]));
 	vm->vm_memory_size = memsize;
-	strncpy(vm->vm_name, vcp->vcp_name, VMM_MAX_NAME_LEN);
+	strlcpy(vm->vm_name, vcp->vcp_name, VMM_MAX_NAME_LEN);
 
 	rw_enter_write(&vmm_softc->vm_lock);
 
@@ -1232,36 +1244,22 @@ vm_impl_init_vmx(struct vm *vm, struct proc *p)
 {
 	int i, ret;
 	vaddr_t mingpa, maxgpa;
-	struct pmap *pmap;
 	struct vm_mem_range *vmr;
 
 	/* If not EPT, nothing to do here */
 	if (vmm_softc->mode != VMM_MODE_EPT)
 		return (0);
 
-	/* Create a new pmap for this VM */
-	pmap = pmap_create();
-	if (!pmap) {
-		printf("%s: pmap_create failed\n", __func__);
-		return (ENOMEM);
-	}
-
-	/*
-	 * Create a new UVM map for this VM, and assign it the pmap just
-	 * created.
-	 */
 	vmr = &vm->vm_memranges[0];
 	mingpa = vmr->vmr_gpa;
 	vmr = &vm->vm_memranges[vm->vm_nmemranges - 1];
 	maxgpa = vmr->vmr_gpa + vmr->vmr_size;
-	vm->vm_map = uvm_map_create(pmap, mingpa, maxgpa,
-	    VM_MAP_ISVMSPACE | VM_MAP_PAGEABLE);
 
-	if (!vm->vm_map) {
-		printf("%s: uvm_map_create failed\n", __func__);
-		pmap_destroy(pmap);
-		return (ENOMEM);
-	}
+	/*
+	 * uvmspace_alloc (currently) always returns a valid vmspace
+	 */
+	vm->vm_vmspace = uvmspace_alloc(mingpa, maxgpa, TRUE, FALSE);
+	vm->vm_map = &vm->vm_vmspace->vm_map;
 
 	/* Map the new map with an anon */
 	DPRINTF("%s: created vm_map @ %p\n", __func__, vm->vm_map);
@@ -1272,19 +1270,19 @@ vm_impl_init_vmx(struct vm *vm, struct proc *p)
 		    &p->p_vmspace->vm_map, vmr->vmr_va, vmr->vmr_size);
 		if (ret) {
 			printf("%s: uvm_share failed (%d)\n", __func__, ret);
-			/* uvm_map_deallocate calls pmap_destroy for us */
-			uvm_map_deallocate(vm->vm_map);
-			vm->vm_map = NULL;
+			/* uvmspace_free calls pmap_destroy for us */
+			uvmspace_free(vm->vm_vmspace);
+			vm->vm_vmspace = NULL;
 			return (ENOMEM);
 		}
 	}
 
-	ret = pmap_convert(pmap, PMAP_TYPE_EPT);
+	ret = pmap_convert(vm->vm_map->pmap, PMAP_TYPE_EPT);
 	if (ret) {
 		printf("%s: pmap_convert failed\n", __func__);
-		/* uvm_map_deallocate calls pmap_destroy for us */
-		uvm_map_deallocate(vm->vm_map);
-		vm->vm_map = NULL;
+		/* uvmspace_free calls pmap_destroy for us */
+		uvmspace_free(vm->vm_vmspace);
+		vm->vm_vmspace = NULL;
 		return (ENOMEM);
 	}
 
@@ -1309,38 +1307,22 @@ vm_impl_init_svm(struct vm *vm, struct proc *p)
 {
 	int i, ret;
 	vaddr_t mingpa, maxgpa;
-	struct pmap *pmap;
 	struct vm_mem_range *vmr;
 
 	/* If not RVI, nothing to do here */
 	if (vmm_softc->mode != VMM_MODE_RVI)
 		return (0);
 
-	/* Create a new pmap for this VM */
-	pmap = pmap_create();
-	if (!pmap) {
-		printf("%s: pmap_create failed\n", __func__);
-		return (ENOMEM);
-	}
-
-	DPRINTF("%s: RVI pmap allocated @ %p\n", __func__, pmap);
-
-	/*
-	 * Create a new UVM map for this VM, and assign it the pmap just
-	 * created.
-	 */
 	vmr = &vm->vm_memranges[0];
 	mingpa = vmr->vmr_gpa;
 	vmr = &vm->vm_memranges[vm->vm_nmemranges - 1];
 	maxgpa = vmr->vmr_gpa + vmr->vmr_size;
-	vm->vm_map = uvm_map_create(pmap, mingpa, maxgpa,
-	    VM_MAP_ISVMSPACE | VM_MAP_PAGEABLE);
 
-	if (!vm->vm_map) {
-		printf("%s: uvm_map_create failed\n", __func__);
-		pmap_destroy(pmap);
-		return (ENOMEM);
-	}
+	/*
+	 * uvmspace_alloc (currently) always returns a valid vmspace
+	 */
+	vm->vm_vmspace = uvmspace_alloc(mingpa, maxgpa, TRUE, FALSE);
+	vm->vm_map = &vm->vm_vmspace->vm_map;
 
 	/* Map the new map with an anon */
 	DPRINTF("%s: created vm_map @ %p\n", __func__, vm->vm_map);
@@ -1351,15 +1333,15 @@ vm_impl_init_svm(struct vm *vm, struct proc *p)
 		    &p->p_vmspace->vm_map, vmr->vmr_va, vmr->vmr_size);
 		if (ret) {
 			printf("%s: uvm_share failed (%d)\n", __func__, ret);
-			/* uvm_map_deallocate calls pmap_destroy for us */
-			uvm_map_deallocate(vm->vm_map);
-			vm->vm_map = NULL;
+			/* uvmspace_free calls pmap_destroy for us */
+			uvmspace_free(vm->vm_vmspace);
+			vm->vm_vmspace = NULL;
 			return (ENOMEM);
 		}
 	}
 
 	/* Convert pmap to RVI */
-	ret = pmap_convert(pmap, PMAP_TYPE_RVI);
+	ret = pmap_convert(vm->vm_map->pmap, PMAP_TYPE_RVI);
 
 	return (ret);
 }
@@ -2091,6 +2073,9 @@ vcpu_reset_regs_svm(struct vcpu *vcpu, struct vcpu_reg_state *vrs)
 
 	/* EFER is R/O so we can ensure the guest always has SVME */
 	svm_setmsrbr(vcpu, MSR_EFER);
+
+	/* allow reading TSC */
+	svm_setmsrbr(vcpu, MSR_TSC);
 
 	/* Guest VCPU ASID */
 	if (vmm_alloc_vpid(&asid)) {
@@ -2926,6 +2911,7 @@ vcpu_reset_regs_vmx(struct vcpu *vcpu, struct vcpu_reg_state *vrs)
 	/* xcr0 power on default sets bit 0 (x87 state) */
 	vcpu->vc_gueststate.vg_xcr0 = XCR0_X87 & xsave_mask;
 
+exit:
 	/* Flush the VMCS */
 	if (vmclear(&vcpu->vc_control_pa)) {
 		DPRINTF("%s: vmclear failed\n", __func__);
@@ -2933,7 +2919,6 @@ vcpu_reset_regs_vmx(struct vcpu *vcpu, struct vcpu_reg_state *vrs)
 		goto exit;
 	}
 
-exit:
 	return (ret);
 }
 
@@ -3431,9 +3416,9 @@ vm_teardown(struct vm *vm)
 	vm_impl_deinit(vm);
 
 	/* teardown guest vmspace */
-	if (vm->vm_map != NULL) {
-		uvm_map_deallocate(vm->vm_map);
-		vm->vm_map = NULL;
+	if (vm->vm_vmspace != NULL) {
+		uvmspace_free(vm->vm_vmspace);
+		vm->vm_vmspace = NULL;
 	}
 
 	if (vm->vm_id > 0) {
@@ -3696,7 +3681,6 @@ vcpu_vmx_compute_ctrl(uint64_t ctrlval, uint16_t ctrl, uint32_t want1,
 /*
  * vm_get_info
  *
- * Returns information about the VM indicated by 'vip'.
  * Returns information about the VM indicated by 'vip'. The 'vip_size' field
  * in the 'vip' parameter is used to indicate the size of the caller's buffer.
  * If insufficient space exists in that buffer, the required size needed is
@@ -3747,6 +3731,7 @@ vm_get_info(struct vm_info_params *vip)
 		out[i].vir_id = vm->vm_id;
 		out[i].vir_creator_pid = vm->vm_creator_pid;
 		strncpy(out[i].vir_name, vm->vm_name, VMM_MAX_NAME_LEN);
+		out[i].vir_swpginuse = uvmexp.swpginuse;
 		rw_enter_read(&vm->vm_vcpu_lock);
 		for (j = 0; j < vm->vm_vcpu_ct; j++) {
 			out[i].vir_vcpu_state[j] = VCPU_STATE_UNKNOWN;
@@ -3972,7 +3957,7 @@ vcpu_must_stop(struct vcpu *vcpu)
 
 	if (vcpu->vc_state == VCPU_STATE_REQTERM)
 		return (1);
-	if (CURSIG(p) != 0)
+	if (SIGPENDING(p) != 0)
 		return (1);
 	return (0);
 }
@@ -4254,6 +4239,12 @@ vcpu_run_vmx(struct vcpu *vcpu, struct vm_run_params *vrp)
 			DPRINTF("%s: vm %d vcpu %d triple fault\n",
 			    __func__, vcpu->vc_parent->vm_id,
 			    vcpu->vc_id);
+			/*
+			 * Ensure we have the proper VMCS loaded before
+			 * dumping register and VMCS state
+			 */
+			if (vcpu_reload_vmcs_vmx(&vcpu->vc_control_pa))
+				break;
 			vmx_vcpu_dump_regs(vcpu);
 			dump_vcpu(vcpu);
 			vmx_dump_vmcs(vcpu);
@@ -4263,6 +4254,12 @@ vcpu_run_vmx(struct vcpu *vcpu, struct vm_run_params *vrp)
 			    "due to invalid guest state\n",
 			    __func__, vcpu->vc_parent->vm_id,
 			    vcpu->vc_id);
+			/*
+			 * Ensure we have the proper VMCS loaded before
+			 * dumping register and VMCS state
+			 */
+			if (vcpu_reload_vmcs_vmx(&vcpu->vc_control_pa))
+				break;
 			vmx_vcpu_dump_regs(vcpu);
 			dump_vcpu(vcpu);
 			return EINVAL;
@@ -4272,6 +4269,12 @@ vcpu_run_vmx(struct vcpu *vcpu, struct vm_run_params *vrp)
 			    vcpu->vc_gueststate.vg_exit_reason,
 			    vmx_exit_reason_decode(
 				vcpu->vc_gueststate.vg_exit_reason));
+			/*
+			 * Ensure we have the proper VMCS loaded before
+			 * dumping register and VMCS state
+			 */
+			if (vcpu_reload_vmcs_vmx(&vcpu->vc_control_pa))
+				break;
 			vmx_vcpu_dump_regs(vcpu);
 			dump_vcpu(vcpu);
 			break;
@@ -5085,23 +5088,6 @@ vmm_get_guest_memtype(struct vm *vm, paddr_t gpa)
 
 	DPRINTF("guest memtype @ 0x%llx unknown\n", (uint64_t)gpa);
 	return (VMM_MEM_TYPE_UNKNOWN);
-}
-
-/*
- * vmm_get_guest_faulttype
- *
- * Determines the type (R/W/X) of the last fault on the VCPU last run on
- * this PCPU. Calls the appropriate architecture-specific subroutine.
- */
-int
-vmm_get_guest_faulttype(void)
-{
-	if (vmm_softc->mode == VMM_MODE_EPT)
-		return vmx_get_guest_faulttype();
-	else if (vmm_softc->mode == VMM_MODE_RVI)
-		return vmx_get_guest_faulttype();
-	else
-		panic("%s: unknown vmm mode: %d", __func__, vmm_softc->mode);
 }
 
 /*
@@ -6072,19 +6058,30 @@ svm_handle_xsetbv(struct vcpu *vcpu)
 int
 vmm_handle_xsetbv(struct vcpu *vcpu, uint64_t *rax)
 {
-	uint64_t *rdx, *rcx;
+	uint64_t *rdx, *rcx, val;
 
 	rcx = &vcpu->vc_gueststate.vg_rcx;
 	rdx = &vcpu->vc_gueststate.vg_rdx;
 
+	if (vmm_get_guest_cpu_cpl(vcpu) != 0) {
+		DPRINTF("%s: guest cpl not zero\n", __func__);
+		return (vmm_inject_gp(vcpu));
+	}
+
 	if (*rcx != 0) {
 		DPRINTF("%s: guest specified invalid xcr register number "
 		    "%lld\n", __func__, *rcx);
-		/* XXX this should #GP(0) instead of killing the guest */
-		return (EINVAL);
+		return (vmm_inject_gp(vcpu));
 	}
 
-	vcpu->vc_gueststate.vg_xcr0 = *rax + (*rdx << 32);
+	val = *rax + (*rdx << 32);
+	if (val & ~xsave_mask) {
+		DPRINTF("%s: guest specified xcr0 outside xsave_mask %lld\n",
+		    __func__, val);
+		return (vmm_inject_gp(vcpu));
+	}
+
+	vcpu->vc_gueststate.vg_xcr0 = val;
 
 	return (0);
 }
@@ -6200,10 +6197,10 @@ vmx_handle_wrmsr(struct vcpu *vcpu)
 int
 svm_handle_msr(struct vcpu *vcpu)
 {
-	uint64_t insn_length, msr;
+	uint64_t insn_length;
 	uint64_t *rax, *rcx, *rdx;
 	struct vmcb *vmcb = (struct vmcb *)vcpu->vc_control_va;
-	int i, ret;
+	int ret;
 
 	/* XXX: Validate RDMSR / WRMSR insn_length */
 	insn_length = 2;
@@ -6228,22 +6225,20 @@ svm_handle_msr(struct vcpu *vcpu)
 		}
 	} else {
 		switch (*rcx) {
-			case MSR_LS_CFG:
-				DPRINTF("%s: guest read LS_CFG msr, injecting "
-				    "#GP\n", __func__);
+			case MSR_DE_CFG:
+				/* LFENCE seralizing bit is set by host */
+				*rax = DE_CFG_SERIALIZE_LFENCE;
+				*rdx = 0;
+				break;
+			case MSR_INT_PEN_MSG:
+				*rax = 0;
+				*rdx = 0;
+				break;
+			default:
+				DPRINTF("%s: guest read msr 0x%llx, injecting "
+				    "#GP\n", __func__, *rcx);
 				ret = vmm_inject_gp(vcpu);
 				return (ret);
-		}
-
-		i = rdmsr_safe(*rcx, &msr);
-		if (i == 0) {
-			*rax = msr & 0xFFFFFFFFULL;
-			*rdx = msr >> 32;
-		} else {
-			DPRINTF("%s: rdmsr for unsupported MSR 0x%llx\n",
-			    __func__, *rcx);
-			*rax = 0;
-			*rdx = 0;
 		}
 	}
 
@@ -6875,12 +6870,62 @@ vmm_free_vpid(uint16_t vpid)
 	rw_exit_write(&vmm_softc->vpid_lock);
 }
 
+
+/* vmm_gpa_is_valid
+ *
+ * Check if the given gpa is within guest memory space.
+ *
+ * Parameters:
+ * 	vcpu: The virtual cpu we are running on.
+ * 	gpa: The address to check.
+ * 	obj_size: The size of the object assigned to gpa
+ *
+ * Return values:
+ * 	1: gpa is within the memory ranges allocated for the vcpu
+ * 	0: otherwise
+ */
+int
+vmm_gpa_is_valid(struct vcpu *vcpu, paddr_t gpa, size_t obj_size)
+{
+	struct vm *vm = vcpu->vc_parent;
+	struct vm_mem_range *vmr;
+	size_t i;
+
+	for (i = 0; i < vm->vm_nmemranges; ++i) {
+		vmr = &vm->vm_memranges[i];
+		if (vmr->vmr_size >= obj_size &&
+		    vmr->vmr_gpa <= gpa &&
+		    gpa < (vmr->vmr_gpa + vmr->vmr_size - obj_size)) {
+		    return 1;
+		}
+	}
+	return 0;
+}
+
 void
 vmm_init_pvclock(struct vcpu *vcpu, paddr_t gpa)
 {
+	paddr_t pvclock_gpa = gpa & 0xFFFFFFFFFFFFFFF0;
+	if (!vmm_gpa_is_valid(vcpu, pvclock_gpa,
+	        sizeof(struct pvclock_time_info))) {
+		/* XXX: Kill guest? */
+		vmm_inject_gp(vcpu);
+		return;
+	}
+
+	/* XXX: handle case when this struct goes over page boundaries */
+	if ((pvclock_gpa & PAGE_MASK) + sizeof(struct pvclock_time_info) >
+	    PAGE_SIZE) {
+		vmm_inject_gp(vcpu);
+		return;
+	}
+
 	vcpu->vc_pvclock_system_gpa = gpa;
-	vcpu->vc_pvclock_system_tsc_mul =
-	    (int) ((1000000000L << 20) / tc_getfrequency());
+	if (tsc_frequency > 0)
+		vcpu->vc_pvclock_system_tsc_mul =
+		    (int) ((1000000000L << 20) / tsc_frequency);
+	else
+		vcpu->vc_pvclock_system_tsc_mul = 0;
 	vmm_update_pvclock(vcpu);
 }
 
@@ -6906,7 +6951,7 @@ vmm_update_pvclock(struct vcpu *vcpu)
 		nanotime(&tv);
 		pvclock_ti->ti_system_time =
 		    tv.tv_sec * 1000000000L + tv.tv_nsec;
-		pvclock_ti->ti_tsc_shift = -20;
+		pvclock_ti->ti_tsc_shift = 12;
 		pvclock_ti->ti_tsc_to_system_mul =
 		    vcpu->vc_pvclock_system_tsc_mul;
 		pvclock_ti->ti_flags = PVCLOCK_FLAG_TSC_STABLE;

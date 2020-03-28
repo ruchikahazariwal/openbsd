@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.142 2019/10/12 14:05:50 kettenis Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.148 2020/02/28 05:31:41 deraadt Exp $	*/
 /* $NetBSD: cpu.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $ */
 
 /*-
@@ -632,6 +632,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 #ifndef SMALL_KERNEL
 		cpu_ucode_apply(ci);
 #endif
+		cpu_tsx_disable(ci);
 		identifycpu(ci);
 #ifdef MTRR
 		mem_range_attach();
@@ -980,6 +981,7 @@ cpu_hatch(void *v)
 	lapic_enable();
 	lapic_startclock();
 	cpu_ucode_apply(ci);
+	cpu_tsx_disable(ci);
 
 	if ((ci->ci_flags & CPUF_IDENTIFIED) == 0) {
 		/*
@@ -1159,6 +1161,28 @@ cpu_init_msrs(struct cpu_info *ci)
 }
 
 void
+cpu_tsx_disable(struct cpu_info *ci)
+{
+	uint64_t msr;
+	uint32_t dummy, sefflags_edx;
+
+	/* this runs before identifycpu() populates ci_feature_sefflags_edx */
+	if (cpuid_level < 0x07)
+		return;
+	CPUID_LEAF(0x7, 0, dummy, dummy, dummy, sefflags_edx);
+
+	if (strcmp(cpu_vendor, "GenuineIntel") == 0 &&
+	    (sefflags_edx & SEFF0EDX_ARCH_CAP)) {
+		msr = rdmsr(MSR_ARCH_CAPABILITIES);
+		if (msr & ARCH_CAPABILITIES_TSX_CTRL) {
+			msr = rdmsr(MSR_TSX_CTRL);
+			msr |= TSX_CTRL_RTM_DISABLE | TSX_CTRL_TSX_CPUID_CLEAR;
+			wrmsr(MSR_TSX_CTRL, msr);
+		}
+	}
+}
+
+void
 patinit(struct cpu_info *ci)
 {
 	extern int	pmap_pg_wc;
@@ -1195,8 +1219,10 @@ rdrand(void *v)
 		uint64_t u64;
 		uint32_t u32[2];
 	} r, t;
+	uint64_t tsc;
 	uint8_t valid = 0;
 
+	tsc = rdtsc();
 	if (has_rdseed)
 		__asm volatile(
 		    "rdseed	%0\n\t"
@@ -1208,10 +1234,12 @@ rdrand(void *v)
 		    "setc	%1\n"
 		    : "=r" (r.u64), "=qm" (valid) );
 
-	t.u64 = rdtsc();
+	t.u64 = tsc;
+	t.u64 ^= r.u64;
+	t.u64 ^= valid;			/* potential rdrand empty */
+	if (has_rdrand)
+		t.u64 += rdtsc();	/* potential vmexit latency */
 
-	if (valid)
-		t.u64 ^= r.u64;
 	enqueue_randomness(t.u32[0]);
 	enqueue_randomness(t.u32[1]);
 

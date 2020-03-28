@@ -1,4 +1,4 @@
-/*	$OpenBSD: eventvar.h,v 1.5 2018/06/17 08:22:02 anton Exp $	*/
+/*	$OpenBSD: eventvar.h,v 1.8 2020/02/14 16:50:25 visa Exp $	*/
 
 /*-
  * Copyright (c) 1999,2000 Jonathan Lemon <jlemon@FreeBSD.org>
@@ -31,13 +31,19 @@
 #ifndef _SYS_EVENTVAR_H_
 #define _SYS_EVENTVAR_H_
 
+#include <sys/task.h>
+
 #define KQ_NEVENTS	8		/* minimize copy{in,out} calls */
 #define KQEXTENT	256		/* linear growth by this amount */
 
+/*
+ * Locking:
+ *	a	atomic operations
+ */
 struct kqueue {
-	TAILQ_HEAD(kqlist, knote) kq_head;	/* list of pending event */
+	TAILQ_HEAD(, knote) kq_head;		/* list of pending event */
 	int		kq_count;		/* number of pending events */
-	int		kq_refs;		/* number of references */
+	u_int		kq_refs;		/* [a] number of references */
 	struct		selinfo kq_sel;
 	struct		filedesc *kq_fdp;
 
@@ -47,6 +53,7 @@ struct kqueue {
 	struct		klist *kq_knlist;	/* list of attached knotes */
 	u_long		kq_knhashmask;		/* size of knhash */
 	struct		klist *kq_knhash;	/* hash table for attached knotes */
+	struct		task kq_task;		/* deferring of activation */
 
 	int		kq_state;
 #define KQ_SEL		0x01

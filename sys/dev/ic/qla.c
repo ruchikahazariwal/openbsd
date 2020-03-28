@@ -1,4 +1,4 @@
-/*	$OpenBSD: qla.c,v 1.57 2019/08/20 22:31:28 krw Exp $ */
+/*	$OpenBSD: qla.c,v 1.60 2020/02/05 16:29:29 krw Exp $ */
 
 /*
  * Copyright (c) 2011 David Gwynne <dlg@openbsd.org>
@@ -170,11 +170,7 @@ static const struct qla_regs qla_regs_23XX = {
     ((*(_sc)->sc_regs->read_isr)((_sc), (_isr), (_info)))
 
 struct scsi_adapter qla_switch = {
-	qla_scsi_cmd,
-	scsi_minphys,
-	qla_scsi_probe,
-	NULL,	/* scsi_free */
-	NULL	/* ioctl */
+	qla_scsi_cmd, NULL, qla_scsi_probe, NULL, NULL
 };
 
 int
@@ -1148,8 +1144,8 @@ qla_mbox(struct qla_softc *sc, int maskin)
 		mtx_enter(&sc->sc_mbox_mtx);
 		sc->sc_mbox_pending = 1;
 		while (sc->sc_mbox_pending == 1) {
-			msleep(sc->sc_mbox, &sc->sc_mbox_mtx, PRIBIO,
-			    "qlambox", 0);
+			msleep_nsec(sc->sc_mbox, &sc->sc_mbox_mtx, PRIBIO,
+			    "qlambox", INFSLP);
 		}
 		result = sc->sc_mbox[0];
 		sc->sc_mbox_pending = 0;

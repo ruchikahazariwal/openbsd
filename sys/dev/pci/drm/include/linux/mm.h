@@ -11,9 +11,8 @@
 #include <machine/cpu.h>
 #include <uvm/uvm_extern.h>
 #include <linux/fs.h>
+#include <linux/shrinker.h>
 #include <asm/pgtable.h>
-
-#define unmap_mapping_range(mapping, holebegin, holeend, even_cows)
 
 #define PageHighMem(x)	0
 

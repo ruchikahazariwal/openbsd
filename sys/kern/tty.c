@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty.c,v 1.148 2019/07/19 00:17:15 cheloha Exp $	*/
+/*	$OpenBSD: tty.c,v 1.153 2020/02/20 16:56:52 visa Exp $	*/
 /*	$NetBSD: tty.c,v 1.68.4.2 1996/06/06 16:04:52 thorpej Exp $	*/
 
 /*-
@@ -75,7 +75,6 @@ static void ttyblock(struct tty *);
 void ttyunblock(struct tty *);
 static void ttyecho(int, struct tty *);
 static void ttyrubo(struct tty *, int);
-void	ttkqflush(struct klist *klist);
 int	filt_ttyread(struct knote *kn, long hint);
 void 	filt_ttyrdetach(struct knote *kn);
 int	filt_ttywrite(struct knote *kn, long hint);
@@ -723,6 +722,7 @@ ttioctl(struct tty *tp, u_long cmd, caddr_t data, int flag, struct proc *p)
 
 	/* If the ioctl involves modification, hang if in the background. */
 	switch (cmd) {
+	case  FIOSETOWN:
 	case  TIOCFLUSH:
 	case  TIOCDRAIN:
 	case  TIOCSBRK:
@@ -828,6 +828,11 @@ ttioctl(struct tty *tp, u_long cmd, caddr_t data, int flag, struct proc *p)
 		s = spltty();
 		*(struct timeval *)data = tp->t_tv;
 		splx(s);
+		break;
+	case FIOGETOWN:			/* get pgrp of tty */
+		if (!isctty(pr, tp) && suser(p))
+			return (ENOTTY);
+		*(int *)data = tp->t_pgrp ? -tp->t_pgrp->pg_id : 0;
 		break;
 	case TIOCGPGRP:			/* get pgrp of tty */
 		if (!isctty(pr, tp) && suser(p))
@@ -983,6 +988,28 @@ ttioctl(struct tty *tp, u_long cmd, caddr_t data, int flag, struct proc *p)
 		pr->ps_session->s_ttyp = tp;
 		atomic_setbits_int(&pr->ps_flags, PS_CONTROLT);
 		break;
+	case FIOSETOWN: {		/* set pgrp of tty */
+		struct pgrp *pgrp;
+		struct process *pr1;
+		pid_t pgid = *(int *)data;
+
+		if (!isctty(pr, tp))
+			return (ENOTTY);
+		if (pgid < 0) {
+			pgrp = pgfind(-pgid);
+		} else {
+			pr1 = prfind(pgid);
+			if (pr1 == NULL)
+				return (ESRCH);
+			pgrp = pr1->ps_pgrp;
+		}
+		if (pgrp == NULL)
+			return (EINVAL);
+		else if (pgrp->pg_session != pr->ps_session)
+			return (EPERM);
+		tp->t_pgrp = pgrp;
+		break;
+	}
 	case TIOCSPGRP: {		/* set pgrp of tty */
 		struct pgrp *pgrp = pgfind(*(int *)data);
 
@@ -1062,10 +1089,19 @@ ttpoll(dev_t device, int events, struct proc *p)
 	return (revents);
 }
 
-struct filterops ttyread_filtops =
-	{ 1, NULL, filt_ttyrdetach, filt_ttyread };
-struct filterops ttywrite_filtops =
-	{ 1, NULL, filt_ttywdetach, filt_ttywrite };
+const struct filterops ttyread_filtops = {
+	.f_flags	= FILTEROP_ISFD,
+	.f_attach	= NULL,
+	.f_detach	= filt_ttyrdetach,
+	.f_event	= filt_ttyread,
+};
+
+const struct filterops ttywrite_filtops = {
+	.f_flags	= FILTEROP_ISFD,
+	.f_attach	= NULL,
+	.f_detach	= filt_ttywdetach,
+	.f_event	= filt_ttywrite,
+};
 
 int
 ttkqfilter(dev_t dev, struct knote *kn)
@@ -1087,7 +1123,7 @@ ttkqfilter(dev_t dev, struct knote *kn)
 		return (EINVAL);
 	}
 
-	kn->kn_hook = (caddr_t)((u_long)dev);
+	kn->kn_hook = tp;
 
 	s = spltty();
 	SLIST_INSERT_HEAD(klist, kn, kn_selnext);
@@ -1097,28 +1133,10 @@ ttkqfilter(dev_t dev, struct knote *kn)
 }
 
 void
-ttkqflush(struct klist *klist)
-{
-	struct knote *kn, *kn1;
-
-	SLIST_FOREACH_SAFE(kn, klist, kn_selnext, kn1) {
-		SLIST_REMOVE(klist, kn, knote, kn_selnext);
-		kn->kn_hook = (caddr_t)((u_long)NODEV);
-		kn->kn_flags |= EV_EOF;
-		knote_activate(kn);
-	}
-}
-
-void
 filt_ttyrdetach(struct knote *kn)
 {
-	dev_t dev = (dev_t)((u_long)kn->kn_hook);
-	struct tty *tp;
+	struct tty *tp = kn->kn_hook;
 	int s;
-
-	if (dev == NODEV)
-		return;
-	tp = (*cdevsw[major(dev)].d_tty)(dev);
 
 	s = spltty();
 	SLIST_REMOVE(&tp->t_rsel.si_note, kn, knote, kn_selnext);
@@ -1128,15 +1146,8 @@ filt_ttyrdetach(struct knote *kn)
 int
 filt_ttyread(struct knote *kn, long hint)
 {
-	dev_t dev = (dev_t)((u_long)kn->kn_hook);
-	struct tty *tp;
+	struct tty *tp = kn->kn_hook;
 	int s;
-
-	if (dev == NODEV) {
-		kn->kn_flags |= EV_EOF;
-		return (1);
-	}
-	tp = (*cdevsw[major(dev)].d_tty)(dev);
 
 	s = spltty();
 	kn->kn_data = ttnread(tp);
@@ -1151,13 +1162,8 @@ filt_ttyread(struct knote *kn, long hint)
 void
 filt_ttywdetach(struct knote *kn)
 {
-	dev_t dev = (dev_t)((u_long)kn->kn_hook);
-	struct tty *tp;
+	struct tty *tp = kn->kn_hook;
 	int s;
-
-	if (dev == NODEV)
-		return;
-	tp = (*cdevsw[major(dev)].d_tty)(dev);
 
 	s = spltty();
 	SLIST_REMOVE(&tp->t_wsel.si_note, kn, knote, kn_selnext);
@@ -1167,15 +1173,8 @@ filt_ttywdetach(struct knote *kn)
 int
 filt_ttywrite(struct knote *kn, long hint)
 {
-	dev_t dev = (dev_t)((u_long)kn->kn_hook);
-	struct tty *tp;
+	struct tty *tp = kn->kn_hook;
 	int canwrite, s;
-
-	if (dev == NODEV) {
-		kn->kn_flags |= EV_EOF;
-		return (1);
-	}
-	tp = (*cdevsw[major(dev)].d_tty)(dev);
 
 	s = spltty();
 	kn->kn_data = tp->t_outq.c_cn - tp->t_outq.c_cc;
@@ -1678,7 +1677,8 @@ ttycheckoutq(struct tty *tp, int wait)
 				return (0);
 			}
 			SET(tp->t_state, TS_ASLEEP);
-			tsleep(&tp->t_outq, PZERO - 1, "ttckoutq", hz);
+			tsleep_nsec(&tp->t_outq, PZERO - 1, "ttckoutq",
+			    SEC_TO_NSEC(1));
 		}
 	splx(s);
 	return (1);
@@ -2340,6 +2340,7 @@ ttymalloc(int baud)
 void
 ttyfree(struct tty *tp)
 {
+	int s;
 
 	--tty_count;
 #ifdef DIAGNOSTIC
@@ -2348,8 +2349,10 @@ ttyfree(struct tty *tp)
 #endif
 	TAILQ_REMOVE(&ttylist, tp, tty_link);
 
-	ttkqflush(&tp->t_rsel.si_note);
-	ttkqflush(&tp->t_wsel.si_note);
+	s = spltty();
+	klist_invalidate(&tp->t_rsel.si_note);
+	klist_invalidate(&tp->t_wsel.si_note);
+	splx(s);
 
 	clfree(&tp->t_rawq);
 	clfree(&tp->t_canq);

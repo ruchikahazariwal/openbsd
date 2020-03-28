@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbdi.c,v 1.101 2019/10/06 17:11:51 mpi Exp $ */
+/*	$OpenBSD: usbdi.c,v 1.103 2020/02/22 14:01:35 jasper Exp $ */
 /*	$NetBSD: usbdi.c,v 1.103 2002/09/27 15:37:38 provos Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbdi.c,v 1.28 1999/11/17 22:33:49 n_hibma Exp $	*/
 
@@ -294,6 +294,7 @@ usbd_transfer(struct usbd_xfer *xfer)
 		usbd_dump_queue(pipe);
 #endif
 	xfer->done = 0;
+	xfer->status = USBD_NOT_STARTED;
 
 	if (pipe->aborting)
 		return (USBD_CANCELLED);
@@ -781,7 +782,7 @@ usb_transfer_complete(struct usbd_xfer *xfer)
 
 	/* Count completed transfers. */
 	++bus->stats.uds_requests
-		[pipe->endpoint->edesc->bmAttributes & UE_XFERTYPE];
+		[UE_GET_XFERTYPE(pipe->endpoint->edesc->bmAttributes)];
 
 	xfer->done = 1;
 	if (!xfer->status && xfer->actlen < xfer->length &&

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.c,v 1.80 2019/06/11 05:00:09 remi Exp $ */
+/*	$OpenBSD: rde.c,v 1.84 2020/02/17 08:12:22 denis Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Claudio Jeker <claudio@openbsd.org>
@@ -319,7 +319,7 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 			    (nbr->state & NBR_STA_FULL ||
 			    state & NBR_STA_FULL)) {
 				nbr->state = state;
-				area_track(nbr->area, state);
+				area_track(nbr->area);
 				orig_intra_area_prefix_lsas(nbr->area);
 			}
 
@@ -327,12 +327,25 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 			if (nbr->state & NBR_STA_FULL)
 				rde_req_list_free(nbr);
 			break;
+		case IMSG_AREA_CHANGE:
+			if (imsg.hdr.len - IMSG_HEADER_SIZE != sizeof(state))
+				fatalx("invalid size of OE request");
+
+			LIST_FOREACH(area, &rdeconf->area_list, entry) {
+				if (area->id.s_addr == imsg.hdr.peerid)
+					break;
+			}
+			if (area == NULL)
+				break;
+			memcpy(&state, imsg.data, sizeof(state));
+			area->active = state;
+			break;
 		case IMSG_DB_SNAPSHOT:
 			nbr = rde_nbr_find(imsg.hdr.peerid);
 			if (nbr == NULL)
 				break;
 
-			lsa_snap(nbr, imsg.hdr.peerid);
+			lsa_snap(nbr);
 
 			imsg_compose_event(iev_ospfe, IMSG_DB_END, imsg.hdr.peerid,
 			    0, -1, NULL, 0);
@@ -442,17 +455,10 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 
 				rde_req_list_del(nbr, &lsa->hdr);
 
-				self = lsa_self(lsa);
-				if (self) {
-					if (v == NULL)
-						/* LSA is no longer announced,
-						 * remove by premature aging. */
-						lsa_flush(nbr, lsa);
-					else
-						lsa_reflood(v, lsa);
-				} else if (lsa_add(nbr, lsa))
-					/* delayed lsa, don't flood yet */
-					break;
+				if (!(self = lsa_self(nbr, lsa, v)))
+					if (lsa_add(nbr, lsa))
+						/* delayed lsa */
+						break;
 
 				/* flood and perhaps ack LSA */
 				imsg_compose_event(iev_ospfe, IMSG_LS_FLOOD,
@@ -740,10 +746,7 @@ rde_dispatch_parent(int fd, short event, void *bula)
 			if (prev_link_ok == link_ok)
 				break;
 
-			area = area_find(rdeconf, iface->area_id);
-			if (!area)
-				fatalx("interface lost area");
-			orig_intra_area_prefix_lsas(area);
+			orig_intra_area_prefix_lsas(iface->area);
 
 			break;
 		case IMSG_IFADD:
@@ -755,8 +758,7 @@ rde_dispatch_parent(int fd, short event, void *bula)
 			TAILQ_INIT(&iface->ls_ack_list);
 			RB_INIT(&iface->lsa_tree);
 
-			area = area_find(rdeconf, iface->area_id);
-			LIST_INSERT_HEAD(&area->iface_list, iface, entry);
+			LIST_INSERT_HEAD(&iface->area->iface_list, iface, entry);
 			break;
 		case IMSG_IFDELETE:
 			if (imsg.hdr.len != IMSG_HEADER_SIZE +
@@ -789,9 +791,8 @@ rde_dispatch_parent(int fd, short event, void *bula)
 			ia->prefixlen = ifc->prefixlen;
 
 			TAILQ_INSERT_TAIL(&iface->ifa_list, ia, entry);
-			area = area_find(rdeconf, iface->area_id);
-			if (area)
-				orig_intra_area_prefix_lsas(area);
+			if (iface->area)
+				orig_intra_area_prefix_lsas(iface->area);
 			break;
 		case IMSG_IFADDRDEL:
 			if (imsg.hdr.len != IMSG_HEADER_SIZE +
@@ -815,9 +816,8 @@ rde_dispatch_parent(int fd, short event, void *bula)
 					break;
 				}
 			}
-			area = area_find(rdeconf, iface->area_id);
-			if (area)
-				orig_intra_area_prefix_lsas(area);
+			if (iface->area)
+				orig_intra_area_prefix_lsas(iface->area);
 			break;
 		case IMSG_RECONF_CONF:
 			if ((nconf = malloc(sizeof(struct ospfd_conf))) ==
@@ -1676,8 +1676,7 @@ orig_asext_lsa(struct kroute *kr, u_int16_t age)
 	memcpy((char *)lsa + sizeof(struct lsa_hdr) + sizeof(struct lsa_asext),
 	    &kr->prefix, LSA_PREFIXSIZE(kr->prefixlen));
 
-	lsa->hdr.ls_id = lsa_find_lsid(&asext_tree, lsa->hdr.type,
-	    lsa->hdr.adv_rtr, comp_asext, lsa);
+	lsa->hdr.ls_id = lsa_find_lsid(&asext_tree, comp_asext, lsa);
 
 	if (age == MAX_AGE) {
 		/* inherit metric and ext_tag from the current LSA,

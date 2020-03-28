@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_smr.c,v 1.5 2019/07/03 22:39:33 cheloha Exp $	*/
+/*	$OpenBSD: kern_smr.c,v 1.7 2020/02/25 16:55:33 visa Exp $	*/
 
 /*
  * Copyright (c) 2019 Visa Hankala
@@ -31,7 +31,6 @@
 
 #define SMR_PAUSE	100		/* pause between rounds in msec */
 
-void	smr_create_thread(void *);
 void	smr_dispatch(struct schedstate_percpu *);
 void	smr_grace_wait(void);
 void	smr_thread(void *);
@@ -66,13 +65,12 @@ smr_startup(void)
 {
 	SIMPLEQ_INIT(&smr_deferred);
 	WITNESS_INIT(&smr_lock_obj, &smr_lock_type);
-	kthread_create_deferred(smr_create_thread, NULL);
+	timeout_set(&smr_wakeup_tmo, smr_wakeup, NULL);
 }
 
 void
-smr_create_thread(void *arg)
+smr_startup_thread(void)
 {
-	timeout_set(&smr_wakeup_tmo, smr_wakeup, NULL);
 	if (kthread_create(smr_thread, NULL, NULL, "smr") != 0)
 		panic("could not create smr thread");
 }
@@ -96,8 +94,8 @@ smr_thread(void *arg)
 		mtx_enter(&smr_lock);
 		if (smr_ndeferred == 0) {
 			while (smr_ndeferred == 0)
-				msleep(&smr_ndeferred, &smr_lock, PVM,
-				    "bored", 0);
+				msleep_nsec(&smr_ndeferred, &smr_lock, PVM,
+				    "bored", INFSLP);
 		} else {
 			if (smr_expedite == 0)
 				msleep_nsec(&smr_ndeferred, &smr_lock, PVM,

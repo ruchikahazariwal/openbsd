@@ -78,9 +78,9 @@
 ./usr/lib/gcc-lib/powerpc-unknown-openbsd6.6/4.2.1/collect2
 ./usr/lib/gcc-lib/powerpc-unknown-openbsd6.6/4.2.1/libgcc.a
 ./usr/lib/gcc-lib/powerpc-unknown-openbsd6.6/4.2.1/specs
-./usr/lib/libLLVM.so.1.0
-./usr/lib/libc++.so.3.0
-./usr/lib/libc++abi.so.1.0
+./usr/lib/libLLVM.so.2.0
+./usr/lib/libc++.so.4.0
+./usr/lib/libc++abi.so.2.0
 ./usr/lib/libcompiler_rt.a
 ./usr/lib/libstdc++.so.57.0
 ./usr/libdata/perl5/powerpc-openbsd
@@ -332,9 +332,7 @@
 ./usr/libdata/perl5/powerpc-openbsd/Scalar
 ./usr/libdata/perl5/powerpc-openbsd/Scalar/Util.pm
 ./usr/libdata/perl5/powerpc-openbsd/Socket.pm
-./usr/libdata/perl5/powerpc-openbsd/Storable
 ./usr/libdata/perl5/powerpc-openbsd/Storable.pm
-./usr/libdata/perl5/powerpc-openbsd/Storable/Limit.pm
 ./usr/libdata/perl5/powerpc-openbsd/Sub
 ./usr/libdata/perl5/powerpc-openbsd/Sub/Util.pm
 ./usr/libdata/perl5/powerpc-openbsd/Sys
@@ -354,7 +352,6 @@
 ./usr/libdata/perl5/powerpc-openbsd/Unicode/Collate.pm
 ./usr/libdata/perl5/powerpc-openbsd/Unicode/Collate/Locale.pm
 ./usr/libdata/perl5/powerpc-openbsd/Unicode/Normalize.pm
-./usr/libdata/perl5/powerpc-openbsd/arybase.pm
 ./usr/libdata/perl5/powerpc-openbsd/attributes.pm
 ./usr/libdata/perl5/powerpc-openbsd/auto
 ./usr/libdata/perl5/powerpc-openbsd/auto/B
@@ -468,7 +465,6 @@
 ./usr/libdata/perl5/powerpc-openbsd/auto/Term
 ./usr/libdata/perl5/powerpc-openbsd/auto/Term/ReadKey
 ./usr/libdata/perl5/powerpc-openbsd/auto/Term/ReadKey/ReadKey.so
-./usr/libdata/perl5/powerpc-openbsd/auto/Term/ReadKey/autosplit.ix
 ./usr/libdata/perl5/powerpc-openbsd/auto/Tie
 ./usr/libdata/perl5/powerpc-openbsd/auto/Tie/Hash
 ./usr/libdata/perl5/powerpc-openbsd/auto/Tie/Hash/NamedCapture
@@ -483,8 +479,6 @@
 ./usr/libdata/perl5/powerpc-openbsd/auto/Unicode/Collate/Collate.so
 ./usr/libdata/perl5/powerpc-openbsd/auto/Unicode/Normalize
 ./usr/libdata/perl5/powerpc-openbsd/auto/Unicode/Normalize/Normalize.so
-./usr/libdata/perl5/powerpc-openbsd/auto/arybase
-./usr/libdata/perl5/powerpc-openbsd/auto/arybase/arybase.so
 ./usr/libdata/perl5/powerpc-openbsd/auto/attributes
 ./usr/libdata/perl5/powerpc-openbsd/auto/attributes/attributes.so
 ./usr/libdata/perl5/powerpc-openbsd/auto/mro
@@ -504,7 +498,6 @@
 ./usr/libdata/perl5/powerpc-openbsd/threads.pm
 ./usr/libdata/perl5/powerpc-openbsd/threads/shared.pm
 ./usr/local/libdata/perl5/site_perl/powerpc-openbsd
-./usr/mdec/boot.mac
 ./usr/mdec/bsd.tbxi
 ./usr/mdec/mbr
 ./usr/mdec/ofwboot

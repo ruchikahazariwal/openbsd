@@ -1,4 +1,4 @@
-/*	$OpenBSD: qle.c,v 1.46 2019/08/20 22:31:28 krw Exp $ */
+/*	$OpenBSD: qle.c,v 1.51 2020/02/05 16:29:30 krw Exp $ */
 
 /*
  * Copyright (c) 2013, 2014 Jonathan Matthew <jmatthew@openbsd.org>
@@ -255,11 +255,7 @@ int		qle_scsi_probe(struct scsi_link *);
 
 
 struct scsi_adapter qle_switch = {
-	qle_scsi_cmd,
-	scsi_minphys,
-	qle_scsi_probe,
-	NULL,	/* scsi_free */
-	NULL	/* ioctl */
+	qle_scsi_cmd, NULL, qle_scsi_probe, NULL, NULL
 };
 
 u_int32_t	qle_read(struct qle_softc *, int);
@@ -1496,8 +1492,8 @@ qle_mbox(struct qle_softc *sc, int maskin)
 		mtx_enter(&sc->sc_mbox_mtx);
 		sc->sc_mbox_pending = 1;
 		while (sc->sc_mbox_pending == 1) {
-			msleep(sc->sc_mbox, &sc->sc_mbox_mtx, PRIBIO,
-			    "qlembox", 0);
+			msleep_nsec(sc->sc_mbox, &sc->sc_mbox_mtx, PRIBIO,
+			    "qlembox", INFSLP);
 		}
 		result = sc->sc_mbox[0];
 		sc->sc_mbox_pending = 0;
@@ -1886,7 +1882,8 @@ qle_ct_pass_through(struct qle_softc *sc, u_int32_t port_handle,
 			if (qle_read_isr(sc, &isr, &info) != 0)
 				qle_handle_intr(sc, isr, info);
 		} else {
-			tsleep(sc->sc_scratch, PRIBIO, "qle_fabric", 100);
+			tsleep_nsec(sc->sc_scratch, PRIBIO, "qle_fabric",
+			    SEC_TO_NSEC(1));
 		}
 	}
 	if (rv == 0)
@@ -2014,7 +2011,8 @@ qle_fabric_plogx(struct qle_softc *sc, struct qle_fc_port *port, int flags,
 			if (qle_read_isr(sc, &isr, &info) != 0)
 				qle_handle_intr(sc, isr, info);
 		} else {
-			tsleep(sc->sc_scratch, PRIBIO, "qle_fabric", 100);
+			tsleep_nsec(sc->sc_scratch, PRIBIO, "qle_fabric",
+			    SEC_TO_NSEC(1));
 		}
 	}
 	sc->sc_fabric_pending = 0;
@@ -2900,13 +2898,13 @@ qle_alloc_ccbs(struct qle_softc *sc)
 	sc->sc_pri_requests = qle_dmamem_alloc(sc, 8 * QLE_QUEUE_ENTRY_SIZE);
 	if (sc->sc_pri_requests == NULL) {
 		printf("%s: unable to allocate pri ccb dmamem\n", DEVNAME(sc));
-		goto free_pri;
+		goto free_res;
 	}
 	sc->sc_segments = qle_dmamem_alloc(sc, sc->sc_maxcmds * QLE_MAX_SEGS *
 	    sizeof(struct qle_iocb_seg));
 	if (sc->sc_segments == NULL) {
 		printf("%s: unable to allocate iocb segments\n", DEVNAME(sc));
-		goto free_res;
+		goto free_pri;
 	}
 
 	sc->sc_fcp_cmnds = qle_dmamem_alloc(sc, sc->sc_maxcmds *

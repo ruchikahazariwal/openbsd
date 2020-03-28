@@ -1,4 +1,4 @@
-/* $OpenBSD: s3_cbc.c,v 1.17 2018/09/08 14:39:41 jsing Exp $ */
+/* $OpenBSD: s3_cbc.c,v 1.20 2020/03/12 17:09:02 jsing Exp $ */
 /* ====================================================================
  * Copyright (c) 2012 The OpenSSL Project.  All rights reserved.
  *
@@ -113,8 +113,8 @@ constant_time_eq_8(unsigned a, unsigned b)
  *   1: if the padding was valid
  *  -1: otherwise. */
 int
-tls1_cbc_remove_padding(const SSL* s, SSL3_RECORD *rec, unsigned block_size,
-    unsigned mac_size)
+tls1_cbc_remove_padding(const SSL* s, SSL3_RECORD_INTERNAL *rec,
+    unsigned block_size, unsigned mac_size)
 {
 	unsigned padding_length, good, to_check, i;
 	const unsigned overhead = 1 /* padding length byte */ + mac_size;
@@ -169,7 +169,7 @@ tls1_cbc_remove_padding(const SSL* s, SSL3_RECORD *rec, unsigned block_size,
 
 	padding_length = good & (padding_length + 1);
 	rec->length -= padding_length;
-	rec->type |= padding_length<<8;	/* kludge: pass padding length */
+	rec->padding_length = padding_length;
 
 	return (int)((good & 1) | (~good & -1));
 }
@@ -194,7 +194,7 @@ tls1_cbc_remove_padding(const SSL* s, SSL3_RECORD *rec, unsigned block_size,
 #define CBC_MAC_ROTATE_IN_PLACE
 
 void
-ssl3_cbc_copy_mac(unsigned char* out, const SSL3_RECORD *rec,
+ssl3_cbc_copy_mac(unsigned char* out, const SSL3_RECORD_INTERNAL *rec,
     unsigned md_size, unsigned orig_len)
 {
 #if defined(CBC_MAC_ROTATE_IN_PLACE)
@@ -265,6 +265,20 @@ ssl3_cbc_copy_mac(unsigned char* out, const SSL3_RECORD *rec,
 	}
 #endif
 }
+
+#define l2n(l,c)	(*((c)++)=(unsigned char)(((l)>>24)&0xff), \
+			 *((c)++)=(unsigned char)(((l)>>16)&0xff), \
+			 *((c)++)=(unsigned char)(((l)>> 8)&0xff), \
+			 *((c)++)=(unsigned char)(((l)    )&0xff))
+
+#define l2n8(l,c)	(*((c)++)=(unsigned char)(((l)>>56)&0xff), \
+			 *((c)++)=(unsigned char)(((l)>>48)&0xff), \
+			 *((c)++)=(unsigned char)(((l)>>40)&0xff), \
+			 *((c)++)=(unsigned char)(((l)>>32)&0xff), \
+			 *((c)++)=(unsigned char)(((l)>>24)&0xff), \
+			 *((c)++)=(unsigned char)(((l)>>16)&0xff), \
+			 *((c)++)=(unsigned char)(((l)>> 8)&0xff), \
+			 *((c)++)=(unsigned char)(((l)    )&0xff))
 
 /* u32toLE serialises an unsigned, 32-bit number (n) as four bytes at (p) in
  * little-endian order. The value of p is advanced by four. */

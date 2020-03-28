@@ -37,9 +37,9 @@
 ./usr/lib/crtbeginS.o
 ./usr/lib/crtend.o
 ./usr/lib/crtendS.o
-./usr/lib/libLLVM.so.1.0
-./usr/lib/libc++.so.3.0
-./usr/lib/libc++abi.so.1.0
+./usr/lib/libLLVM.so.2.0
+./usr/lib/libc++.so.4.0
+./usr/lib/libc++abi.so.2.0
 ./usr/lib/libcompiler_rt.a
 ./usr/libdata/perl5/arm-openbsd
 ./usr/libdata/perl5/arm-openbsd/.packlist
@@ -290,9 +290,7 @@
 ./usr/libdata/perl5/arm-openbsd/Scalar
 ./usr/libdata/perl5/arm-openbsd/Scalar/Util.pm
 ./usr/libdata/perl5/arm-openbsd/Socket.pm
-./usr/libdata/perl5/arm-openbsd/Storable
 ./usr/libdata/perl5/arm-openbsd/Storable.pm
-./usr/libdata/perl5/arm-openbsd/Storable/Limit.pm
 ./usr/libdata/perl5/arm-openbsd/Sub
 ./usr/libdata/perl5/arm-openbsd/Sub/Util.pm
 ./usr/libdata/perl5/arm-openbsd/Sys
@@ -312,7 +310,6 @@
 ./usr/libdata/perl5/arm-openbsd/Unicode/Collate.pm
 ./usr/libdata/perl5/arm-openbsd/Unicode/Collate/Locale.pm
 ./usr/libdata/perl5/arm-openbsd/Unicode/Normalize.pm
-./usr/libdata/perl5/arm-openbsd/arybase.pm
 ./usr/libdata/perl5/arm-openbsd/attributes.pm
 ./usr/libdata/perl5/arm-openbsd/auto
 ./usr/libdata/perl5/arm-openbsd/auto/B
@@ -426,7 +423,6 @@
 ./usr/libdata/perl5/arm-openbsd/auto/Term
 ./usr/libdata/perl5/arm-openbsd/auto/Term/ReadKey
 ./usr/libdata/perl5/arm-openbsd/auto/Term/ReadKey/ReadKey.so
-./usr/libdata/perl5/arm-openbsd/auto/Term/ReadKey/autosplit.ix
 ./usr/libdata/perl5/arm-openbsd/auto/Tie
 ./usr/libdata/perl5/arm-openbsd/auto/Tie/Hash
 ./usr/libdata/perl5/arm-openbsd/auto/Tie/Hash/NamedCapture
@@ -441,8 +437,6 @@
 ./usr/libdata/perl5/arm-openbsd/auto/Unicode/Collate/Collate.so
 ./usr/libdata/perl5/arm-openbsd/auto/Unicode/Normalize
 ./usr/libdata/perl5/arm-openbsd/auto/Unicode/Normalize/Normalize.so
-./usr/libdata/perl5/arm-openbsd/auto/arybase
-./usr/libdata/perl5/arm-openbsd/auto/arybase/arybase.so
 ./usr/libdata/perl5/arm-openbsd/auto/attributes
 ./usr/libdata/perl5/arm-openbsd/auto/attributes/attributes.so
 ./usr/libdata/perl5/arm-openbsd/auto/mro

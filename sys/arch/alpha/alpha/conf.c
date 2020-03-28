@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.84 2017/11/02 14:04:24 mpi Exp $	*/
+/*	$OpenBSD: conf.c,v 1.87 2020/01/24 14:11:01 mpi Exp $	*/
 /*	$NetBSD: conf.c,v 1.16 1996/10/18 21:26:57 cgd Exp $	*/
 
 /*-
@@ -111,9 +111,11 @@ cdev_decl(cy);
 /* USB Devices */
 #include "usb.h"
 #include "uhid.h"
+#include "fido.h"
 #include "ugen.h"
 #include "ulpt.h"
 #include "ucom.h"
+#include "dt.h"
 #include "pf.h"
 #ifdef USER_PCICONF
 #include "pci.h"
@@ -160,7 +162,7 @@ struct cdevsw	cdevsw[] =
 	cdev_mouse_init(NWSKBD,wskbd),	/* 29: /dev/kbd XXX */
 	cdev_mouse_init(NWSMOUSE,wsmouse),	/* 30: /dev/mouse XXX */
 	cdev_lpt_init(NLPT,lpt),	/* 31: parallel printer */
-	cdev_notdef(),			/* 32: */
+	cdev_dt_init(NDT,dt),		/* 32: dynamic tracer */
 	cdev_uk_init(NUK,uk),		/* 33: SCSI unknown */
 	cdev_random_init(1,random),	/* 34: random data source */
 	cdev_pf_init(NPF, pf),		/* 35: packet filter */
@@ -202,6 +204,8 @@ struct cdevsw	cdevsw[] =
 	cdev_fuse_init(NFUSE,fuse),	/* 67: fuse */
 	cdev_tun_init(NTUN,tap),	/* 68: Ethernet network tunnel */
 	cdev_switch_init(NSWITCH,switch), /* 69: switch(4) control interface */
+	cdev_fido_init(NFIDO,fido),	/* 70: FIDO/U2F security key */
+	cdev_pppx_init(NPPPX,pppac),	/* 71: PPP Access Concentrator */
 };
 int	nchrdev = nitems(cdevsw);
 

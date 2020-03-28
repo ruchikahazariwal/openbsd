@@ -13,31 +13,98 @@ file	dev/cninit.c
 file	arch/riscv64/riscv64/autoconf.c
 file	arch/riscv64/riscv64/bus_space.c
 file	arch/riscv64/riscv64/bus_dma.c
+file	arch/riscv64/riscv64/clock.c
 file	arch/riscv64/riscv64/conf.c
 file	arch/riscv64/riscv64/disksubr.c		disk
 file	arch/riscv64/riscv64/locore.S
+file	arch/riscv64/riscv64/copy.S
+file	arch/riscv64/riscv64/copystr.S
+file	arch/riscv64/riscv64/exception.S
+file	arch/riscv64/riscv64/cpuswitch.S
 file	arch/riscv64/riscv64/machdep.c
 file	arch/riscv64/riscv64/intr.c
 file	arch/riscv64/riscv64/pmap.c
+file	arch/riscv64/riscv64/mem.c
+file	arch/riscv64/riscv64/process_machdep.c
+file	arch/riscv64/riscv64/vm_machdep.c
+file	arch/riscv64/riscv64/sig_machdep.c
+file	arch/riscv64/riscv64/softintr.c
+file	arch/riscv64/riscv64/support.S
+file	arch/riscv64/riscv64/pagezero.S
+file	arch/riscv64/riscv64/trap.c
+file	arch/riscv64/riscv64/sbi.c
+file	arch/riscv64/riscv64/cpufunc_asm.S
 
 file	arch/riscv64/riscv64/db_disasm.c	ddb
 file	arch/riscv64/riscv64/db_interface.c	ddb
 file	arch/riscv64/riscv64/db_trace.c	ddb
 
-define	mainbus {}
-device	mainbus
-attach	mainbus at root
-file	arch/riscv64/dev/mainbus.c			mainbus
-
-device	cpu
-attach	cpu at mainbus
-file	arch/riscv64/riscv64/cpu.c
-
-include "scsi/files.scsi"
+define	fdt {[early = 0]}
 
 #
-# XXX simplebus
-# XXX ofw
+# mainbus
+#
+define	mainbus {[early = 0]}
+device	mainbus: fdt
+attach	mainbus at root
+file	arch/riscv64/dev/mainbus.c		mainbus
+
+#
+# cpu
+#
+define	cpu {}
+device	cpu
+attach	cpu at mainbus
+file	arch/riscv64/riscv64/cpu.c		cpu
+
+#
+# timer
+#
+device	timer
+attach	timer at cpu
+file	arch/riscv64/dev/timer.c
+
+#
+# overall interrupt controller
+#
+device	intc
+attach	intc at cpu
+file	arch/riscv64/dev/riscv_cpu_intc.c
+
+# Paravirtual device bus and virtio
+include "dev/pv/files.pv"
+
+file	netinet/in_cksum.c
+file	netinet/in4_cksum.c
+
+#
+# Machine-independent HID support
+#
+include	"dev/hid/files.hid"
+
+# Machine-independent I2C drivers
+include "dev/i2c/files.i2c"
+
+# FDT support
+include "dev/ofw/files.ofw"
+
+# Machine-independent FDT drivers
+include "dev/fdt/files.fdt"
+
+# Machine-independent SCSI drivers
+include "scsi/files.scsi"
+
 # XXX ofwbus
-# XXX timer
-# XXX interrupt controller
+
+#
+# simplebus
+#
+define simplebus {[early = 1]}
+device	simplebus: fdt
+attach	simplebus at mainbus
+file	arch/riscv64/dev/simplebus.c		simplebus
+
+# PLIC
+device	plic
+attach	plic at simplebus
+file	arch/riscv64/dev/plic.c

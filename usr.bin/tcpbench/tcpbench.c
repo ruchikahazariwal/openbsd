@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcpbench.c,v 1.59 2018/09/28 19:01:52 bluhm Exp $	*/
+/*	$OpenBSD: tcpbench.c,v 1.61 2020/02/12 14:46:36 schwarze Exp $	*/
 
 /*
  * Copyright (c) 2008 Damien Miller <djm@mindrot.org>
@@ -185,7 +185,7 @@ usage(void)
 {
 	fprintf(stderr,
 	    "usage: tcpbench -l\n"
-	    "       tcpbench [-46RUuv] [-B buf] [-b addr] [-k kvars] [-n connections]\n"
+	    "       tcpbench [-46RUuv] [-B buf] [-b sourceaddr] [-k kvars] [-n connections]\n"
 	    "                [-p port] [-r interval] [-S space] [-T toskeyword]\n"
 	    "                [-t secs] [-V rtable] hostname\n"
 	    "       tcpbench -s [-46Uuv] [-B buf] [-k kvars] [-p port] [-r interval]\n"
@@ -565,6 +565,8 @@ tcp_process_slice(int fd, short event, void *bula)
 		total_elapsed = t_diff.tv_sec * 1000 + t_diff.tv_usec / 1000;
 		timersub(&t_cur, &sc->t_last, &t_diff);
 		since_last = t_diff.tv_sec * 1000 + t_diff.tv_usec / 1000;
+		if (since_last == 0)
+			continue;
 		bwperc = (sc->bytes * 100.0) / mainstats.slice_bytes;
 		mbps = (sc->bytes * 8) / (since_last * 1000.0);
 		slice_mbps += mbps;
@@ -602,6 +604,8 @@ udp_process_slice(int fd, short event, void *v_sc)
 	total_elapsed = t_diff.tv_sec * 1000 + t_diff.tv_usec / 1000;
 	timersub(&t_cur, &sc->t_last, &t_diff);
 	since_last = t_diff.tv_sec * 1000 + t_diff.tv_usec / 1000;
+	if (since_last == 0)
+		return;
 	slice_mbps = (sc->bytes * 8) / (since_last * 1000.0);
 	pps = (sc->udp_slice_pkts * 1000) / since_last;
 	if (slice_mbps > mainstats.peak_mbps)

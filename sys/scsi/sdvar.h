@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdvar.h,v 1.43 2019/09/27 23:07:42 krw Exp $	*/
+/*	$OpenBSD: sdvar.h,v 1.46 2020/02/05 16:29:30 krw Exp $	*/
 /*	$NetBSD: sdvar.h,v 1.7 1998/08/17 00:49:03 mycroft Exp $	*/
 
 /*-
@@ -57,17 +57,17 @@ struct sd_softc {
 	struct bufq		sc_bufq;
 
 	int			flags;
-#define	SDF_ANCIENT	0x10		/* disk is ancient; for minphys */
+#define	SDF_ANCIENT	0x10		/* disk is ancient; for sdminphys */
 #define	SDF_DIRTY	0x20		/* disk is dirty; needs cache flush */
 #define	SDF_DYING	0x40		/* dying, when deactivated */
 #define	SDF_WAITING	0x80
 #define	SDF_THIN	0x01		/* disk is thin provisioned */
 	struct scsi_link	*sc_link; /* contains our targ, lun, etc. */
 	struct disk_parms {
-		u_long	heads;		/* number of heads */
-		u_long	cyls;		/* number of cylinders */
-		u_long	sectors;	/* number of sectors/track */
-		u_long	secsize;	/* number of bytes/sector */
+		u_int32_t	heads;		/* number of heads */
+		u_int32_t	cyls;		/* number of cylinders */
+		u_int32_t	sectors;	/* number of sectors/track */
+		u_int32_t	secsize;	/* number of bytes/sector */
 		u_int64_t	disksize;	/* total number sectors */
 		u_int32_t	unmap_sectors;	/* maximum sectors/unmap */
 		u_int32_t	unmap_descs;	/* maximum descriptors/unmap */
@@ -77,9 +77,5 @@ struct sd_softc {
 
 	struct scsi_xshandler sc_xsh;
 };
-
-#define	SDGP_RESULT_OK		0	/* parameters obtained */
-#define	SDGP_RESULT_OFFLINE	1	/* no media, or otherwise losing */
-
 #endif /* _KERNEL */
 #endif /* _SCSI_SDVAR_H */

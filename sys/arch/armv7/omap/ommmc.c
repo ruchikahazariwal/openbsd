@@ -1,4 +1,4 @@
-/*	$OpenBSD: ommmc.c,v 1.31 2017/01/21 05:42:03 guenther Exp $	*/
+/*	$OpenBSD: ommmc.c,v 1.33 2020/02/18 12:13:39 mpi Exp $	*/
 
 /*
  * Copyright (c) 2009 Dale Rahn <drahn@openbsd.org>
@@ -23,7 +23,6 @@
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
-#include <sys/kthread.h>
 #include <sys/malloc.h>
 #include <sys/systm.h>
 #include <machine/bus.h>
@@ -180,9 +179,9 @@
 #define MMCHS_CUR_CAPA	0x148
 #define MMCHS_REV	0x1fc
 
-#define SDHC_COMMAND_TIMEOUT	hz
-#define SDHC_BUFFER_TIMEOUT	hz
-#define SDHC_TRANSFER_TIMEOUT	hz
+#define SDHC_COMMAND_TIMEOUT	1 /* sec */
+#define SDHC_BUFFER_TIMEOUT	1 /* sec */
+#define SDHC_TRANSFER_TIMEOUT	1 /* sec */
 
 int ommmc_match(struct device *, void *, void *);
 void ommmc_attach(struct device *, struct device *, void *);
@@ -1123,7 +1122,7 @@ ommmc_soft_reset(struct ommmc_softc *sc, int mask)
 }
 
 int
-ommmc_wait_intr(struct ommmc_softc *sc, int mask, int timo)
+ommmc_wait_intr(struct ommmc_softc *sc, int mask, int sec)
 {
 	int status;
 	int s;
@@ -1133,8 +1132,8 @@ ommmc_wait_intr(struct ommmc_softc *sc, int mask, int timo)
 	s = splsdmmc();
 	status = sc->intr_status & mask;
 	while (status == 0) {
-		if (tsleep(&sc->intr_status, PWAIT, "hcintr", timo)
-		    == EWOULDBLOCK) {
+		if (tsleep_nsec(&sc->intr_status, PWAIT, "hcintr",
+		    SEC_TO_NSEC(sec)) == EWOULDBLOCK) {
 			status |= MMCHS_STAT_ERRI;
 			break;
 		}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: qlw.c,v 1.31 2017/01/24 02:28:17 visa Exp $ */
+/*	$OpenBSD: qlw.c,v 1.34 2020/02/05 16:29:30 krw Exp $ */
 
 /*
  * Copyright (c) 2011 David Gwynne <dlg@openbsd.org>
@@ -164,11 +164,7 @@ qlw_queue_write(struct qlw_softc *sc, bus_size_t offset, u_int16_t value)
 }
 
 struct scsi_adapter qlw_switch = {
-	qlw_scsi_cmd,
-	scsi_minphys,
-	qlw_scsi_probe,
-	NULL,	/* scsi_free */
-	NULL	/* ioctl */
+	qlw_scsi_cmd, NULL, qlw_scsi_probe, NULL, NULL
 };
 
 int
@@ -1025,7 +1021,7 @@ qlw_mbox(struct qlw_softc *sc, int maskin, int maskout)
 			}
 		}
 	} else {
-		tsleep(sc->sc_mbox, PRIBIO, "qlw_mbox", 0);
+		tsleep_nsec(sc->sc_mbox, PRIBIO, "qlw_mbox", INFSLP);
 		result = sc->sc_mbox[0];
 	}
 

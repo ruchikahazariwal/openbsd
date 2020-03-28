@@ -1,4 +1,4 @@
-/*	$OpenBSD: ofw_misc.h,v 1.7 2019/09/30 20:40:54 kettenis Exp $	*/
+/*	$OpenBSD: ofw_misc.h,v 1.10 2020/02/21 15:46:16 patrick Exp $	*/
 /*
  * Copyright (c) 2017 Mark Kettenis
  *
@@ -113,5 +113,40 @@ void	pwm_register(struct pwm_device *);
 int	pwm_init_state(uint32_t *cells, struct pwm_state *ps);
 int	pwm_get_state(uint32_t *cells, struct pwm_state *ps);
 int	pwm_set_state(uint32_t *cells, struct pwm_state *ps);
+
+/* Non-volatile memory support */
+
+struct nvmem_device {
+	int	nd_node;
+	void	*nd_cookie;
+	int	(*nd_read)(void *, bus_addr_t, void *, bus_size_t);
+
+	LIST_ENTRY(nvmem_device) nd_list;
+	uint32_t nd_phandle;
+};
+
+void	nvmem_register(struct nvmem_device *);
+int	nvmem_read(uint32_t, bus_addr_t, void *, bus_size_t);
+int	nvmem_read_cell(int, const char *name, void *, bus_size_t);
+
+/* Video interface support */
+
+struct drm_device;
+struct video_device {
+	int	vd_node;
+	void	*vd_cookie;
+	int	(*vd_read)(void *, bus_addr_t, void *, bus_size_t);
+
+	int	(*vd_ep_activate)(void *, struct drm_device *);
+	void *	(*vd_ep_get_data)(void *);
+
+	LIST_ENTRY(video_device) vd_list;
+	uint32_t vd_phandle;
+};
+
+void	video_register(struct video_device *);
+int	video_port_activate(uint32_t, struct drm_device *);
+int	video_endpoint_activate(uint32_t, struct drm_device *);
+void *	video_endpoint_get_data(uint32_t);
 
 #endif /* _DEV_OFW_MISC_H_ */

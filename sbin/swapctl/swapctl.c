@@ -1,4 +1,4 @@
-/*	$OpenBSD: swapctl.c,v 1.24 2019/06/28 13:32:46 deraadt Exp $	*/
+/*	$OpenBSD: swapctl.c,v 1.26 2020/02/11 18:16:38 jca Exp $	*/
 /*	$NetBSD: swapctl.c,v 1.9 1998/07/26 20:23:15 mycroft Exp $	*/
 
 /*
@@ -13,8 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -334,7 +332,7 @@ do_fstab(void)
 	char	*s;
 	long	priority;
 	struct	stat st;
-	mode_t	rejecttype;
+	mode_t	rejecttype = 0;
 	int	gotone = 0;
 
 	/*
@@ -346,8 +344,7 @@ do_fstab(void)
 			rejecttype = S_IFREG;
 		else if (strcmp(tflag, "noblk") == 0)
 			rejecttype = S_IFBLK;
-	} else
-		rejecttype = 0;
+	}
 
 #define PRIORITYEQ	"priority="
 #define NFSMNTPT	"nfsmntpt="

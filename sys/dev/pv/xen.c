@@ -1,4 +1,4 @@
-/*	$OpenBSD: xen.c,v 1.93 2018/01/21 18:54:46 mikeb Exp $	*/
+/*	$OpenBSD: xen.c,v 1.95 2020/02/13 15:39:02 mikeb Exp $	*/
 
 /*
  * Copyright (c) 2015, 2016, 2017 Mike Belopuhov
@@ -650,8 +650,10 @@ xen_intr_unmask_release(struct xen_softc *sc, struct xen_intsrc *xi)
 	struct evtchn_unmask eu;
 
 	xi->xi_masked = 0;
-	if (!test_bit(xi->xi_port, &sc->sc_ipg->evtchn_mask[0]))
+	if (!test_bit(xi->xi_port, &sc->sc_ipg->evtchn_mask[0])) {
+		xen_intsrc_release(sc, xi);
 		return (0);
+	}
 	eu.port = xi->xi_port;
 	xen_intsrc_release(sc, xi);
 	return (xen_evtchn_hypercall(sc, EVTCHNOP_unmask, &eu, sizeof(eu)));
@@ -702,7 +704,8 @@ xen_intr(void)
 			}
 			xi->xi_evcnt.ec_count++;
 			xen_intr_mask_acquired(sc, xi);
-			task_add(xi->xi_taskq, &xi->xi_task);
+			if (!task_add(xi->xi_taskq, &xi->xi_task))
+				xen_intsrc_release(sc, xi);
 		}
 	}
 }
@@ -714,6 +717,7 @@ xen_intr_schedule(xen_intr_handle_t xih)
 	struct xen_intsrc *xi;
 
 	if ((xi = xen_intsrc_acquire(sc, (evtchn_port_t)xih)) != NULL) {
+		xen_intr_mask_acquired(sc, xi);
 		if (!task_add(xi->xi_taskq, &xi->xi_task))
 			xen_intsrc_release(sc, xi);
 	}

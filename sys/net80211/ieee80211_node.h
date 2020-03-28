@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_node.h,v 1.83 2019/09/02 12:54:21 stsp Exp $	*/
+/*	$OpenBSD: ieee80211_node.h,v 1.85 2020/01/15 09:34:27 phessler Exp $	*/
 /*	$NetBSD: ieee80211_node.h,v 1.9 2004/04/30 22:57:32 dyoung Exp $	*/
 
 /*-
@@ -39,7 +39,7 @@
 #define	IEEE80211_TRANS_WAIT	5		/* transition wait */
 #define	IEEE80211_INACT_WAIT	5		/* inactivity timer interval */
 #define	IEEE80211_INACT_MAX	(300/IEEE80211_INACT_WAIT)
-#define	IEEE80211_CACHE_SIZE	100
+#define	IEEE80211_CACHE_SIZE	512
 #define	IEEE80211_CACHE_WAIT	30
 #define	IEEE80211_INACT_SCAN	10		/* for station mode */
 
@@ -533,6 +533,7 @@ void ieee80211_create_ibss(struct ieee80211com* ,
 		struct ieee80211_channel *);
 void ieee80211_notify_dtim(struct ieee80211com *);
 void ieee80211_set_tim(struct ieee80211com *, int, int);
+void ieee80211_free_node(struct ieee80211com *, struct ieee80211_node *);
 
 int ieee80211_node_cmp(const struct ieee80211_node *,
 		const struct ieee80211_node *);

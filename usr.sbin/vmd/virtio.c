@@ -1,4 +1,5 @@
-/*	$OpenBSD: virtio.c,v 1.79 2019/09/24 12:14:54 mlarkin Exp $	*/
+/*	$OpenBSD: virtio.c,v 1.82 2019/12/11 06:45:16 pd Exp $	*/
+
 
 /*
  * Copyright (c) 2015 Mike Larkin <mlarkin@openbsd.org>
@@ -47,9 +48,7 @@
 #include "loadfile.h"
 #include "atomicio.h"
 
-
 extern char *__progname;
-
 struct viornd_dev viornd;
 struct vioblk_dev *vioblk;
 struct vionet_dev *vionet;
@@ -193,7 +192,7 @@ viombh_notifyq(void)
 	size_t sz;
 	int ret;
 	uint16_t aidx, uidx;
-	char *buf, *rnd_data;
+	char *buf;
 	struct vring_desc *desc;
 	struct vring_avail *avail;
 	struct vring_used *used;
@@ -231,6 +230,8 @@ viombh_notifyq(void)
 	sz = desc[avail->ring[aidx]].len;
 	if (sz > MAXPHYS)
 		fatal("viombh descriptor size too large (%zu)", sz);
+
+	// free the pages via another vmm ioctl (TBD)
 
 	/* ret == 1 -> interrupt needed */
 	/* XXX check VIRTIO_F_NO_INTR */
@@ -347,7 +348,6 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 
 	return (0);
 }
-
 
 /* Update queue select */
 void
@@ -2271,26 +2271,28 @@ virtio_init(struct vmd_vm *vm, int child_cdrom,
 			__progname);
 		return;
 	}
-	printf("\n I am here testing2");
 	// viombh defined in vmd/virtio.h
 	// vcp "vm_create_params" defined in include/vmmvar.h
 	memset(&viombh, 0, sizeof(viombh));
 	viombh.vq[0].qs = VIOMBH_QUEUE_SIZE;
 	viombh.vq[0].vq_availoffset = sizeof(struct vring_desc) * VIOMBH_QUEUE_SIZE;
-	viombh.vq[0].vq_usedoffset = VIRTQUEUE_ALIGN(sizeof(struct vring_desc) * VIOMBH_QUEUE_SIZE + sizeof(uint16_t) * (2 + VIOMBH_QUEUE_SIZE));
+	viombh.vq[0].vq_usedoffset = VIRTQUEUE_ALIGN(sizeof(struct vring_desc) *
+		VIOMBH_QUEUE_SIZE + sizeof(uint16_t) * (2 + VIOMBH_QUEUE_SIZE));
+	viombh.vq[0].last_avail = 0;
 	viombh.vq[1].qs = VIOMBH_QUEUE_SIZE;
 	viombh.vq[1].vq_availoffset = sizeof(struct vring_desc) * VIOMBH_QUEUE_SIZE;
-	viombh.vq[1].vq_usedoffset = VIRTQUEUE_ALIGN(sizeof(struct vring_desc) * VIOMBH_QUEUE_SIZE + sizeof(uint16_t) * (2 + VIOMBH_QUEUE_SIZE));
+	viombh.vq[1].vq_usedoffset = VIRTQUEUE_ALIGN(sizeof(struct vring_desc) *
+		VIOMBH_QUEUE_SIZE + sizeof(uint16_t) * (2 + VIOMBH_QUEUE_SIZE));
+	viombh.vq[1].last_avail = 0;
 	viombh.vq[2].qs = VIOMBH_QUEUE_SIZE;
 	viombh.vq[2].vq_availoffset = sizeof(struct vring_desc) * VIOMBH_QUEUE_SIZE;
-	viombh.vq[2].vq_usedoffset = VIRTQUEUE_ALIGN(sizeof(struct vring_desc) * VIOMBH_QUEUE_SIZE + sizeof(uint16_t) * (2 + VIOMBH_QUEUE_SIZE));
+	viombh.vq[2].vq_usedoffset = VIRTQUEUE_ALIGN(sizeof(struct vring_desc) *
+		VIOMBH_QUEUE_SIZE + sizeof(uint16_t) * (2 + VIOMBH_QUEUE_SIZE));
+	viombh.vq[2].last_avail = 0;
 	viombh.pci_id = id;
 	viombh.irq = pci_get_dev_irq(id);
 	viombh.vm_id = vcp->vcp_id;
 	viombh.cfg.device_feature = VIRTIO_BALLOON_F_STATS_VQ;
-	printf("\n I am here testing1");
-	//viombh_vq_dequeue();
-	/* cmpe end */
 }
 
 void
@@ -2419,11 +2421,6 @@ vionet_restore(int fd, struct vmd_vm *vm, int *child_taps)
 			memset(&vionet[i].event, 0, sizeof(struct event));
 			event_set(&vionet[i].event, vionet[i].fd,
 			    EV_READ | EV_PERSIST, vionet_rx_event, &vionet[i]);
-			if (event_add(&vionet[i].event, NULL)) {
-				log_warn("could not initialize vionet event "
-				    "handler");
-				return (-1);
-			}
 		}
 	}
 	return (0);
@@ -2529,7 +2526,7 @@ virtio_restore(int fd, struct vmd_vm *vm, int child_cdrom,
 	if ((ret = vmmci_restore(fd, vcp->vcp_id)) == -1)
 		return ret;
 
-	/*CMPE added restore fucntion for viombh */ 
+	/*CMPE added restore fucntion for viombh */
 	if ((ret = viombh_restore(fd, vcp)) == -1)
 		return ret;
 	/*CMPE ends */
@@ -2621,4 +2618,42 @@ virtio_dump(int fd)
 		return ret;
 
 	return (0);
+}
+
+void
+virtio_stop(struct vm_create_params *vcp)
+{
+	uint8_t i;
+	for (i = 0; i < vcp->vcp_nnics; i++) {
+		if (event_del(&vionet[i].event)) {
+			log_warn("could not initialize vionet event "
+			    "handler");
+			return;
+		}
+	}
+}
+
+void
+virtio_start(struct vm_create_params *vcp)
+{
+	uint8_t i;
+	for (i = 0; i < vcp->vcp_nnics; i++) {
+		if (event_add(&vionet[i].event, NULL)) {
+			log_warn("could not initialize vionet event "
+			    "handler");
+			return;
+		}
+	}
+}
+
+/* move below into separate file XXX */
+void
+viombh_do_inflate(struct vmd_vm *vm)
+{
+	// update num_pages register
+	// viombh.num_pages = ??
+
+	// send interrupt to VM
+	// vcpu_assert_pic_irq(vm_id, vcpu_id (always 0), viombh.irq);
+
 }

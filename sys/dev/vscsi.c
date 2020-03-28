@@ -1,4 +1,4 @@
-/*	$OpenBSD: vscsi.c,v 1.41 2017/02/12 17:12:37 chl Exp $ */
+/*	$OpenBSD: vscsi.c,v 1.48 2020/02/20 16:56:52 visa Exp $ */
 
 /*
  * Copyright (c) 2008 David Gwynne <dlg@openbsd.org>
@@ -96,10 +96,7 @@ int		vscsi_probe(struct scsi_link *);
 void		vscsi_free(struct scsi_link *);
 
 struct scsi_adapter vscsi_switch = {
-	vscsi_cmd,
-	scsi_minphys,
-	vscsi_probe,
-	vscsi_free
+	vscsi_cmd, NULL, vscsi_probe, vscsi_free, NULL
 };
 
 int		vscsi_i2t(struct vscsi_softc *, struct vscsi_ioc_i2t *);
@@ -116,11 +113,11 @@ void		vscsi_ccb_put(void *, void *);
 void		filt_vscsidetach(struct knote *);
 int		filt_vscsiread(struct knote *, long);
   
-struct filterops vscsi_filtops = {
-	1,
-	NULL,
-	filt_vscsidetach,
-	filt_vscsiread
+const struct filterops vscsi_filtops = {
+	.f_flags	= FILTEROP_ISFD,
+	.f_attach	= NULL,
+	.f_detach	= filt_vscsidetach,
+	.f_event	= filt_vscsiread,
 };
 
 
@@ -199,7 +196,8 @@ vscsi_cmd(struct scsi_xfer *xs)
 	if (polled) {
 		mtx_enter(&sc->sc_poll_mtx);
 		while (ccb->ccb_xs != NULL)
-			msleep(ccb, &sc->sc_poll_mtx, PRIBIO, "vscsipoll", 0);
+			msleep_nsec(ccb, &sc->sc_poll_mtx, PRIBIO, "vscsipoll",
+			    INFSLP);
 		mtx_leave(&sc->sc_poll_mtx);
 		scsi_done(xs);
 	}
@@ -537,7 +535,7 @@ vscsipoll(dev_t dev, int events, struct proc *p)
 	int				revents = 0;
 
 	if (sc == NULL)
-		return (ENXIO);
+		return (POLLERR);
 
 	if (events & (POLLIN | POLLRDNORM)) {
 		mtx_enter(&sc->sc_state_mtx);
@@ -645,8 +643,8 @@ vscsiclose(dev_t dev, int flags, int mode, struct proc *p)
 
 	mtx_enter(&sc->sc_state_mtx);
 	while (sc->sc_ref_count > 0) {
-		msleep(&sc->sc_ref_count, &sc->sc_state_mtx,
-		    PRIBIO, "vscsiref", 0);
+		msleep_nsec(&sc->sc_ref_count, &sc->sc_state_mtx,
+		    PRIBIO, "vscsiref", INFSLP);
 	}
 	mtx_leave(&sc->sc_state_mtx);
 

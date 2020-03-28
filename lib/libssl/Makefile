@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.56 2019/02/09 15:30:52 jsing Exp $
+# $OpenBSD: Makefile,v 1.64 2020/03/13 16:40:42 jsing Exp $
 
 .include <bsd.own.mk>
 .ifndef NOMAN
@@ -17,7 +17,8 @@ CFLAGS+= -Werror
 .endif
 CFLAGS+= -DLIBRESSL_INTERNAL
 .ifdef TLS1_3
-CFLAGS+= -DLIBRESSL_HAS_TLS1_3
+CFLAGS+= -DLIBRESSL_HAS_TLS1_3_CLIENT
+CFLAGS+= -DLIBRESSL_HAS_TLS1_3_SERVER
 .endif
 CFLAGS+= -I${.CURDIR}
 
@@ -33,7 +34,6 @@ SRCS= \
 	bs_cbs.c \
 	d1_both.c \
 	d1_clnt.c \
-	d1_enc.c \
 	d1_lib.c \
 	d1_pkt.c \
 	d1_srtp.c \
@@ -50,6 +50,7 @@ SRCS= \
 	ssl_clnt.c \
 	ssl_err.c \
 	ssl_init.c \
+	ssl_kex.c \
 	ssl_lib.c \
 	ssl_methods.c \
 	ssl_packet.c \
@@ -67,16 +68,30 @@ SRCS= \
 	t1_lib.c \
 	tls13_buffer.c \
 	tls13_client.c \
+	tls13_error.c \
 	tls13_handshake.c \
 	tls13_handshake_msg.c \
 	tls13_key_schedule.c \
+	tls13_key_share.c \
+	tls13_legacy.c \
 	tls13_lib.c \
 	tls13_record.c \
-	tls13_record_layer.c
+	tls13_record_layer.c \
+	tls13_server.c
 
 HDRS=	dtls1.h srtp.h ssl.h ssl2.h ssl23.h ssl3.h tls1.h
 
 .PATH:	${.CURDIR}
+
+check_includes:
+	@cd ${.CURDIR}; for i in $(HDRS); do \
+	    j="cmp -s $$i ${DESTDIR}/usr/include/openssl/`basename $$i` || \
+		(echo \"`basename $$i` differs from installed version; \" \
+	        \"did you forget 'make includes'?\" && false)"; \
+	    eval "$$j"; \
+	done;
+
+all: check_includes
 
 includes:
 	@test -d ${DESTDIR}/usr/include/openssl || \

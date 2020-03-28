@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhclient.c,v 1.651 2019/08/06 11:07:36 krw Exp $	*/
+/*	$OpenBSD: dhclient.c,v 1.659 2020/01/26 10:31:03 krw Exp $	*/
 
 /*
  * Copyright 2004 Henning Brauer <henning@openbsd.org>
@@ -154,6 +154,7 @@ void write_lease_db(struct client_lease_tq *);
 void write_option_db(struct client_lease *, struct client_lease *);
 char *lease_as_string(char *, struct client_lease *);
 struct proposal *lease_as_proposal(struct client_lease *);
+struct unwind_info *lease_as_unwind_info(struct client_lease *);
 void append_statement(char *, size_t, char *, char *);
 time_t lease_expiry(struct client_lease *);
 time_t lease_renewal(struct client_lease *);
@@ -231,7 +232,7 @@ get_link_ifa(const char *name, struct ifaddrs *ifap)
 
 	if (ifa != NULL) {
 		sdl = (struct sockaddr_dl *)ifa->ifa_addr;
-		if (sdl->sdl_type != IFT_ETHER ||
+		if ((sdl->sdl_type != IFT_ETHER && sdl->sdl_type != IFT_CARP) ||
 		    sdl->sdl_alen != ETHER_ADDR_LEN)
 			return NULL;
 	}
@@ -348,6 +349,11 @@ rtm_dispatch(struct interface_info *ifi, struct rt_msghdr *rtm)
 
 	switch (rtm->rtm_type) {
 	case RTM_PROPOSAL:
+		if (rtm->rtm_priority == RTP_PROPOSAL_SOLICIT) {
+			if (quit == 0 && ifi->active != NULL)
+				tell_unwind(ifi->unwind_info, ifi->flags);
+			return;
+		}
 		if (rtm->rtm_index != ifi->index ||
 		    rtm->rtm_priority != RTP_PROPOSAL_DHCLIENT)
 			return;
@@ -379,10 +385,14 @@ rtm_dispatch(struct interface_info *ifi, struct rt_msghdr *rtm)
 		if ((rtm->rtm_flags & RTF_UP) == 0)
 			fatalx("down");
 
- 		if ((ifm->ifm_xflags & IFXF_AUTOCONF4) == 0)
- 			ifi->flags &= ~IFI_AUTOCONF;
-		else if ((ifi->flags & IFI_AUTOCONF) == 0) {
-			/* Get new lease when AUTOCONF4 gets set. */
+ 		if ((ifm->ifm_xflags & IFXF_AUTOCONF4) == 0 &&
+		    (ifi->flags & IFI_AUTOCONF) != 0) {
+			/* Tell unwind when IFI_AUTOCONF is cleared. */
+			tell_unwind(NULL, ifi->flags);
+			ifi->flags &= ~IFI_AUTOCONF;
+		} else if ((ifm->ifm_xflags & IFXF_AUTOCONF4) != 0 &&
+		    (ifi->flags & IFI_AUTOCONF) == 0) {
+			/* Get new lease when IFI_AUTOCONF is set. */
 			ifi->flags |= IFI_AUTOCONF;
 			quit = RESTART;
 			break;
@@ -431,10 +441,11 @@ rtm_dispatch(struct interface_info *ifi, struct rt_msghdr *rtm)
 	}
 
 	/*
-	 * Something has happened that may have granted/revoked responsibility
-	 * for resolv.conf.
+	 * Responsibility for resolv.conf may have changed hands.
 	 */
-	if (ifi->active != NULL && (ifi->flags & IFI_IN_CHARGE) != 0)
+	if (quit == 0 && ifi->active != NULL &&
+	    (ifi->flags & IFI_AUTOCONF) != 0 &&
+	    (ifi->flags & IFI_IN_CHARGE) != 0)
 		write_resolv_conf();
 }
 
@@ -463,23 +474,25 @@ main(int argc, char *argv[])
 	while ((ch = getopt(argc, argv, "c:di:L:nrv")) != -1)
 		switch (ch) {
 		case 'c':
+			if (optarg == NULL)
+				usage();
+			cmd_opts |= OPT_CONFPATH;
 			path_dhclient_conf = optarg;
 			break;
 		case 'd':
 			cmd_opts |= OPT_FOREGROUND;
 			break;
 		case 'i':
+			if (optarg == NULL)
+				usage();
+			cmd_opts |= OPT_IGNORELIST;
 			ignore_list = strdup(optarg);
-			if (ignore_list == NULL)
-				fatal("ignore_list");
 			break;
 		case 'L':
+			if (optarg == NULL)
+				usage();
+			cmd_opts |= OPT_DBPATH;
 			path_option_db = optarg;
-			if (lstat(path_option_db, &sb) != -1) {
-				if (S_ISREG(sb.st_mode) == 0)
-					fatalx("'%s' is not a regular file",
-					    path_option_db);
-			}
 			break;
 		case 'n':
 			cmd_opts |= OPT_NOACTION;
@@ -499,6 +512,29 @@ main(int argc, char *argv[])
 
 	if (argc != 1)
 		usage();
+
+	if ((cmd_opts & OPT_DBPATH) != 0) {
+		if (lstat(path_option_db, &sb) == -1) {
+			/*
+			 * Non-existant file is OK. An attempt will be
+			 * made to create it.
+			 */
+			if (errno != ENOENT)
+				fatal("lstat(%s)", path_option_db);
+		} else if (S_ISREG(sb.st_mode) == 0)
+			fatalx("'%s' is not a regular file",
+			    path_option_db);
+	}
+	if ((cmd_opts & OPT_CONFPATH) != 0) {
+		if (lstat(path_dhclient_conf, &sb) == -1) {
+			/*
+			 * Non-existant file is OK. It lets you ignore
+			 * /etc/dhclient.conf for testing.
+			 */
+			if (errno != ENOENT)
+				fatal("lstat(%s)", path_dhclient_conf);
+		}
+	}
 
 	if ((cmd_opts & (OPT_FOREGROUND | OPT_NOACTION)) != 0)
 		cmd_opts |= OPT_VERBOSE;
@@ -925,6 +961,8 @@ dhcpnak(struct interface_info *ifi, const char *src)
 	ifi->active = NULL;
 	free(ifi->configured);
 	ifi->configured = NULL;
+	free(ifi->unwind_info);
+	ifi->unwind_info = NULL;
 
 	/* Stop sending DHCPREQUEST packets. */
 	cancel_timeout(ifi);
@@ -938,6 +976,7 @@ bind_lease(struct interface_info *ifi)
 {
 	struct client_lease	*lease, *pl, *ll;
 	struct proposal		*effective_proposal = NULL;
+	struct unwind_info	*unwind_info;
 	char			*msg = NULL;
 	time_t			 cur_time, renewal;
 	int			 rslt, seen;
@@ -966,6 +1005,27 @@ bind_lease(struct interface_info *ifi)
 	/* Replace the old active lease with the accepted offer. */
 	ifi->active = ifi->offer;
 	ifi->offer = NULL;
+
+	/*
+	 * Supply unwind with updated info.
+	 */
+	unwind_info = lease_as_unwind_info(ifi->active);
+	if (ifi->unwind_info == NULL && unwind_info != NULL) {
+		ifi->unwind_info = unwind_info;
+		tell_unwind(ifi->unwind_info, ifi->flags);
+	} else if (ifi->unwind_info != NULL && unwind_info == NULL) {
+		tell_unwind(NULL, ifi->flags);
+		free(ifi->unwind_info);
+		ifi->unwind_info = NULL;
+	} else if (ifi->unwind_info != NULL && unwind_info != NULL) {
+		if (memcmp(ifi->unwind_info, unwind_info,
+		    sizeof(*ifi->unwind_info)) != 0) {
+			tell_unwind(NULL, ifi->flags);
+			free(ifi->unwind_info);
+			ifi->unwind_info = unwind_info;
+			tell_unwind(ifi->unwind_info, ifi->flags);
+		}
+	}
 
 	effective_proposal = lease_as_proposal(lease);
 	if (ifi->configured != NULL) {
@@ -1879,6 +1939,37 @@ append_statement(char *string, size_t sz, char *s1, char *s2)
 	strlcat(string, ";\n", sz);
 }
 
+struct unwind_info *
+lease_as_unwind_info(struct client_lease *lease)
+{
+	struct unwind_info	*unwind_info;
+	struct option_data	*opt;
+	unsigned int		 servers;
+
+	unwind_info = calloc(1, sizeof(*unwind_info));
+	if (unwind_info == NULL)
+		fatal("unwind_info");
+
+	opt = &lease->options[DHO_DOMAIN_NAME_SERVERS];
+	if (opt->len != 0) {
+		servers = opt->len / sizeof(in_addr_t);
+		if (servers > MAXNS)
+			servers = MAXNS;
+		if (servers > 0) {
+			unwind_info->count = servers;
+			memcpy(unwind_info->ns, opt->data, servers *
+			    sizeof(in_addr_t));
+		}
+	}
+
+	if (unwind_info->count == 0) {
+		free(unwind_info);
+		unwind_info = NULL;
+	}
+
+	return unwind_info;
+}
+
 struct proposal *
 lease_as_proposal(struct client_lease *lease)
 {
@@ -2244,7 +2335,7 @@ fork_privchld(struct interface_info *ifi, int fd, int fd2)
 	if ((routefd = socket(AF_ROUTE, SOCK_RAW, 0)) == -1)
 		fatal("socket(AF_ROUTE, SOCK_RAW)");
 
-	if (unveil("/etc/resolv.conf", "wc") == -1)
+	if (unveil(_PATH_RESCONF, "wc") == -1)
 		fatal("unveil");
 	if (unveil("/etc/resolv.conf.tail", "r") == -1)
 		fatal("unveil");
@@ -2374,7 +2465,7 @@ apply_defaults(struct client_lease *lease)
 	}
 
 	if (newlease->options[DHO_STATIC_ROUTES].len != 0) {
-		log_warnx("%s: DHO_STATIC_ROUTES (option 33) not supported",
+		log_debug("%s: DHO_STATIC_ROUTES (option 33) not supported",
 		    log_procname);
 		free(newlease->options[DHO_STATIC_ROUTES].data);
 		newlease->options[DHO_STATIC_ROUTES].data = NULL;
@@ -2696,6 +2787,8 @@ release_lease(struct interface_info *ifi)
 	make_release(ifi, ifi->active);
 	send_release(ifi);
 
+	tell_unwind(NULL, ifi->flags);
+
 	revoke_proposal(ifi->configured);
 	imsg_flush(unpriv_ibuf);
 
@@ -2712,6 +2805,8 @@ release_lease(struct interface_info *ifi)
 	ifi->active = NULL;
 	free(ifi->configured);
 	ifi->configured = NULL;
+	free(ifi->unwind_info);
+	ifi->unwind_info = NULL;
 
 	log_warnx("%s: %s RELEASED to %s", log_procname, ifabuf, destbuf);
 }

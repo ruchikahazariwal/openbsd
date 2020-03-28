@@ -48,9 +48,9 @@
 ./usr/lib/gcc-lib/mips64el-unknown-openbsd6.6/4.2.1/collect2
 ./usr/lib/gcc-lib/mips64el-unknown-openbsd6.6/4.2.1/libgcc.a
 ./usr/lib/gcc-lib/mips64el-unknown-openbsd6.6/4.2.1/specs
-./usr/lib/libLLVM.so.1.0
-./usr/lib/libc++.so.3.0
-./usr/lib/libc++abi.so.1.0
+./usr/lib/libLLVM.so.2.0
+./usr/lib/libc++.so.4.0
+./usr/lib/libc++abi.so.2.0
 ./usr/lib/libcompiler_rt.a
 ./usr/lib/libstdc++.so.57.0
 ./usr/libdata/perl5/mips64el-openbsd
@@ -302,9 +302,7 @@
 ./usr/libdata/perl5/mips64el-openbsd/Scalar
 ./usr/libdata/perl5/mips64el-openbsd/Scalar/Util.pm
 ./usr/libdata/perl5/mips64el-openbsd/Socket.pm
-./usr/libdata/perl5/mips64el-openbsd/Storable
 ./usr/libdata/perl5/mips64el-openbsd/Storable.pm
-./usr/libdata/perl5/mips64el-openbsd/Storable/Limit.pm
 ./usr/libdata/perl5/mips64el-openbsd/Sub
 ./usr/libdata/perl5/mips64el-openbsd/Sub/Util.pm
 ./usr/libdata/perl5/mips64el-openbsd/Sys
@@ -324,7 +322,6 @@
 ./usr/libdata/perl5/mips64el-openbsd/Unicode/Collate.pm
 ./usr/libdata/perl5/mips64el-openbsd/Unicode/Collate/Locale.pm
 ./usr/libdata/perl5/mips64el-openbsd/Unicode/Normalize.pm
-./usr/libdata/perl5/mips64el-openbsd/arybase.pm
 ./usr/libdata/perl5/mips64el-openbsd/attributes.pm
 ./usr/libdata/perl5/mips64el-openbsd/auto
 ./usr/libdata/perl5/mips64el-openbsd/auto/B
@@ -438,7 +435,6 @@
 ./usr/libdata/perl5/mips64el-openbsd/auto/Term
 ./usr/libdata/perl5/mips64el-openbsd/auto/Term/ReadKey
 ./usr/libdata/perl5/mips64el-openbsd/auto/Term/ReadKey/ReadKey.so
-./usr/libdata/perl5/mips64el-openbsd/auto/Term/ReadKey/autosplit.ix
 ./usr/libdata/perl5/mips64el-openbsd/auto/Tie
 ./usr/libdata/perl5/mips64el-openbsd/auto/Tie/Hash
 ./usr/libdata/perl5/mips64el-openbsd/auto/Tie/Hash/NamedCapture
@@ -453,8 +449,6 @@
 ./usr/libdata/perl5/mips64el-openbsd/auto/Unicode/Collate/Collate.so
 ./usr/libdata/perl5/mips64el-openbsd/auto/Unicode/Normalize
 ./usr/libdata/perl5/mips64el-openbsd/auto/Unicode/Normalize/Normalize.so
-./usr/libdata/perl5/mips64el-openbsd/auto/arybase
-./usr/libdata/perl5/mips64el-openbsd/auto/arybase/arybase.so
 ./usr/libdata/perl5/mips64el-openbsd/auto/attributes
 ./usr/libdata/perl5/mips64el-openbsd/auto/attributes/attributes.so
 ./usr/libdata/perl5/mips64el-openbsd/auto/mro

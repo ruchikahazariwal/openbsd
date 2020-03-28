@@ -1,4 +1,4 @@
-/* $OpenBSD: window-tree.c,v 1.42 2019/10/15 08:30:36 nicm Exp $ */
+/* $OpenBSD: window-tree.c,v 1.44 2020/01/08 06:38:55 nicm Exp $ */
 
 /*
  * Copyright (c) 2017 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -33,7 +33,7 @@ static void		 window_tree_key(struct window_mode_entry *,
 			     struct client *, struct session *,
 			     struct winlink *, key_code, struct mouse_event *);
 
-#define WINDOW_TREE_DEFAULT_COMMAND "switch-client -t '%%'"
+#define WINDOW_TREE_DEFAULT_COMMAND "switch-client -Zt '%%'"
 
 #define WINDOW_TREE_DEFAULT_FORMAT \
 	"#{?pane_format," \
@@ -317,7 +317,7 @@ window_tree_filter_pane(struct session *s, struct winlink *wl,
 
 static int
 window_tree_build_window(struct session *s, struct winlink *wl,
-    void* modedata, struct mode_tree_sort_criteria *sort_crit,
+    void *modedata, struct mode_tree_sort_criteria *sort_crit,
     struct mode_tree_item *parent, const char *filter)
 {
 	struct window_tree_modedata	*data = modedata;
@@ -383,7 +383,7 @@ empty:
 }
 
 static void
-window_tree_build_session(struct session *s, void* modedata,
+window_tree_build_session(struct session *s, void *modedata,
     struct mode_tree_sort_criteria *sort_crit, const char *filter)
 {
 	struct window_tree_modedata	*data = modedata;
@@ -973,7 +973,7 @@ window_tree_get_target(struct window_tree_itemdata *item,
 }
 
 static void
-window_tree_command_each(void* modedata, void* itemdata, struct client *c,
+window_tree_command_each(void *modedata, void *itemdata, struct client *c,
     __unused key_code key)
 {
 	struct window_tree_modedata	*data = modedata;
@@ -1030,7 +1030,7 @@ window_tree_command_free(void *modedata)
 }
 
 static void
-window_tree_kill_each(__unused void* modedata, void* itemdata,
+window_tree_kill_each(__unused void *modedata, void *itemdata,
     __unused struct client *c, __unused key_code key)
 {
 	struct window_tree_itemdata	*item = itemdata;

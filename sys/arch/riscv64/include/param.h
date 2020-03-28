@@ -49,8 +49,6 @@
 #define PAGE_SIZE	(1 << PAGE_SHIFT)
 #define PAGE_MASK	(PAGE_SIZE - 1)
 
-#define KERNBASE	0xffffffc000000000ULL	/* start of kernel virtual space */
-
 #ifdef _KERNEL
 
 #define NBPG		PAGE_SIZE		/* bytes/page */
@@ -65,6 +63,10 @@
 
 #ifndef MSGBUFSIZE
 #define MSGBUFSIZE	(16 * PAGE_SIZE)	/* XXX default message buffer size */
+#endif
+
+#ifndef KSTACK_PAGES
+#define KSTACK_PAGES	4			/*pages of kernel stack, with pcb*/
 #endif
 
 /*

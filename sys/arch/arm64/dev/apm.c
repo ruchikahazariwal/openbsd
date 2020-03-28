@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.1 2019/01/23 09:57:36 phessler Exp $	*/
+/*	$OpenBSD: apm.c,v 1.3 2020/02/20 16:56:51 visa Exp $	*/
 
 /*-
  * Copyright (c) 2001 Alexander Guy.  All rights reserved.
@@ -87,8 +87,12 @@ int filt_apmread(struct knote *kn, long hint);
 int apmkqfilter(dev_t dev, struct knote *kn);
 int apm_getdefaultinfo(struct apm_power_info *);
 
-struct filterops apmread_filtops =
-	{ 1, NULL, filt_apmrdetach, filt_apmread};
+const struct filterops apmread_filtops = {
+	.f_flags	= FILTEROP_ISFD,
+	.f_attach	= NULL,
+	.f_detach	= filt_apmrdetach,
+	.f_event	= filt_apmread,
+};
 
 int (*get_apminfo)(struct apm_power_info *) = apm_getdefaultinfo;
 

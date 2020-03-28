@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfd.c,v 1.108 2019/05/16 05:49:22 denis Exp $ */
+/*	$OpenBSD: ospfd.c,v 1.111 2020/01/21 20:38:52 remi Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -893,7 +893,6 @@ merge_interfaces(struct area *a, struct area *xa)
 		if (i->self)
 			i->self->priority = i->priority;
 		i->flags = xi->flags; /* needed? */
-		i->type = xi->type; /* needed? */
 		i->if_type = xi->if_type; /* needed? */
 		i->linkstate = xi->linkstate; /* needed? */
 
@@ -901,6 +900,10 @@ merge_interfaces(struct area *a, struct area *xa)
 		strncpy(i->auth_key, xi->auth_key, MAX_SIMPLE_AUTH_LEN);
 		md_list_clr(&i->auth_md_list);
 		md_list_copy(&i->auth_md_list, &xi->auth_md_list);
+
+		strlcpy(i->dependon, xi->dependon,
+		        sizeof(i->dependon));
+		i->depend_ok = xi->depend_ok;
 
 		if (i->passive != xi->passive) {
 			/* need to restart interface to cope with this change */
@@ -911,9 +914,14 @@ merge_interfaces(struct area *a, struct area *xa)
 				if_fsm(i, IF_EVT_UP);
 		}
 
-		strlcpy(i->dependon, xi->dependon,
-		        sizeof(i->dependon));
-		i->depend_ok = xi->depend_ok;
+		if (i->type != xi->type) {
+			/* restart interface to enable or disable DR election */
+			if (ospfd_process == PROC_OSPF_ENGINE)
+				if_fsm(i, IF_EVT_DOWN);
+			i->type = xi->type;
+			if (ospfd_process == PROC_OSPF_ENGINE)
+				if_fsm(i, IF_EVT_UP);
+		}
 	}
 	return (dirty);
 }

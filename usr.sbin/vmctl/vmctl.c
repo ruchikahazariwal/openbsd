@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmctl.c,v 1.71 2019/09/07 09:11:14 tobhe Exp $	*/
+/*	$OpenBSD: vmctl.c,v 1.74 2020/03/11 12:47:49 jasper Exp $	*/
 
 /*
  * Copyright (c) 2014 Mike Larkin <mlarkin@openbsd.org>
@@ -459,7 +459,7 @@ terminate_vm(uint32_t terminate_id, const char *name, unsigned int flags)
  * terminate_vm_complete
  *
  * Callback function invoked when we are expecting an
- * IMSG_VMDOP_TERMINATE_VMM_RESPONSE message indicating the completion of
+ * IMSG_VMDOP_TERMINATE_VM_RESPONSE message indicating the completion of
  * a terminate vm operation.
  *
  * Parameters:
@@ -716,6 +716,8 @@ vm_state(unsigned int mask)
 {
 	if (mask & VM_STATE_PAUSED)
 		return "paused";
+	else if (mask & VM_STATE_WAITING)
+		return "waiting";
 	else if (mask & VM_STATE_RUNNING)
 		return "running";
 	else if (mask & VM_STATE_SHUTDOWN)
@@ -744,13 +746,14 @@ print_vm_info(struct vmop_info_result *list, size_t ct)
 	size_t i;
 	char *tty;
 	char curmem[FMT_SCALED_STRSIZE];
+	char swap[FMT_SCALED_STRSIZE];
 	char maxmem[FMT_SCALED_STRSIZE];
 	char user[16], group[16];
 	const char *name;
 	int running;
 
-	printf("%5s %5s %5s %7s %7s %7s %12s %8s %s\n", "ID", "PID", "VCPUS",
-	    "MAXMEM", "CURMEM", "TTY", "OWNER", "STATE", "NAME");
+	printf("%5s %5s %5s %7s %7s %7s %7s %12s %8s %s\n", "ID", "PID", "VCPUS",
+	    "MAXMEM", "CURMEM", "SWAP", "TTY", "OWNER", "STATE", "NAME");
 
 	for (i = 0; i < ct; i++) {
 		vmi = &list[i];
@@ -766,8 +769,6 @@ print_vm_info(struct vmop_info_result *list, size_t ct)
 				(void)strlcpy(user, name, sizeof(user));
 			/* get group name */
 			if (vmi->vir_gid != -1) {
-				if (vmi->vir_uid == 0)
-					*user = '\0';
 				name = group_from_gid(vmi->vir_gid, 1);
 				if (name == NULL)
 					(void)snprintf(group, sizeof(group),
@@ -780,6 +781,7 @@ print_vm_info(struct vmop_info_result *list, size_t ct)
 
 			(void)strlcpy(curmem, "-", sizeof(curmem));
 			(void)strlcpy(maxmem, "-", sizeof(maxmem));
+			(void)strlcpy(swap, "-", sizeof(swap));
 
 			(void)fmt_scaled(vir->vir_memory_size * 1024 * 1024,
 			    maxmem);
@@ -793,18 +795,20 @@ print_vm_info(struct vmop_info_result *list, size_t ct)
 					tty = list[i].vir_ttyname;
 
 				(void)fmt_scaled(vir->vir_used_size, curmem);
+				/* Needs mult by 4k XXX */
+				(void)fmt_scaled(vir->vir_swpginuse, swap);
 
 				/* running vm */
-				printf("%5u %5u %5zd %7s %7s %7s %12s %8s %s\n",
+				printf("%5u %5u %5zd %7s %7s %7s %7s %12s %8s %s\n",
 				    vir->vir_id, vir->vir_creator_pid,
-				    vir->vir_ncpus, maxmem, curmem,
+				    vir->vir_ncpus, maxmem, curmem, swap,
 				    tty, user, vm_state(vmi->vir_state),
 				    vir->vir_name);
 			} else {
 				/* disabled vm */
-				printf("%5u %5s %5zd %7s %7s %7s %12s %8s %s\n",
+				printf("%5u %5s %5zd %7s %7s %7s %7s %12s %8s %s\n",
 				    vir->vir_id, "-",
-				    vir->vir_ncpus, maxmem, curmem,
+				    vir->vir_ncpus, maxmem, curmem, swap,
 				    "-", user, vm_state(vmi->vir_state),
 				    vir->vir_name);
 			}
@@ -951,41 +955,83 @@ create_imagefile(int type, const char *imgfile_path, const char *base_path,
 }
 
 // vmctl get memory status information from VMs
-int vm_getStats(uint32_t start_id, const char *name, enum actions action)
+void
+vm_getStats(uint32_t start_id, const char *name, enum actions action)
 {
-	get_info_vm(NULL, NULL, CMD_CONSOLE, NULL );
-	printf("CMPE vm_getStats ");
-	return 0;
-}
+	struct vmop_id vid;
 
-// CMPE
+	memset(&vid, 0, sizeof(vid));
+	vid.vid_id = start_id;
+	if (name != NULL) {
+		(void)strlcpy(vid.vid_name, name, sizeof(vid.vid_name));
+		fprintf(stderr, "getting memory statistics of VM %s: ", name);
+	} else {
+		fprintf(stderr, "getting memory statistics of all VMs: ");
+	}
+
+	imsg_compose(ibuf,  IMSG_VMDOP_GET_VM_STATS_REQUEST,
+	    0, 0, -1, &vid, sizeof(vid));
+}
 
 void
 get_num_vm(struct imsg *imsg, int *ret)
 {
 	static size_t ct = 0;
 	static struct vmop_info_result *vir = NULL;
-	vm_counter = -1;
 
-	printf("CMPE imsg header type - %d", imsg->hdr.type); 
-
-	if (imsg->hdr.type == IMSG_VMDOP_GET_INFO_VM_DATA) {
+	if (imsg->hdr.type == IMSG_VMDOP_GET_VM_STATS_RESPONSE) {
 		vir = reallocarray(vir, ct + 1,
 		    sizeof(struct vmop_info_result));
 		if (vir == NULL) {
 			*ret = ENOMEM;
+			return;
 		}
-		else {
-			memcpy(&vir[ct], imsg->data, sizeof(struct vmop_info_result));
-			ct++;
-			*ret = 0;
-			vm_counter = ct;
-			printf("CMPE imsg after counter - %d", vm_counter); 
-		}		
-	}	
-	else {
+		memcpy(&vir[ct], imsg->data, sizeof(struct vmop_info_result));
+		ct++;
 		*ret = 0;
-		printf("CMPE imsg counter - %zu", ct);
+		return;
+	} else if (imsg->hdr.type == IMSG_VMDOP_GET_VM_STATS_END_RESPONSE) {
+		switch (info_action) {
+		case CMD_CONSOLE:
+			vm_console(vir, ct);
+			break;
+		case CMD_STOPALL:
+			terminate_all(vir, ct, info_flags);
+			break;
+		default:
+			print_vm_info(vir, ct);
+			break;
+		}
+		free(vir);
+		*ret = 0;
+		return;
+	} else {
+		*ret = EINVAL;
+		return;
 	}
+	// static size_t ct = 0;
+	// static struct vmop_info_result *vir = NULL;
+	// vm_counter = -1;
+
+	// printf("CMPE imsg header type - %d", imsg->hdr.type);
+
+	// if (imsg->hdr.type == IMSG_VMDOP_GET_INFO_VM_DATA) {
+	// 	vir = reallocarray(vir, ct + 1,
+	// 	    sizeof(struct vmop_info_result));
+	// 	if (vir == NULL) {
+	// 		*ret = ENOMEM;
+	// 	}
+	// 	else {
+	// 		memcpy(&vir[ct], imsg->data, sizeof(struct vmop_info_result));
+	// 		ct++;
+	// 		*ret = 0;
+	// 		vm_counter = ct;
+	// 		printf("CMPE imsg after counter - %d", vm_counter);
+	// 	}
+	// }
+	// else {
+	// 	*ret = 0;
+	// 	printf("CMPE imsg counter - %zu", ct);
+	// }
 }
 

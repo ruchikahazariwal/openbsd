@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 Brian Bamsch <bbamsch@google.com>
+ * Copyright (c) 2019-2020 Brian Bamsch <bbamsch@google.com>
  * Copyright (c) 2008,2009,2014 Dale Rahn <drahn@dalerahn.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -28,13 +28,16 @@
 // XXX Only targeting compatibility with SV39
 #define VP_IDX0_CNT	512
 #define VP_IDX0_MASK	(VP_IDX0_CNT-1)
-#define VP_IDX0_POS	12
+#define VP_IDX0_POS	39
 #define VP_IDX1_CNT	512
 #define VP_IDX1_MASK	(VP_IDX1_CNT-1)
-#define VP_IDX1_POS	21
+#define VP_IDX1_POS	30
 #define VP_IDX2_CNT	512
 #define VP_IDX2_MASK	(VP_IDX2_CNT-1)
-#define VP_IDX2_POS	30
+#define VP_IDX2_POS	21
+#define VP_IDX3_CNT	512
+#define VP_IDX3_MASK	(VP_IDX3_CNT-1)
+#define VP_IDX3_POS	12
 
 /* cache flags */
 // XXX These are duplicated from arm64 and may need some reworking
@@ -48,7 +51,6 @@
 #define PTED_VA_WIRED_M		(PMAP_MD3 << 1)
 #define PTED_VA_EXEC_M		(PMAP_MD3 << 2)
 
-
 #if defined(_KERNEL) && !defined(_LOCORE)
 /*
  * Pmap stuff
@@ -58,10 +60,15 @@ typedef struct pmap *pmap_t;
 
 struct pmap {
 	struct mutex pm_mtx;
-	struct pmapvp2 *pm_vp;	/* SV39 */
-	uint64_t pm_pa;
+	union {
+		struct pmapvp0 *l0;	/* virtual to physical table 4 lvl */
+		struct pmapvp1 *l1;	/* virtual to physical table 3 lvl */
+	} pm_vp;
+	bool have_4_level_pt;	// XXX This can be inferred from mode
+	uint8_t pm_mode;	// 4 Bits
+	uint16_t pm_asid;	// 16 Bits
+	uint64_t pm_pt0pa;
 	int pm_privileged;
-	int pm_asid;
 	int pm_refs;				/* ref count */
 	struct pmap_statistics  pm_stats;	/* pmap statistics */
 };
@@ -79,16 +86,19 @@ extern paddr_t zero_page;
 extern paddr_t copy_src_page;
 extern paddr_t copy_dst_page;
 
-void pagezero_cache(vaddr_t);
+void pagezero(vaddr_t);
 
 extern struct pmap kernel_pmap_;
 #define pmap_kernel()   		(&kernel_pmap_)
 #define	pmap_resident_count(pmap)	((pmap)->pm_stats.resident_count)
 #define	pmap_wired_count(pmap)		((pmap)->pm_stats.wired_count)
 
-vaddr_t pmap_bootstrap(long kvo, paddr_t lpt1,  long kernelstart,
-    long kernelend, long ram_start, long ram_end);
+vaddr_t pmap_bootstrap(long kvo, paddr_t lpt1,
+		vaddr_t kernelstart, vaddr_t kernelend,
+		paddr_t fdt_start, paddr_t fdt_end,
+		paddr_t ram_start, paddr_t ram_end);
 void pmap_kenter_cache(vaddr_t va, paddr_t pa, vm_prot_t prot, int cacheable);
+void pmap_page_ro(pmap_t pm, vaddr_t va, vm_prot_t prot);
 
 paddr_t pmap_steal_avail(size_t size, int align, void **kva);
 void pmap_avail_fixup();
@@ -101,7 +111,7 @@ struct pv_entry;
 /* investigate */
 #define pmap_unuse_final(p)		do { /* nothing */ } while (0)
 int	pmap_fault_fixup(pmap_t, vaddr_t, vm_prot_t, int);
-void	pmap_postinit(void);
+void pmap_postinit(void);
 void	pmap_map_early(paddr_t, psize_t);
 
 #endif /* _KERNEL && !_LOCORE */

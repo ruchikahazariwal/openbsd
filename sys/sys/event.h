@@ -1,4 +1,4 @@
-/*	$OpenBSD: event.h,v 1.30 2018/01/13 12:58:40 robert Exp $	*/
+/*	$OpenBSD: event.h,v 1.33 2020/02/20 16:56:52 visa Exp $	*/
 
 /*-
  * Copyright (c) 1999,2000,2001 Jonathan Lemon <jlemon@FreeBSD.org>
@@ -125,6 +125,8 @@ SLIST_HEAD(klist, knote);
 
 #ifdef _KERNEL
 
+#define EVFILT_MARKER	0xf			/* placemarker for tailq */
+
 /*
  * hint flag for in-kernel use - must not equal any existing note
  */
@@ -144,8 +146,10 @@ SLIST_HEAD(klist, knote);
  */
 #define NOTE_SIGNAL	0x08000000
 
+#define FILTEROP_ISFD		0x00000001	/* ident == filedescriptor */
+
 struct filterops {
-	int	f_isfd;		/* true if ident == filedescriptor */
+	int	f_flags;
 	int	(*f_attach)(struct knote *kn);
 	void	(*f_detach)(struct knote *kn);
 	int	(*f_event)(struct knote *kn, long hint);
@@ -170,6 +174,8 @@ struct knote {
 #define KN_QUEUED	0x0002			/* event is on queue */
 #define KN_DISABLED	0x0004			/* event is disabled */
 #define KN_DETACHED	0x0008			/* knote is detached */
+#define KN_PROCESSING	0x0010			/* knote is being processed */
+#define KN_WAITING	0x0020			/* waiting on processing */
 
 #define kn_id		kn_kevent.ident
 #define kn_filter	kn_kevent.filter
@@ -180,6 +186,8 @@ struct knote {
 };
 
 struct proc;
+
+extern const struct filterops sig_filtops;
 
 extern void	knote(struct klist *list, long hint);
 extern void	knote_activate(struct knote *);

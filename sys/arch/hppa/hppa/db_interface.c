@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_interface.c,v 1.44 2018/05/04 02:54:23 visa Exp $	*/
+/*	$OpenBSD: db_interface.c,v 1.47 2020/01/20 15:58:23 visa Exp $	*/
 
 /*
  * Copyright (c) 1999-2003 Michael Shalayeff
@@ -30,6 +30,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/stacktrace.h>
 
 #include <machine/db_machdep.h>
 #include <machine/frame.h>
@@ -200,9 +201,9 @@ db_ktrap(int type, int code, db_regs_t *regs)
 	s = splhigh();
 	ddb_regs = *regs;
 	db_active++;
-	cnpollc(TRUE);
+	cnpollc(1);
 	db_trap(type, code);
-	cnpollc(FALSE);
+	cnpollc(0);
 	db_active--;
 	splx(s);
 
@@ -216,7 +217,7 @@ db_ktrap(int type, int code, db_regs_t *regs)
  *  Any address is allowed for now.
  */
 int
-db_valid_breakpoint(db_addr_t addr)
+db_valid_breakpoint(vaddr_t addr)
 {
 	return (1);
 }
@@ -267,7 +268,7 @@ db_stack_trace_print(db_expr_t addr, int have_addr, db_expr_t count,
 		 * be stored on stack, dunno how to recover their values yet
 		 */
 		for (argp = &fp[-9]; nargs--; argp--) {
-			(*pr)("%x%s", db_get_value((int)argp, 4, FALSE),
+			(*pr)("%x%s", db_get_value((int)argp, 4, 0),
 				  nargs? ",":"");
 		}
 		(*pr)(") at ");
@@ -315,7 +316,7 @@ db_stack_trace_print(db_expr_t addr, int have_addr, db_expr_t count,
 }
 
 void
-db_save_stack_trace(struct db_stack_trace *st)
+stacktrace_save(struct stacktrace *st)
 {
 	register_t *fp, pc, rp;
 	int	i;
@@ -325,7 +326,7 @@ db_save_stack_trace(struct db_stack_trace *st)
 	rp = fp[-5];
 
 	st->st_count = 0;
-	for (i = 0; i < DB_STACK_TRACE_MAX; i++) {
+	for (i = 0; i < STACKTRACE_MAX; i++) {
 		st->st_pc[st->st_count++] = rp;
 
 		/* next frame */
