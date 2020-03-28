@@ -265,6 +265,8 @@ vm_balloon_thread_fn(void *p)
 			log_warn("balloon ioctl failed: %s",
 			    strerror(errno));
 		} else if (vib.vib_host_is_swapping) {
+			//vib_host_is_swapping contains the number of pages to swap
+			// assume vm has number of pages to swap
 			log_debug("host in swap, requesting inflate");
 			viombh_do_inflate(vm);
 		}

@@ -2295,6 +2295,7 @@ virtio_init(struct vmd_vm *vm, int child_cdrom,
 	viombh.cfg.device_feature = VIRTIO_BALLOON_F_STATS_VQ;
 }
 
+
 void
 virtio_shutdown(struct vmd_vm *vm)
 {
@@ -2545,6 +2546,20 @@ viornd_dump(int fd)
 	return (0);
 }
 
+//CMPE
+int
+viombh_dump(int fd)
+{
+	log_debug("%s: sending viombh", __func__);
+	if (atomicio(vwrite, fd, &viombh, sizeof(viombh)) != sizeof(viombh)) {
+		log_warnx("%s: error writing viombh to fd", __func__);
+		return (-1);
+	}
+	return (0);
+}
+//CMPE ends
+
+
 int
 vmmci_dump(int fd)
 {
@@ -2617,6 +2632,11 @@ virtio_dump(int fd)
 	if ((ret = vmmci_dump(fd)) == -1)
 		return ret;
 
+	//CMPE
+	if ((ret = viombh_dump(fd)) == -1)
+		return ret;
+	//CMPE Ends
+
 	return (0);
 }
 
@@ -2648,12 +2668,13 @@ virtio_start(struct vm_create_params *vcp)
 
 /* move below into separate file XXX */
 void
-viombh_do_inflate(struct vmd_vm *vm)
+viombh_do_inflate(struct vmd_vm *vm, int numSwapHost)
 {
 	// update num_pages register
-	// viombh.num_pages = ??
+	viombh.num_pages = numSwapHost;
 
 	// send interrupt to VM
-	// vcpu_assert_pic_irq(vm_id, vcpu_id (always 0), viombh.irq);
+	log_debug("Sending an interrupt for inflating the balloon");
+	vcpu_assert_pic_irq(viombh.vm_id, 0, viombh.irq);
 
 }
