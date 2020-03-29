@@ -838,6 +838,7 @@ uvmpd_scan(void)
 	 * we need to unlock the page queues for this.
 	 */
 	if (free < uvmexp.freetarg) {
+		uvmexp.inswap = 1;
 		uvmexp.pdswout++;
 		uvm_unlock_pageq();
 		uvm_swapout_threads();

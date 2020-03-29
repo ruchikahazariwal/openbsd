@@ -66,22 +66,9 @@ do_trap_supervisor(struct trapframe *frame)
 		return;
 	}
 
-//XXX TODO: just panic for now
 	exception = (frame->tf_scause & EXCP_MASK);
-	dump_regs(frame);
-	panic("Unknown kernel exception %x trap value %lx\n",
-	    exception, frame->tf_stval);
-#if 0
-
-#ifdef KDTRACE_HOOKS
-	if (dtrace_trap_func != NULL && (*dtrace_trap_func)(frame, exception))
-		return;
-#endif
-
-	CTR3(KTR_TRAP, "do_trap_supervisor: curthread: %p, sepc: %lx, frame: %p",
-	    curthread, frame->tf_sepc, frame);
-
 	switch(exception) {
+#if 0
 	case EXCP_FAULT_LOAD:
 	case EXCP_FAULT_STORE:
 	case EXCP_FAULT_FETCH:
@@ -89,15 +76,11 @@ do_trap_supervisor(struct trapframe *frame)
 	case EXCP_LOAD_PAGE_FAULT:
 		data_abort(frame, 0);
 		break;
-	case EXCP_BREAKPOINT:
-#ifdef KDTRACE_HOOKS
-		if (dtrace_invop_jump_addr != 0) {
-			dtrace_invop_jump_addr(frame);
-			break;
-		}
 #endif
-#ifdef KDB
-		kdb_trap(exception, 0, frame);
+	case EXCP_BREAKPOINT:
+#ifdef DDB
+		// kdb_trap(exception, 0, frame);
+                db_trapper(frame->tf_sepc,0/*XXX*/, frame, exception);         
 #else
 		dump_regs(frame);
 		panic("No debugger in kernel.\n");
@@ -112,7 +95,6 @@ do_trap_supervisor(struct trapframe *frame)
 		panic("Unknown kernel exception %x trap value %lx\n",
 		    exception, frame->tf_stval);
 	}
-#endif //0
 }
 
 void

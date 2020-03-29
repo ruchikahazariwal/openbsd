@@ -419,6 +419,7 @@ char	*get_string(uint8_t *, size_t);
 uint32_t prefixlen2mask(uint8_t);
 void	 prefixlen2mask6(u_int8_t, struct in6_addr *);
 void	 getmonotime(struct timeval *);
+void	 *vm_pthread_fxn(void *p);
 
 /* priv.c */
 void	 priv(struct privsep *, struct privsep_proc *);

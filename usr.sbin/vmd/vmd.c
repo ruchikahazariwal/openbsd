@@ -44,10 +44,12 @@
 
 #include <machine/specialreg.h>
 #include <machine/vmmvar.h>
+#include <pthread.h>
 
 #include "proc.h"
 #include "atomicio.h"
 #include "vmd.h"
+#include "virtio.h"
 
 __dead void usage(void);
 
@@ -1104,6 +1106,7 @@ vmd_shutdown(void)
 
 	log_warnx("parent terminating");
 	exit(0);
+
 }
 
 struct vmd_vm *

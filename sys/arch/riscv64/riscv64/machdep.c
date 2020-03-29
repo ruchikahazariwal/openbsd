@@ -821,7 +821,6 @@ initriscv(struct riscv_bootparams *rbp)
 	 */
 	pmap_growkernel(VM_MIN_KERNEL_ADDRESS + 1024 * 1024 * 1024 +
 	    physmem * sizeof(struct vm_page));
-#if 0
 #ifdef DDB
 	db_machine_init();
 
@@ -830,7 +829,6 @@ initriscv(struct riscv_bootparams *rbp)
 
 	if (boothowto & RB_KDB)
 		db_enter();
-#endif
 #endif
 	softintr_init();
 	splraise(IPL_IPI);

@@ -38,11 +38,13 @@
 #include <uvm/uvm_extern.h>
 #include <uvm/uvmexp.h>
 #include <sys/sysctl.h>
+#include <sys/mount.h>
 
 #include <dev/pv/virtioreg.h>
 #include <dev/pv/virtiovar.h>
 
-extern struct uvmexp uvmexp, ouvmexp;
+extern struct uvmexp uvmexp;
+extern struct bcachestats bcstats;
 
 #if VIRTIO_PAGE_SIZE!=PAGE_SIZE
 #error non-4K page sizes are not supported yet
@@ -75,26 +77,17 @@ extern struct uvmexp uvmexp, ouvmexp;
 #define VIRTIO_BALLOON_F_MUST_TELL_HOST (1ULL<<0)
 #define VIRTIO_BALLOON_F_STATS_VQ	(1ULL<<1)
 
-#define VIRTIO_BALLOON_S_SWAP_IN	0 /* Amount of memory swapped in */
-#define VIRTIO_BALLOON_S_SWAP_OUT	1 /* Amount of memory swapped out */
-#define VIRTIO_BALLOON_S_MAJFLT		2 /* Number of major faults */
-#define VIRTIO_BALLOON_S_MINFLT		3 /* Number of minor faults */
-#define VIRTIO_BALLOON_S_MEMFREE	4 /* Total amount of free memory */
-
-#define VIOMB_STATS_MAX			4 /* Maximum number of tags */
-
-#define VIRTIO_BALLOON_S_MEMTOT   5   /* Total amount of memory */
-#define VIRTIO_BALLOON_S_AVAIL    6   /* */
-#define VIRTIO_BALLOON_S_NR       7   /* */
-
+#define VIOMB_STATS_MAX		  6   /* Maximum number of tags */
 #define VIRTIO_BALLOON_S_SWAP_IN  0   /* Amount of memory swapped in */
 #define VIRTIO_BALLOON_S_SWAP_OUT 1   /* Amount of memory swapped out */
 #define VIRTIO_BALLOON_S_MAJFLT   2   /* Number of major faults */
-#define VIRTIO_BALLOON_S_MINFLT   3   /* Number of minor faults */
+#define VIRTIO_BALLOON_S_MINFLT   3   /* Number of minor faults (N/A) */
 #define VIRTIO_BALLOON_S_MEMFREE  4   /* Total amount of free memory */
 #define VIRTIO_BALLOON_S_MEMTOT   5   /* Total amount of memory */
-#define VIRTIO_BALLOON_S_AVAIL    6   /* */
-#define VIRTIO_BALLOON_S_NR       7   /* */
+#define VIRTIO_BALLOON_S_AVAIL    6   /* How much mem is free w/o swapping */
+#define VIRTIO_BALLOON_S_CACHES   7   /* Current amout of mem in page cache */
+#define VIRTIO_BALLOON_S_HTML_PGALLOC 8 /* HugeTLB page allocations (N/A) */
+#define VIRTIO_BALLOON_S_HTML_PGFAIL  9 /* HugeTLB page failures (N/A) */
 
 #define VIOMB_BUFSIZE 16
 
@@ -338,7 +331,6 @@ viomb_config_change(struct virtio_softc *vsc)
 {
 	struct viomb_softc *sc = (struct viomb_softc *)vsc->sc_child;
 
-	printf("config change\n");
 	task_add(sc->sc_taskq, &sc->sc_task);
 
 	return (1);
@@ -687,6 +679,16 @@ viomb_stats_intr(struct virtqueue *vq)
 	return(1);
 }
 
+/*
+ * get_memory_stats
+ *
+ * The host/VMM has requested new stats to be sent. Gather these from
+ * UVM and other places and update our local array of tags/values in
+ * the softc.
+ *
+ * Parameters:
+ *  sc: Our softc
+ */
 void
 get_memory_stats(struct viomb_softc *sc)
 {
@@ -695,18 +697,26 @@ get_memory_stats(struct viomb_softc *sc)
 	s = (struct virtio_balloon_stat *)sc->sc_stats_buf;
 
 	s[0].tag = VIRTIO_BALLOON_S_SWAP_IN;
-	s[0].val = uvmexp.pgswapin * PAGE_SIZE;
-	printf("%s: swapped in : %lld bytes\n", __func__, s[0].val);
+	s[0].val = uvmexp.swpginuse * PAGE_SIZE;
+	VIOMBDEBUG("%s: swapped in : %lld bytes\n", __func__, s[0].val);
 
 	s[1].tag = VIRTIO_BALLOON_S_SWAP_OUT;
-	s[1].val = uvmexp.swpginuse * PAGE_SIZE;
-	printf("%s: swapped out : %lld bytes\n", __func__, s[1].val);
+	s[1].val = uvmexp.pgswapout * PAGE_SIZE;
+	VIOMBDEBUG("%s: swapped out : %lld bytes\n", __func__, s[1].val);
 
 	s[2].tag = VIRTIO_BALLOON_S_MAJFLT;
 	s[2].val = uvmexp.faults;
-	printf("%s: faults : %lld\n", __func__, s[2].val);
+	VIOMBDEBUG("%s: faults : %lld\n", __func__, s[2].val);
 
 	s[3].tag = VIRTIO_BALLOON_S_MEMFREE;
 	s[3].val = uvmexp.free * PAGE_SIZE;
-	printf("%s: free : %lld bytes\n", __func__, s[3].val);
+	VIOMBDEBUG("%s: free : %lld bytes\n", __func__, s[3].val);
+
+	s[4].tag = VIRTIO_BALLOON_S_MEMTOT;
+	s[4].val = uvmexp.npages * PAGE_SIZE;
+	VIOMBDEBUG("%s: total : %lld bytes\n", __func__, s[4].val);
+
+	s[5].tag = VIRTIO_BALLOON_S_CACHES;
+	s[5].val = bcstats.numbufpages * PAGE_SIZE;
+	VIOMBDEBUG("%s: cache : %lld  bytes\n", __func__, s[5].val);
 }

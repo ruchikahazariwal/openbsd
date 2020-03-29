@@ -125,6 +125,7 @@ int vm_resetcpu(struct vm_resetcpu_params *);
 int vm_intr_pending(struct vm_intr_params *);
 int vm_rwregs(struct vm_rwregs_params *, int);
 int vm_rwvmparams(struct vm_rwvmparams_params *, int);
+int vm_get_balloon_info(struct vm_inswap_balloon *);
 int vm_find(uint32_t, struct vm **);
 int vcpu_readregs_vmx(struct vcpu *, uint64_t, struct vcpu_reg_state *);
 int vcpu_readregs_svm(struct vcpu *, uint64_t, struct vcpu_reg_state *);
@@ -500,6 +501,9 @@ vmmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	case VMM_IOC_WRITEVMPARAMS:
 		ret = vm_rwvmparams((struct vm_rwvmparams_params *)data, 1);
 		break;
+	case VMM_IOC_BALLOON:
+		ret = vm_get_balloon_info((struct vm_inswap_balloon *)data);
+		break;
 
 	default:
 		DPRINTF("%s: unknown ioctl code 0x%lx\n", __func__, cmd);
@@ -509,6 +513,13 @@ vmmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	return (ret);
 }
 
+int
+vm_get_balloon_info(struct vm_inswap_balloon *vib)
+{
+	vib->vib_host_is_swapping = uvmexp.inswap;
+
+	return vib->vib_host_is_swapping;
+}
 /*
  * pledge_ioctl_vmm
  *
@@ -534,6 +545,7 @@ pledge_ioctl_vmm(struct proc *p, long com)
 	case VMM_IOC_WRITEREGS:
 	case VMM_IOC_READVMPARAMS:
 	case VMM_IOC_WRITEVMPARAMS:
+	case VMM_IOC_BALLOON:
 		return (0);
 	}
 
