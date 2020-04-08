@@ -268,16 +268,11 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 	// dir == 0 means writing
 	if (dir == 0) {
 		switch (reg) {
-		//case VIRTIO_BALLOON_F_MUST_TELL_HOST:
-		//	log_warnx("%s: illegal write %x to %s",
-		//	    __progname, *data, virtio_reg_name(reg));
-		//	break;
+		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI:
+			viombh.num_pages = *data;
+			break;
 		case VIRTIO_BALLOON_F_STATS_VQ:
             break;
-		//case VIRTIO_BALLOON_F_DEFLATE_ON_OOM:
-		//	log_warnx("%s: illegal write %x to %s",
-		//	    __progname, *data, virtio_reg_name(reg));
-		//	break;
 		case VIRTIO_CONFIG_DEVICE_FEATURES:
 		case VIRTIO_CONFIG_QUEUE_SIZE:
 		case VIRTIO_CONFIG_ISR_STATUS:
@@ -306,16 +301,12 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 		}
 	} else {
 		switch (reg) {
-
-		//case VIRTIO_BALLOON_F_MUST_TELL_HOST:
-		//	*data = viombh.cfg.device_feature;
-		//	break;
+		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI+4:
+			*data = viombh.actual;
+			break;
 		case VIRTIO_BALLOON_F_STATS_VQ:
 			*data = viombh.cfg.guest_feature;
 			break;
-		//case VIRTIO_BALLOON_F_DEFLATE_ON_OOM:
-		//	*data = viombh.cfg.queue_address;
-		//	break;
 
 		case VIRTIO_CONFIG_DEVICE_FEATURES:
 			*data = viombh.cfg.device_feature;
@@ -2668,13 +2659,15 @@ virtio_start(struct vm_create_params *vcp)
 
 /* move below into separate file XXX */
 void
-viombh_do_inflate(struct vmd_vm *vm, int numSwapHost)
+viombh_do_inflate(struct vmd_vm *vm)
 {
 	// update num_pages register
-	viombh.num_pages = numSwapHost;
+	viombh.num_pages = 40;
 
 	// send interrupt to VM
-	log_debug("Sending an interrupt for inflating the balloon");
-	vcpu_assert_pic_irq(viombh.vm_id, 0, viombh.irq);
-
+	if(viombh.num_pages>viombh.actual){
+		log_debug("Sending an interrupt for inflating the balloon");
+		viombh.cfg.isr_status = VIRTIO_CONFIG_ISR_CONFIG_CHANGE;
+		vcpu_assert_pic_irq(viombh.vm_id, 0, viombh.irq);
+	}
 }
