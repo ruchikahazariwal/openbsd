@@ -2668,8 +2668,8 @@ viombh_do_inflate(struct vmd_vm *vm)
 
 	// send interrupt to VM
 	if(viombh.num_pages>viombh.actual){
-		log_debug("Sending an interrupt for inflating the balloon");
-		viombh.cfg.isr_status = VIRTIO_CONFIG_ISR_CONFIG_CHANGE;
+		printf("Sending an interrupt for inflating the balloon \n");
+		//viombh.cfg.isr_status = VIRTIO_CONFIG_ISR_CONFIG_CHANGE;
 		vcpu_assert_pic_irq(viombh.vm_id, 0, viombh.irq);
 	}
 }

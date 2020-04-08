@@ -3832,6 +3832,8 @@ vm_terminate(struct vm_terminate_params *vtp)
 int
 vm_run(struct vm_run_params *vrp)
 {
+	printf("%s vm_run \n", __func__);
+
 	struct vm *vm;
 	struct vcpu *vcpu;
 	int ret = 0, error;
