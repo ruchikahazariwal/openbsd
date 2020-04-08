@@ -148,7 +148,7 @@ struct uvmline uvmline[] = {
 	  &uvmexp.pddeact, &last_uvmexp.pddeact, "pddeact",
 	  NULL, NULL, NULL },
 	{ &uvmexp.pageshift, &last_uvmexp.pageshift, "pageshift",
-	  &uvmexp.inswap, &last_uvmexp.inswap, "inswap"
+	  &uvmexp.inswap, &last_uvmexp.inswap, "inswap",
 	  NULL, NULL, NULL }
 };
 
