@@ -261,7 +261,9 @@ vm_balloon_thread_fn(void *p)
 
 	for (;;) {
 		sleep(1);
-		if (ioctl(env->vmd_fd, VMM_IOC_BALLOON, &vib) == -1) {
+		int temp = ioctl(env->vmd_fd, VMM_IOC_BALLOON, &vib);
+		printf("%d ioctl value: \n", temp);
+		if (temp == -1) {
 			log_warn("balloon ioctl failed: %s",
 			    strerror(errno));
 		} else if (vib.vib_host_is_swapping) {
