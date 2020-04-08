@@ -520,7 +520,7 @@ vm_get_balloon_info(struct vm_inswap_balloon *vib)
 	vib->vib_host_is_swapping = result;
 	printf("%d uvmexp.inswap \n", result);
 
-	return vib->vib_host_is_swapping;
+	return 0;
 }
 /*
  * pledge_ioctl_vmm
