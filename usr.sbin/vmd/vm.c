@@ -266,7 +266,7 @@ vm_balloon_thread_fn(void *p)
 		if (temp == -1) {
 			log_warn("balloon ioctl failed: %s",
 			    strerror(errno));
-		} else 
+		} else {
 			int vibResult = vib.vib_host_is_swapping;
 			printf("%d vibResult: \n", vibResult);
 
