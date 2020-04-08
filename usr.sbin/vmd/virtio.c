@@ -2265,6 +2265,8 @@ virtio_init(struct vmd_vm *vm, int child_cdrom,
 	// viombh defined in vmd/virtio.h
 	// vcp "vm_create_params" defined in include/vmmvar.h
 	memset(&viombh, 0, sizeof(viombh));
+	viombh.num_pages = 0;
+	viombh.actual = 0;
 	viombh.vq[0].qs = VIOMBH_QUEUE_SIZE;
 	viombh.vq[0].vq_availoffset = sizeof(struct vring_desc) * VIOMBH_QUEUE_SIZE;
 	viombh.vq[0].vq_usedoffset = VIRTQUEUE_ALIGN(sizeof(struct vring_desc) *
