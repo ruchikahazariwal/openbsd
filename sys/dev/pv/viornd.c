@@ -74,6 +74,10 @@ struct cfdriver viornd_cd = {
 
 int viornd_match(struct device *parent, void *match, void *aux)
 {
+	#if VIORND_DEBUG
+		printf("CMPE %s\n", __func__);
+	#endif
+
 	struct virtio_softc *va = aux;
 	if (va->sc_childdevid == PCI_PRODUCT_VIRTIO_ENTROPY)
 		return 1;
@@ -83,6 +87,11 @@ int viornd_match(struct device *parent, void *match, void *aux)
 void
 viornd_attach(struct device *parent, struct device *self, void *aux)
 {
+	printf("%s - attaching rnd cmpe\n",__func__);
+
+	#if VIORND_DEBUG
+		printf("CMPE %s\n", __func__);
+	#endif
 	struct viornd_softc *sc = (struct viornd_softc *)self;
 	struct virtio_softc *vsc = (struct virtio_softc *)parent;
 	unsigned int shift;
@@ -157,6 +166,10 @@ err:
 int
 viornd_vq_done(struct virtqueue *vq)
 {
+	#if VIORND_DEBUG
+		printf("CMPE %s\n", __func__);
+	#endif
+
 	struct virtio_softc *vsc = vq->vq_owner;
 	struct viornd_softc *sc = (struct viornd_softc *)vsc->sc_child;
 	int slot, len, i;
@@ -188,6 +201,10 @@ out:
 void
 viornd_tick(void *arg)
 {
+	#if VIORND_DEBUG
+		printf("CMPE %s\n", __func__);
+	#endif
+
 	struct viornd_softc *sc = arg;
 	struct virtio_softc *vsc = sc->sc_virtio;
 	struct virtqueue *vq = &sc->sc_vq;
