@@ -275,9 +275,9 @@ vm_balloon_thread_fn(void *p)
 				// assume vm has number of pages to swap
 				printf("host in swap, requesting inflate \n");
 				viombh_do_inflate(vm);
-			}
-		}
-	}
+			} // if
+		} // if else
+	} // for
 
 	return (NULL);
 }

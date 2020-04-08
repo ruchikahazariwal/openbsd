@@ -516,7 +516,9 @@ vmmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 int
 vm_get_balloon_info(struct vm_inswap_balloon *vib)
 {
-	vib->vib_host_is_swapping = uvmexp.inswap;
+	int result = uvmexp.inswap;
+	vib->vib_host_is_swapping = result;
+	printf("%d uvmexp.inswap \n", result);
 
 	return vib->vib_host_is_swapping;
 }
