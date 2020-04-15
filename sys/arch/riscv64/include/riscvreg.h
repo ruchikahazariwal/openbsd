@@ -152,16 +152,18 @@
 #define UIP_UTIP	(1 << 4)
 #define UIP_UEIP	(1 << 8)
 
-#define PPN(pa)		(((uint64_t) pa) >> PAGE_SHIFT)
+#define PPN(pa)			((pa) >> PAGE_SHIFT)
 #define SATP_PPN_SHIFT		0
 #define SATP_PPN_MASK		(0xfffffffffffULL << SATP_PPN_SHIFT)
-#define SATP_PPN(pa)		((PPN(pa) << SATP_PPN_SHIFT) & SATP_PPN_MASK)
+#define SATP_PPN(satp)		(((satp) & SATP_PPN_MASK) >> SATP_PPN_SHIFT)
+#define SATP_FORMAT_PPN(ppn)	(((uint64_t)(ppn) << SATP_PPN_SHIFT) & SATP_PPN_MASK)
 #define SATP_ASID_SHIFT		44
 #define SATP_ASID_MASK		(0xffffULL << SATP_ASID_SHIFT)
-#define SATP_ASID(asid)		((((uint64_t) asid) << SATP_ASID_SHIFT) & SATP_ASID_MASK)
+#define SATP_ASID(satp)		(((satp) & SATP_ASID_MASK) >> SATP_ASID_SHIFT)
+#define SATP_FORMAT_ASID(asid)	(((uint64_t)(asid) << SATP_ASID_SHIFT) & SATP_ASID_MASK)
 #define SATP_MODE_SHIFT		60
 #define SATP_MODE_MASK		(0xfULL << SATP_MODE_SHIFT)
-#define SATP_MODE(mode)		((((uint64_t) mode) << SATP_MODE_SHIFT) & SATP_MODE_MASK)
+#define SATP_MODE(mode)		(((satp) & SATP_MODE_MASK) >> SATP_MODE_SHIFT)
 
 #define SATP_MODE_SV39		(8ULL  << SATP_MODE_SHIFT)
 #define SATP_MODE_SV48		(9ULL  << SATP_MODE_SHIFT)

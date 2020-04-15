@@ -125,13 +125,18 @@ kdb_trap(int type, db_regs_t *regs)
 }
 #endif
 
+#define INKERNEL(va)    (((vaddr_t)(va)) & (1ULL << 63))
+
+static int db_validate_address(vaddr_t addr);
+
 static int
 db_validate_address(vaddr_t addr)
 {
 	struct proc *p = curproc;
 	struct pmap *pmap;
 
-	if (!p || !p->p_vmspace || !p->p_vmspace->vm_map.pmap)
+	if (!p || !p->p_vmspace || !p->p_vmspace->vm_map.pmap ||
+		INKERNEL(addr))
 		pmap = pmap_kernel();
 	else
 		pmap = p->p_vmspace->vm_map.pmap;

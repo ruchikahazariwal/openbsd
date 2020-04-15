@@ -461,6 +461,6 @@ db_disasm(vaddr_t loc, int altfmt)
 	 * list, pretend it's a compressed instruction then (for now)
 	 */
 
-	db_printf("a compressed instruction?!!\n");
+	db_printf("[not displaying compressed instruction]\n");
 	return loc + 2;
 }

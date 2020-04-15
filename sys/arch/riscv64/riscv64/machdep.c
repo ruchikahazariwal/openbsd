@@ -90,6 +90,7 @@ extern todr_chip_handle_t todr_handle;
 
 int safepri = 0;
 
+uint32_t boot_hart;	/* The hart we booted on. */
 struct cpu_info cpu_info_primary;
 struct cpu_info *cpu_info[MAXCPUS] = { &cpu_info_primary };
 
@@ -539,14 +540,10 @@ initriscv(struct riscv_bootparams *rbp)
 	// the bootstrap memory config, so nothing is necessary
 	// until pmap_bootstrap_finalize is called??
 
-	//XXX NOTE: FDT is already mapped (rbp->dtbp_virt => rbp->dtbp_phys)
-	// pmap_map_early((paddr_t)config, PAGE_SIZE);
-
+	//NOTE: FDT is already mapped (rbp->dtbp_virt => rbp->dtbp_phys)
 	// Initialize the Flattened Device Tree
 	if (!fdt_init(config) || fdt_get_size(config) == 0)
 		panic("initriscv: no FDT");
-
-	// pmap_map_early((paddr_t)config, round_page(fdt_get_size(config)));
 
 	size_t fdt_size = fdt_get_size(config);
 	paddr_t fdt_start = (paddr_t) rbp->dtbp_phys;

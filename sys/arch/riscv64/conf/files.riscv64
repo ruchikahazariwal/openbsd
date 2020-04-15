@@ -30,6 +30,7 @@ file	arch/riscv64/riscv64/vm_machdep.c
 file	arch/riscv64/riscv64/sig_machdep.c
 file	arch/riscv64/riscv64/softintr.c
 file	arch/riscv64/riscv64/support.S
+file	arch/riscv64/riscv64/syscall.c
 file	arch/riscv64/riscv64/pagezero.S
 file	arch/riscv64/riscv64/trap.c
 file	arch/riscv64/riscv64/sbi.c

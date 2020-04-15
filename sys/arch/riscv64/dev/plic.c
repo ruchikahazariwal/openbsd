@@ -1,51 +1,45 @@
-/*-
- * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
+/*
+ * Copyright (c) 2020, Mars Li <mengshi.li.mars@gmail.com>
+ * Copyright (c) 2020, Brian Bamsch <bbamsch@google.com>
  *
- * Copyright (c) 2018 Ruslan Bukin <br@bsdpad.com>
- * All rights reserved.
- * Copyright (c) 2019 Mitchell Horne <mhorne@FreeBSD.org>
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * Portions of this software were developed by SRI International and the
- * University of Cambridge Computer Laboratory (Department of Computer Science
- * and Technology) under DARPA contract HR0011-18-C-0016 ("ECATS"), as part of
- * the DARPA SSITH research programme.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-
-#include <sys/cdefs.h>
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/kernel.h>
-#include <sys/proc.h>
+#include <sys/queue.h>
+#include <sys/malloc.h>
+#include <sys/device.h>
+#include <sys/evcount.h>
 
 #include <machine/bus.h>
-#include <machine/cpu.h>
-#include <machine/intr.h>
 #include <machine/fdt.h>
+#include <machine/cpu.h>
+#include "riscv64/dev/riscv_cpu_intc.h"
 
-#include <dev/ofw/fdt.h>
 #include <dev/ofw/openfirm.h>
+#include <dev/ofw/fdt.h>
+
+/*
+ * This driver implements a version of the RISC-V PLIC with the actual layout
+ * specified in chapter 8 of the SiFive U5 Coreplex Series Manual:
+ *
+ *     https://static.dev.sifive.com/U54-MC-RVCoreIP.pdf
+ *
+ * The largest number supported by devices marked as 'sifive,plic-1.0.0', is
+ * 1024, of which device 0 is defined as non-existent by the RISC-V Privileged
+ * Spec.
+ */
 
 #define	PLIC_MAX_IRQS		1024
 
@@ -53,6 +47,8 @@
 
 #define	PLIC_ENABLE_BASE	0x002000U
 #define	PLIC_ENABLE_STRIDE	0x80U
+#define	IRQ_ENABLE		1
+#define	IRQ_DISABLE		0
 
 #define	PLIC_CONTEXT_BASE	0x200000U
 #define	PLIC_CONTEXT_STRIDE	0x1000U
@@ -61,36 +57,34 @@
 
 #define	PLIC_PRIORITY(n)	(PLIC_PRIORITY_BASE + (n) * sizeof(uint32_t))
 #define	PLIC_ENABLE(sc, n, h)						\
-    (sc->contexts[h].enable_offset + ((n) / 32) * sizeof(uint32_t))
+    (sc->sc_contexts[h].enable_offset + ((n) / 32) * sizeof(uint32_t))
 #define	PLIC_THRESHOLD(sc, h)						\
-    (sc->contexts[h].context_offset + PLIC_CONTEXT_THRESHOLD)
+    (sc->sc_contexts[h].context_offset + PLIC_CONTEXT_THRESHOLD)
 #define	PLIC_CLAIM(sc, h)						\
-    (sc->contexts[h].context_offset + PLIC_CONTEXT_CLAIM)
+    (sc->sc_contexts[h].context_offset + PLIC_CONTEXT_CLAIM)
 
 
-#define	RD4(sc, reg)				\
-    bus_space_read_4(sc->intc_res, (reg))
-#define	WR4(sc, reg, val)			\
-    bus_space_write_4(sc->intc_res, (reg), (val))
+struct plic_intrhand {
+	TAILQ_ENTRY(plic_intrhand) ih_list; /* link on intrq list */
+	int (*ih_func)(void *);		/* handler */
+	void *ih_arg;			/* arg for handler */
+	int ih_ipl;			/* IPL_* */
+	int ih_flags;
+	int ih_irq;			/* IRQ number */
+	struct evcount	ih_count;
+	char *ih_name;
+};
 
 /*
- * XXX driver hooks  ====================
+ * One interrupt source could have multiple handler attached,
+ * each handler could have different priority level,
+ * we track the max and min priority level.
  */
-int	plic_match(struct device *, void *, void *);
-void	plic_attach(struct device *, struct device *, void *);
-
-int	plic_spllower(int);
-void	plic_splx(int);
-int	plic_splraise(int);
-void	plic_setipl(int);
-void	plic_irq_handler(void *);
-
-#if 0 // XXX
 struct plic_irqsrc {
-	struct intr_irqsrc	isrc;
-	u_int			irq;
+	TAILQ_HEAD(, plic_intrhand) is_list; /* handler list */
+	int 	is_irq_max;	/* IRQ to mask while handling */
+	int 	is_irq_min;	/* lowest IRQ when shared */
 };
-#endif
 
 struct plic_context {
 	bus_size_t enable_offset;
@@ -99,30 +93,59 @@ struct plic_context {
 
 struct plic_softc {
 	struct device		sc_dev;
+	int			sc_node;
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
-#if 0
-	struct resource *	intc_res;
-	struct plic_irqsrc	isrcs[PLIC_MAX_IRQS];
-#endif
-	struct plic_context	contexts[MAXCPUS];
-	int			ndev;
+	struct plic_irqsrc	*sc_isrcs;
+	struct plic_context	sc_contexts[MAXCPUS];
+	int			sc_ndev;
+	struct interrupt_controller 	sc_intc;
 };
+struct plic_softc *plic = NULL;
+
+int	plic_match(struct device *, void *, void *);
+void	plic_attach(struct device *, struct device *, void *);
+int	plic_irq_handler(void *);
+int	plic_irq_dispatch(uint32_t, void *);
+void	*plic_intr_establish(int, int, int (*)(void *),
+		void *, char *);
+void	*plic_intr_establish_fdt(void *, int *, int, int (*)(void *),
+		void *, char *);
+void	plic_intr_disestablish(void *);
+void	plic_intr_route(void *, int, struct cpu_info *);
+
+void	plic_splx(int);
+int	plic_spllower(int);
+int	plic_splraise(int);
+void	plic_setipl(int);
+void	plic_calc_mask(void);
+
+/* helper function */
+int	plic_get_cpuid(int);
+void	plic_set_priority(int, uint32_t);
+void	plic_set_threshold(int, uint32_t);
+void	plic_intr_route_grid(int, int, int);
+void	plic_intr_enable_with_pri(int, uint32_t, int);
+void	plic_intr_disable(int, int);
+
 
 struct cfattach plic_ca = {
 	sizeof(struct plic_softc), plic_match, plic_attach,
-	NULL,	// XXX need detach??
-	NULL	// XXX need activate??
 };
 
 struct cfdriver plic_cd = {
 	NULL, "plic", DV_DULL
 };
 
+int plic_attached = 0;
+
 int
 plic_match(struct device *parent, void *cfdata, void *aux)
 {
 	struct fdt_attach_args *faa = aux;
+
+	if (plic_attached)
+		return 0; // Only expect one instance of PLIC
 
 	return (OF_is_compatible(faa->fa_node, "riscv,plic0") ||
 		OF_is_compatible(faa->fa_node, "sifive,plic-1.0.0"));
@@ -131,72 +154,348 @@ plic_match(struct device *parent, void *cfdata, void *aux)
 void
 plic_attach(struct device *parent, struct device *dev, void *aux)
 {
-	struct plic_softc *sc = (struct plic_softc *) dev;
-	struct fdt_attach_args *faa = aux;
+	struct plic_softc *sc;
+	struct fdt_attach_args *faa;
+	uint32_t *cells;
+	uint32_t irq;
+	uint32_t cpu;
+	int node;
+	int len;
+	int ncell;
+	int context;
+	int i;
+	struct cpu_info *ci;
+	CPU_INFO_ITERATOR cii;
 
+	if (plic_attached)
+		return;
+
+	plic = sc = (struct plic_softc *)dev;
+	faa = (struct fdt_attach_args *)aux;
+
+	if (faa->fa_nreg < 1)
+		return;
+
+	sc->sc_node = node = faa->fa_node;
 	sc->sc_iot = faa->fa_iot;
 
-	sc->ndev = OF_getpropint(faa->fa_node, "riscv,ndev", 0);
-	if (sc->ndev >= PLIC_MAX_IRQS) {
-		printf(": invalid ndev (%d)\n", sc->ndev);
+	/* determine number of devices sending intr to this ic */
+	sc->sc_ndev = OF_getpropint(faa->fa_node, "riscv,ndev", -1);
+	if (sc->sc_ndev < 0) {
+		printf(": unable to resolve number of devices\n");
 		return;
 	}
 
-	// Request memory resources
+	if (sc->sc_ndev >= PLIC_MAX_IRQS) {
+		printf(": invalid ndev (%d)\n", sc->sc_ndev);
+		return;
+	}
+
+	/* map interrupt controller to va space */
 	if (bus_space_map(sc->sc_iot, faa->fa_reg[0].addr,
 	    faa->fa_reg[0].size, 0, &sc->sc_ioh))
 		panic("%s: bus_space_map failed!", __func__);
 
-	// XXX Register interrupt sources?
-	// XXX Disable all interrupts?
-	// XXX Clear all pending interrupts?
+	sc->sc_isrcs = mallocarray(PLIC_MAX_IRQS, sizeof(struct plic_irqsrc),
+			M_DEVBUF, M_ZERO | M_NOWAIT);
 
+	for (irq = 1; irq <= sc->sc_ndev; irq++) {
+		TAILQ_INIT(&sc->sc_isrcs[irq].is_list);
+		plic_set_priority(irq, 0);// Mask interrupt
+	}
 
+	/*
+	 * Calculate the per-cpu enable and context register offsets.
+	 *
+	 * This is tricky for a few reasons. The PLIC divides the interrupt
+	 * enable, threshold, and claim bits by "context"
+	 *
+	 * The tricky part is that the PLIC spec imposes no restrictions on how
+	 * these contexts are laid out. So for example, there is no guarantee
+	 * that each CPU will have both a machine mode and supervisor context,
+	 * or that different PLIC implementations will organize the context
+	 * registers in the same way. On top of this, we must handle the fact
+	 * that cpuid != hartid, as they may have been renumbered during boot.
+	 * We perform the following steps:
+	 *
+	 * 1. Examine the PLIC's "interrupts-extended" property and skip any
+	 *    entries that are not for supervisor external interrupts.
+	 *
+	 * 2. Walk up the device tree to find the corresponding CPU, using node
+	 *    property to identify the cpuid.
+	 *
+	 * 3. Calculate the register offsets based on the context number.
+	 */
+	len = OF_getproplen(node, "interrupts-extended");
+	if (len <= 0) {
+		printf(": could not find interrupts-extended\n");
+		return;
+	}
 
-	/* insert self as interrupt handler */
-	riscv_set_intr_handler(plic_splraise, plic_spllower, plic_splx,
-	    plic_setipl, plic_irq_handler);
+	cells = malloc(len, M_TEMP, M_WAITOK);
+	ncell = len / sizeof(*cells);
+	if (OF_getpropintarray(node, "interrupts-extended", cells, len) < 0) {
+		printf(": failed to read interrupts-extended\n");
+		free(cells, M_TEMP, len);
+		return;
+	}
 
-	return;
+	for (i = 0, context = 0; i < ncell; i += 2, context++) {
+		/* Skip M-mode external interrupts */
+		if (cells[i + 1] != IRQ_EXTERNAL_SUPERVISOR)
+			continue;
+
+		/* Get the corresponding cpuid. */
+		cpu = plic_get_cpuid(OF_getnodebyphandle(cells[i]));
+		if (cpu < 0) {
+			printf(": invalid hart!\n");
+			free(cells, M_TEMP, len);
+			return;
+		}
+
+		/*
+		 * Set the enable and context register offsets for the CPU.
+		 *
+		 * We assume S-mode handler always comes later than M-mode
+		 * handler, but this might be a little fragile.
+		 *
+		 * XXX
+		 * sifive spec doesn't list hart0 S-mode enable/contexts
+		 * in its memory map, but QEMU emulates hart0 S-mode
+		 * enable/contexts? Otherwise the following offset calculation
+		 * would point to hart1 M-mode enable/contexts.
+		 */
+		sc->sc_contexts[cpu].enable_offset = PLIC_ENABLE_BASE +
+		    context * PLIC_ENABLE_STRIDE;
+		sc->sc_contexts[cpu].context_offset = PLIC_CONTEXT_BASE +
+		    context * PLIC_CONTEXT_STRIDE;
+	}
+
+	free(cells, M_TEMP, len);
+
+	/* Set CPU interrupt priority thresholds to minimum */
+	CPU_INFO_FOREACH(cii, ci) {
+		plic_set_threshold(ci->ci_cpuid, 0);
+	}
+
+	plic_setipl(IPL_HIGH);  /* XXX ??? */
+	plic_calc_mask();
+
+	/*
+	 * insert self into the external interrupt handler entry in
+	 * global interrupt handler vector
+	 */
+	riscv_intc_intr_establish(IRQ_EXTERNAL_SUPERVISOR, 0,
+			plic_irq_handler, NULL, "plic0");
+
+	/*
+	 * From now on, spl update must be enforeced to plic, so
+	 * spl* routine should be updated.
+	 */
+	riscv_set_intr_func(plic_splraise, plic_spllower,
+			plic_splx, plic_setipl);
+
+	plic_attached = 1;
+
+	/* enable external interrupt */
+	csr_set(sie, SIE_SEIE);
+
+	sc->sc_intc.ic_node = faa->fa_node;
+	sc->sc_intc.ic_cookie = sc;
+	sc->sc_intc.ic_establish = plic_intr_establish_fdt;
+	sc->sc_intc.ic_disestablish = plic_intr_disestablish;
+	sc->sc_intc.ic_route = plic_intr_route;
+	// sc->sc_intc.ic_cpu_enable = XXX Per-CPU Initialization?
+
+	riscv_intr_register_fdt(&sc->sc_intc);
 }
 
-/*
- * end of driver hooks  ===============
- */
+int
+plic_irq_handler(void *frame)
+{
+	struct plic_softc* sc;
+	uint32_t pending;
+	uint32_t cpu;
+	int handled = 0;
+
+	sc = plic;
+	cpu = cpu_number();
+
+	pending = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
+			PLIC_CLAIM(sc, cpu));
+
+	if(pending >= sc->sc_ndev)
+		return 0;
+
+	if (pending) {
+		handled = plic_irq_dispatch(pending, frame);
+		bus_space_write_4(sc->sc_iot, sc->sc_ioh,
+				PLIC_CLAIM(sc, cpu), pending);
+	}
+
+	return handled;
+}
+
+int
+plic_irq_dispatch(uint32_t irq,	void *frame)
+{
+	int pri, s;
+	int handled = 0;
+	struct plic_softc* sc;
+	struct plic_intrhand *ih;
+	void *arg;
+
+#ifdef DEBUG_INTC
+	printf("plic irq %d fired\n", irq);
+#endif
+
+	sc = plic;
+	pri = sc->sc_isrcs[irq].is_irq_max;
+	s = plic_splraise(pri);
+	TAILQ_FOREACH(ih, &sc->sc_isrcs[irq].is_list, ih_list) {
+#ifdef MULTIPROCESSOR
+		int need_lock;
+
+		if (ih->ih_flags & IPL_MPSAFE)
+			need_lock = 0;
+		else
+			need_lock = s < IPL_SCHED;
+
+		if (need_lock)
+			KERNEL_LOCK();
+#endif
+
+		if (ih->ih_arg != 0)
+			arg = ih->ih_arg;
+		else
+			arg = frame;
+
+		enable_interrupts();	//XXX allow preemption?
+		handled = ih->ih_func(arg);
+		disable_interrupts();
+		if (handled)
+			ih->ih_count.ec_count++;
+
+#ifdef MULTIPROCESSOR
+		if (need_lock)
+			KERNEL_UNLOCK();
+#endif
+	}
+
+	plic_splx(s);
+	return handled;
+}
+
+void *
+plic_intr_establish(int irqno, int level, int (*func)(void *),
+    void *arg, char *name)
+{
+	struct plic_softc *sc = plic;
+	struct plic_intrhand *ih;
+	int sie;
+
+	if (irqno < 0 || irqno >= PLIC_MAX_IRQS)
+		panic("plic_intr_establish: bogus irqnumber %d: %s",
+		     irqno, name);
+	sie = disable_interrupts();
+
+	ih = malloc(sizeof *ih, M_DEVBUF, M_WAITOK);
+	ih->ih_func = func;
+	ih->ih_arg = arg;
+	ih->ih_ipl = level & IPL_IRQMASK;
+	ih->ih_flags = level & IPL_FLAGMASK;
+	ih->ih_irq = irqno;
+	ih->ih_name = name;
+
+	TAILQ_INSERT_TAIL(&sc->sc_isrcs[irqno].is_list, ih, ih_list);
+
+	if (name != NULL)
+		evcount_attach(&ih->ih_count, name, &ih->ih_irq);
+
+#ifdef DEBUG_INTC
+	printf("%s irq %d level %d [%s]\n", __func__, irqno, level,
+	    name);
+#endif
+
+	plic_calc_mask();
+
+	restore_interrupts(sie);
+	return (ih);
+}
+
+void *
+plic_intr_establish_fdt(void *cookie, int *cell, int level,
+    int (*func)(void *), void *arg, char *name)
+{
+	return plic_intr_establish(cell[0], level, func, arg, name);
+}
+
+void
+plic_intr_disestablish(void *cookie)
+{
+	struct plic_softc *sc = plic;
+	struct plic_intrhand *ih = cookie;
+	int irqno = ih->ih_irq;
+	int sie;
+
+	sie = disable_interrupts();
+	TAILQ_REMOVE(&sc->sc_isrcs[irqno].is_list, ih, ih_list);
+	if (ih->ih_name != NULL)
+		evcount_detach(&ih->ih_count);
+	free(ih, M_DEVBUF, 0);
+	restore_interrupts(sie);
+}
+
+void
+plic_intr_route(void *cookie, int enable, struct cpu_info *ci)
+{
+	struct plic_softc	*sc = plic;
+	struct plic_intrhand	*ih = cookie;
+
+	int		irq = ih->ih_irq;
+	int		cpu = ci->ci_cpuid;
+	uint32_t 	min_pri = sc->sc_isrcs[irq].is_irq_min;
+
+	if (enable == IRQ_ENABLE) {
+		plic_intr_enable_with_pri(irq, min_pri, cpu);
+	} else {
+		plic_intr_route_grid(irq, IRQ_DISABLE, cpu);
+	}
+}
 
 void
 plic_splx(int new)
 {
-#if 0
+	/* XXX
+	 * how to do pending external interrupt ?
+	 * After set the new threshold, if there is any pending
+	 * external interrupts whose priority is now greater than the
+	 * threshold, they will get passed through plic to cpu,
+	 * trigger a new claim/complete cycle.
+	 * So there is no need to handle pending external intr here.
+	 *
+	 */
 	struct cpu_info *ci = curcpu();
 
-	if (ci->ci_ipending & arm_smask[new])
-		arm_do_pending_intr(new);
+	/* Pending software intr is handled here */
+	if (ci->ci_ipending & riscv_smask[new])
+		riscv_do_pending_intr(new);
 
 	plic_setipl(new);
-#else
-	panic("plic_splx unimplemented");
-#endif
 }
 
 int
 plic_spllower(int new)
 {
-#if 0
 	struct cpu_info *ci = curcpu();
 	int old = ci->ci_cpl;
 	plic_splx(new);
 	return (old);
-#else
-	panic("plic_spllower unimplemented");
-	return (new);
-#endif
 }
 
 int
 plic_splraise(int new)
 {
-#if 0
 	struct cpu_info *ci = curcpu();
 	int old;
 	old = ci->ci_cpl;
@@ -214,401 +513,188 @@ plic_splraise(int new)
 	plic_setipl(new);
 
 	return (old);
-#else
-	panic("plic_splraise unimplemented");
-	return (new);
-#endif
 }
 
 void
 plic_setipl(int new)
 {
-#if 0
 	struct cpu_info		*ci = curcpu();
-	//struct plic_softc	*sc = plic;
-	int			 psw;
+	uint64_t sie;
 
 	/* disable here is only to keep hardware in sync with ci->ci_cpl */
-	psw = disable_interrupts();
+	sie = disable_interrupts();
 	ci->ci_cpl = new;
 
-	/* low values are higher priority thus IPL_HIGH - pri */
-	bus_space_write_4(sc->sc_iot, sc->sc_p_ioh, ICPIPMR,
-	    (IPL_HIGH - new) << ICMIPMR_SH);
-	restore_interrupts(psw);
-#else
-	panic("plic_setipl unimplemented");
-#endif
-}
+	/* higher values are higher priority */
+	plic_set_threshold(ci->ci_cpuid, new);
 
+	restore_interrupts(sie);
+}
+ 
+ /*
+  * update the max/min priority for an interrupt src,
+  * and enforce the updated priority to plic.
+  * this should be called whenever a new handler is attached.
+  */
 void
-plic_irq_handler(void *frame)
+plic_calc_mask(void)
 {
-	panic("plic_irq_handler unimplemented");
-}
+	struct cpu_info 	*ci = curcpu();
+	struct plic_softc 	*sc = plic;
+	struct plic_intrhand 	*ih;
+	int 			irq;
 
-#if 0 // XXX till end
-static u_int plic_irq_cpu;
+	/* PLIC irq 0 is reserved, thus we start from 1 */
+	for (irq = 1; irq <= sc->sc_ndev; irq++) {
+		int max = IPL_NONE;
+		int min = IPL_HIGH;
+		TAILQ_FOREACH(ih, &sc->sc_isrcs[irq].is_list, ih_list) {
+			if (ih->ih_ipl > max)
+				max = ih->ih_ipl;
 
-static int
-riscv_hartid_to_cpu(int hartid)
-{
-	int i;
+			if (ih->ih_ipl < min)
+				min = ih->ih_ipl;
+		}
 
-	CPU_FOREACH(i) {
-		if (pcpu_find(i)->pc_hart == hartid)
-			return (i);
+		if (max == IPL_NONE)
+			min = IPL_NONE;
+
+		if (sc->sc_isrcs[irq].is_irq_max == max &&
+		    sc->sc_isrcs[irq].is_irq_min == min)
+			continue;
+
+		sc->sc_isrcs[irq].is_irq_max = max;
+		sc->sc_isrcs[irq].is_irq_min = min;
+
+		/* Enable interrupts at lower levels, clear -> enable */
+		/* Set interrupt priority/enable */
+		if (min != IPL_NONE) {
+			plic_intr_enable_with_pri(irq, min, ci->ci_cpuid);
+		} else {
+			plic_intr_disable(irq, ci->ci_cpuid);
+		}
 	}
 
-	return (-1);
+	plic_setipl(ci->ci_cpl);
 }
 
-static int
-plic_get_hartid(device_t dev, phandle_t intc)
+/***************** helper functions *****************/
+
+/*
+ * OpenBSD saves cpu node info in ci struct, so we can search
+ * cpuid by node matching
+ */
+int
+plic_get_cpuid(int intc)
 {
-	int hart;
+	uint32_t hart;
+	int parent_node;
+	struct cpu_info *ci;
+	CPU_INFO_ITERATOR cii;
 
 	/* Check the interrupt controller layout. */
-	if (OF_searchencprop(intc, "#interrupt-cells", &hart,
-	    sizeof(hart)) == -1) {
-		device_printf(dev,
-		    "Could not find #interrupt-cells for phandle %u\n", intc);
+	if (OF_getpropintarray(intc, "#interrupt-cells", &hart,
+	    sizeof(hart)) < 0) {
+		printf(": could not find #interrupt-cells for phandle %u\n", intc);
 		return (-1);
 	}
 
 	/*
 	 * The parent of the interrupt-controller is the CPU we are
-	 * interested in, so search for its hart ID.
+	 * interested in, so search for its OF node index.
 	 */
-	if (OF_searchencprop(OF_parent(intc), "reg", (pcell_t *)&hart,
-	    sizeof(hart)) == -1) {
-		device_printf(dev, "Could not find hartid\n");
-		return (-1);
+	parent_node = OF_parent(intc);
+	CPU_INFO_FOREACH(cii, ci) {
+		if(ci->ci_node == parent_node)
+			return ci->ci_cpuid;
 	}
-
-	return (hart);
+	return -1;
 }
 
-static inline void
-plic_irq_dispatch(struct plic_softc *sc, u_int irq,
-    struct trapframe *tf)
+/* update priority for intr src 'irq' */
+void
+plic_set_priority(int irq, uint32_t pri)
 {
-	struct plic_irqsrc *src;
-
-	src = &sc->isrcs[irq];
-
-	if (intr_isrc_dispatch(&src->isrc, tf) != 0)
-		device_printf(sc->dev, "Stray irq %u detected\n", irq);
-}
-
-static int
-plic_intr(void *arg)
-{
-	struct plic_softc *sc;
-	struct trapframe *tf;
-	uint32_t pending;
-	uint32_t cpu;
-
-	sc = arg;
-	cpu = PCPU_GET(cpuid);
-
-	pending = RD4(sc, PLIC_CLAIM(sc, cpu));
-	if (pending) {
-		tf = curthread->td_intr_frame;
-		plic_irq_dispatch(sc, pending, tf);
-		WR4(sc, PLIC_CLAIM(sc, cpu), pending);
-	}
-
-	return (FILTER_HANDLED);
-}
-
-static void
-plic_disable_intr(device_t dev, struct intr_irqsrc *isrc)
-{
-	struct plic_softc *sc;
-	struct plic_irqsrc *src;
-
-	sc = device_get_softc(dev);
-	src = (struct plic_irqsrc *)isrc;
-
-	WR4(sc, PLIC_PRIORITY(src->irq), 0);
-}
-
-static void
-plic_enable_intr(device_t dev, struct intr_irqsrc *isrc)
-{
-	struct plic_softc *sc;
-	struct plic_irqsrc *src;
-
-	sc = device_get_softc(dev);
-	src = (struct plic_irqsrc *)isrc;
-
-	WR4(sc, PLIC_PRIORITY(src->irq), 1);
-}
-
-static int
-plic_map_intr(device_t dev, struct intr_map_data *data,
-    struct intr_irqsrc **isrcp)
-{
-	struct intr_map_data_fdt *daf;
-	struct plic_softc *sc;
-
-	sc = device_get_softc(dev);
-
-	if (data->type != INTR_MAP_DATA_FDT)
-		return (ENOTSUP);
-
-	daf = (struct intr_map_data_fdt *)data;
-	if (daf->ncells != 1 || daf->cells[0] > sc->ndev)
-		return (EINVAL);
-
-	*isrcp = &sc->isrcs[daf->cells[0]].isrc;
-
-	return (0);
-}
-
-static int
-plic_probe(device_t dev)
-{
-
-	if (!ofw_bus_status_okay(dev))
-		return (ENXIO);
-
-	if (!ofw_bus_is_compatible(dev, "riscv,plic0") &&
-	    !ofw_bus_is_compatible(dev, "sifive,plic-1.0.0"))
-		return (ENXIO);
-
-	device_set_desc(dev, "RISC-V PLIC");
-
-	return (BUS_PROBE_DEFAULT);
-}
-
-static int
-plic_attach(device_t dev)
-{
-	struct plic_irqsrc *isrcs;
-	struct plic_softc *sc;
-	struct intr_pic *pic;
-	pcell_t *cells;
-	uint32_t irq;
-	const char *name;
-	phandle_t node;
-	phandle_t xref;
-	uint32_t cpu;
-	int error;
-	int rid;
-	int nintr;
-	int context;
-	int i;
-	int hart;
-
-	sc = device_get_softc(dev);
-
-	sc->dev = dev;
-
-	node = ofw_bus_get_node(dev);
-	if ((OF_getencprop(node, "riscv,ndev", &sc->ndev,
-	    sizeof(sc->ndev))) < 0) {
-		device_printf(dev,
-		    "Error: could not get number of devices\n");
-		return (ENXIO);
-	}
-
-	if (sc->ndev >= PLIC_MAX_IRQS) {
-		device_printf(dev,
-		    "Error: invalid ndev (%d)\n", sc->ndev);
-		return (ENXIO);
-	}
-
-	/* Request memory resources */
-	rid = 0;
-	sc->intc_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY, &rid,
-	    RF_ACTIVE);
-	if (sc->intc_res == NULL) {
-		device_printf(dev,
-		    "Error: could not allocate memory resources\n");
-		return (ENXIO);
-	}
-
-	/* Register the interrupt sources */
-	isrcs = sc->isrcs;
-	name = device_get_nameunit(sc->dev);
-	for (irq = 1; irq <= sc->ndev; irq++) {
-		isrcs[irq].irq = irq;
-		error = intr_isrc_register(&isrcs[irq].isrc, sc->dev,
-		    0, "%s,%u", name, irq);
-		if (error != 0)
-			return (error);
-
-		WR4(sc, PLIC_PRIORITY(irq), 0);
-	}
+	struct plic_softc	*sc = plic;
+	uint32_t		prival;
 
 	/*
-	 * Calculate the per-cpu enable and context register offsets.
-	 *
-	 * This is tricky for a few reasons. The PLIC divides the interrupt
-	 * enable, threshold, and claim bits by "context", where each context
-	 * routes to a Core-Local Interrupt Controller (CLIC).
-	 *
-	 * The tricky part is that the PLIC spec imposes no restrictions on how
-	 * these contexts are laid out. So for example, there is no guarantee
-	 * that each CPU will have both a machine mode and supervisor context,
-	 * or that different PLIC implementations will organize the context
-	 * registers in the same way. On top of this, we must handle the fact
-	 * that cpuid != hartid, as they may have been renumbered during boot.
-	 * We perform the following steps:
-	 *
-	 * 1. Examine the PLIC's "interrupts-extended" property and skip any
-	 *    entries that are not for supervisor external interrupts.
-	 *
-	 * 2. Walk up the device tree to find the corresponding CPU, and grab
-	 *    it's hart ID.
-	 *
-	 * 3. Convert the hart to a cpuid, and calculate the register offsets
-	 *    based on the context number.
+	 * sifive plic only has 0 - 7 priority levels, yet OpenBSD defines
+	 * 0 - 12 priority levels(level 1 - 4 are for SOFT*, level 12
+	 * is for IPI. They should NEVER be passed to plic.
+	 * So we calculate plic priority in the following way:
 	 */
-	nintr = OF_getencprop_alloc_multi(node, "interrupts-extended",
-	    sizeof(uint32_t), (void **)&cells);
-	if (nintr <= 0) {
-		device_printf(dev, "Could not read interrupts-extended\n");
-		return (ENXIO);
-	}
+	if(pri <= 4 || pri >= 12)//invalid input
+		prival = 0;//effectively disable this intr source
+	else
+		prival = pri - 4;
 
-	/* interrupts-extended is a list of phandles and interrupt types. */
-	for (i = 0, context = 0; i < nintr; i += 2, context++) {
-		/* Skip M-mode external interrupts */
-		if (cells[i + 1] != IRQ_EXTERNAL_SUPERVISOR)
-			continue;
-
-		/* Get the hart ID from the CLIC's phandle. */
-		hart = plic_get_hartid(dev, OF_node_from_xref(cells[i]));
-		if (hart < 0) {
-			OF_prop_free(cells);
-			return (ENXIO);
-		}
-
-		/* Get the corresponding cpuid. */
-		cpu = riscv_hartid_to_cpu(hart);
-		if (cpu < 0) {
-			device_printf(dev, "Invalid hart!\n");
-			OF_prop_free(cells);
-			return (ENXIO);
-		}
-
-		/* Set the enable and context register offsets for the CPU. */
-		sc->contexts[cpu].enable_offset = PLIC_ENABLE_BASE +
-		    context * PLIC_ENABLE_STRIDE;
-		sc->contexts[cpu].context_offset = PLIC_CONTEXT_BASE +
-		    context * PLIC_CONTEXT_STRIDE;
-	}
-	OF_prop_free(cells);
-
-	/* Set the threshold for each CPU to accept all priorities. */
-	CPU_FOREACH(cpu)
-		WR4(sc, PLIC_THRESHOLD(sc, cpu), 0);
-
-	xref = OF_xref_from_node(node);
-	pic = intr_pic_register(sc->dev, xref);
-	if (pic == NULL)
-		return (ENXIO);
-
-	csr_set(sie, SIE_SEIE);
-
-	return (intr_pic_claim_root(sc->dev, xref, plic_intr, sc, 0));
+	bus_space_write_4(sc->sc_iot, sc->sc_ioh,
+			PLIC_PRIORITY(irq), prival);
 }
 
-static void
-plic_pre_ithread(device_t dev, struct intr_irqsrc *isrc)
+/* update threshold for 'cpu' */
+void
+plic_set_threshold(int cpu, uint32_t threshold)
 {
+	struct plic_softc	*sc = plic;
+	uint32_t		prival;
 
-	plic_disable_intr(dev, isrc);
+	if(threshold <= 4 || threshold >= 12)//invalid input
+		prival = IPL_HIGH - 4;//effectively disable this intr source
+	else
+		prival = threshold - 4;
+
+	bus_space_write_4(sc->sc_iot, sc->sc_ioh,
+			PLIC_THRESHOLD(sc, cpu), prival);
 }
 
-static void
-plic_post_ithread(device_t dev, struct intr_irqsrc *isrc)
+/*
+ * turns on/off the route from intr source 'irq'
+ * to context 'ci' based on 'enable'
+ */
+void
+plic_intr_route_grid(int irq, int enable, int cpu)
 {
+	struct plic_softc	*sc = plic;
+	uint32_t		val, mask;
 
-	plic_enable_intr(dev, isrc);
+	if(irq == 0)
+		return;
+
+	KASSERT(cpu < MAXCPUS);
+
+	mask = (1 << (irq % 32));
+	val = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
+			PLIC_ENABLE(sc, irq, cpu));
+	if (enable == IRQ_ENABLE)
+		val |= mask;
+	else
+		val &= ~mask;
+
+	bus_space_write_4(sc->sc_iot, sc->sc_ioh,
+			PLIC_ENABLE(sc, irq, cpu), val);
 }
 
-static int
-plic_setup_intr(device_t dev, struct intr_irqsrc *isrc,
-    struct resource *res, struct intr_map_data *data)
+/*
+ * Enable intr src 'irq' to cpu 'cpu' by setting:
+ * - priority
+ * - threshold
+ * - enable bit
+ */
+void
+plic_intr_enable_with_pri(int irq, uint32_t min_pri, int cpu)
 {
-	struct plic_softc *sc;
-	struct plic_irqsrc *src;
-
-	sc = device_get_softc(dev);
-	src = (struct plic_irqsrc *)isrc;
-
-	/* Bind to the boot CPU for now. */
-	CPU_SET(PCPU_GET(cpuid), &isrc->isrc_cpu);
-	plic_bind_intr(dev, isrc);
-
-	return (0);
+	plic_set_priority(irq, min_pri);
+	plic_set_threshold(cpu, min_pri-1);
+	plic_intr_route_grid(irq, IRQ_ENABLE, cpu);
 }
 
-static int
-plic_bind_intr(device_t dev, struct intr_irqsrc *isrc)
+void
+plic_intr_disable(int irq, int cpu)
 {
-	struct plic_softc *sc;
-	struct plic_irqsrc *src;
-	uint32_t reg;
-	u_int cpu;
-
-	sc = device_get_softc(dev);
-	src = (struct plic_irqsrc *)isrc;
-
-	/* Disable the interrupt source on all CPUs. */
-	CPU_FOREACH(cpu) {
-		reg = RD4(sc, PLIC_ENABLE(sc, src->irq, cpu));
-		reg &= ~(1 << (src->irq % 32));
-		WR4(sc, PLIC_ENABLE(sc, src->irq, cpu), reg);
-	}
-
-	if (CPU_EMPTY(&isrc->isrc_cpu)) {
-		cpu = plic_irq_cpu = intr_irq_next_cpu(plic_irq_cpu, &all_cpus);
-		CPU_SETOF(cpu, &isrc->isrc_cpu);
-	} else {
-		/*
-		 * We will only bind to a single CPU so select the first
-		 * CPU found.
-		 */
-		cpu = CPU_FFS(&isrc->isrc_cpu) - 1;
-	}
-
-	/* Enable the interrupt on the selected CPU only. */
-	reg = RD4(sc, PLIC_ENABLE(sc, src->irq, cpu));
-	reg |= (1 << (src->irq % 32));
-	WR4(sc, PLIC_ENABLE(sc, src->irq, cpu), reg);
-
-	return (0);
+	plic_set_priority(irq, 0);
+	plic_set_threshold(cpu, IPL_HIGH);
+	plic_intr_route_grid(irq, IRQ_DISABLE, cpu);
 }
-
-static device_method_t plic_methods[] = {
-	DEVMETHOD(device_probe,		plic_probe),
-	DEVMETHOD(device_attach,	plic_attach),
-
-	DEVMETHOD(pic_disable_intr,	plic_disable_intr),
-	DEVMETHOD(pic_enable_intr,	plic_enable_intr),
-	DEVMETHOD(pic_map_intr,		plic_map_intr),
-	DEVMETHOD(pic_pre_ithread,	plic_pre_ithread),
-	DEVMETHOD(pic_post_ithread,	plic_post_ithread),
-	DEVMETHOD(pic_setup_intr,	plic_setup_intr),
-	DEVMETHOD(pic_bind_intr,	plic_bind_intr),
-
-	DEVMETHOD_END
-};
-
-static driver_t plic_driver = {
-	"plic",
-	plic_methods,
-	sizeof(struct plic_softc),
-};
-
-static devclass_t plic_devclass;
-
-EARLY_DRIVER_MODULE(plic, simplebus, plic_driver, plic_devclass,
-    0, 0, BUS_PASS_INTERRUPT + BUS_PASS_ORDER_MIDDLE);
-
-#endif
+/***************** end of helper functions *****************/

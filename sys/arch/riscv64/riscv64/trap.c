@@ -24,6 +24,7 @@
 #include <sys/syscall_mi.h>
 
 #include <machine/riscvreg.h>
+#include <machine/syscall.h>
 
 /* Called from exception.S */
 void do_trap_supervisor(struct trapframe *);
@@ -100,25 +101,18 @@ do_trap_supervisor(struct trapframe *frame)
 void
 do_trap_user(struct trapframe *frame)
 {
-//XXX TODO: panic for now
-	dump_regs(frame);
 	uint64_t exception;
-	exception = (frame->tf_scause & EXCP_MASK);
-	panic("Unknown userland exception %x, trap value %lx\n",
-	    exception, frame->tf_stval);
+	//union sigval sv; // XXX
+	struct proc *p;
+	// struct pcb *pcb; // XXX
 
-#if 0
-	uint64_t exception;
-	struct thread *td;
-	struct pcb *pcb;
-
-	td = curthread;
-	td->td_frame = frame;
-	pcb = td->td_pcb;
+	p = curproc;
+	p->p_addr->u_pcb.pcb_tf = frame;
+	// pcb = td->td_pcb; // XXX
 
 	/* Ensure we came from usermode, interrupts disabled */
-	KASSERT((csr_read(sstatus) & (SSTATUS_SPP | SSTATUS_SIE)) == 0,
-	    ("Came from U mode with interrupts enabled"));
+	KASSERTMSG((csr_read(sstatus) & (SSTATUS_SPP | SSTATUS_SIE)) == 0,
+	    "Came from U mode with interrupts enabled");
 
 	exception = (frame->tf_scause & EXCP_MASK);
 	if (frame->tf_scause & EXCP_INTR) {
@@ -127,10 +121,13 @@ do_trap_user(struct trapframe *frame)
 		return;
 	}
 
+#if 0	// XXX Debug logging
 	CTR3(KTR_TRAP, "do_trap_user: curthread: %p, sepc: %lx, frame: %p",
 	    curthread, frame->tf_sepc, frame);
+#endif
 
 	switch(exception) {
+#if 0
 	case EXCP_FAULT_LOAD:
 	case EXCP_FAULT_STORE:
 	case EXCP_FAULT_FETCH:
@@ -139,10 +136,12 @@ do_trap_user(struct trapframe *frame)
 	case EXCP_INST_PAGE_FAULT:
 		data_abort(frame, 1);
 		break;
+#endif
 	case EXCP_USER_ECALL:
 		frame->tf_sepc += 4;	/* Next instruction */
 		svc_handler(frame);
 		break;
+#if 0
 	case EXCP_ILLEGAL_INSTRUCTION:
 #ifdef FPE
 		if ((pcb->pcb_fpflags & PCB_FP_STARTED) == 0) {
@@ -164,28 +163,14 @@ do_trap_user(struct trapframe *frame)
 		call_trapsignal(td, SIGTRAP, TRAP_BRKPT, (void *)frame->tf_sepc);
 		userret(td, frame);
 		break;
+#endif
 	default:
 		dump_regs(frame);
 		panic("Unknown userland exception %x, trap value %lx\n",
 		    exception, frame->tf_stval);
 	}
-#endif //0
 }
 
-void
-child_return(arg)
-	void *arg;
-{
-	struct proc *p = arg;
-	struct trapframe *frame = p->p_addr->u_pcb.pcb_tf;
-
-	frame->tf_a[0] = 0;
-	frame->tf_a[1] = 1;
-
-	KERNEL_UNLOCK();
-
-	mi_child_return(p);
-}
 #if 0
 #include <sys/cdefs.h>
 
@@ -271,20 +256,6 @@ cpu_fetch_syscall_args(struct thread *td)
 	td->td_retval[1] = 0;
 
 	return (0);
-}
-
-#include "../../kern/subr_syscall.c"
-
-static void
-svc_handler(struct trapframe *frame)
-{
-	struct thread *td;
-
-	td = curthread;
-	td->td_frame = frame;
-
-	syscallenter(td);
-	syscallret(td);
 }
 
 static void

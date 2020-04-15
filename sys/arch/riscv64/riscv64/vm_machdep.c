@@ -88,14 +88,10 @@ cpu_fork(struct proc *p1, struct proc *p2, void *stack, void *tcb,
 		pcb->pcb_tcb = tcb;
 
 	sf = (struct switchframe *)tf - 1;
-// XXX Initialize switchframe
-#if 0
-	sf->sf_x19 = (uint64_t)func;
-	sf->sf_x20 = (uint64_t)arg;
+	sf->sf_s[0] = (uint64_t)func;
+	sf->sf_s[1] = (uint64_t)arg;
 	sf->sf_ra = (u_int64_t)&proc_trampoline;
-#endif
 	pcb->pcb_sp = (uint64_t)sf;
-
 }
 
 /*
@@ -107,9 +103,11 @@ cpu_fork(struct proc *p1, struct proc *p2, void *stack, void *tcb,
 void
 cpu_exit(struct proc *p)
 {
+# if 0	// XXX FP
 	/* If we were using the FPU, forget about it. */
 	if (p->p_addr->u_pcb.pcb_fpcpu != NULL)
-		// vfp_discard(p); // XXX Discard FP
+		vfp_discard(p); // XXX Discard FP
+#endif
 
 	pmap_deactivate(p);
 	sched_exit(p);

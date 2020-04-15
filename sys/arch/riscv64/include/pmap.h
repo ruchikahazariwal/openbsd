@@ -61,13 +61,11 @@ typedef struct pmap *pmap_t;
 struct pmap {
 	struct mutex pm_mtx;
 	union {
-		struct pmapvp0 *l0;	/* virtual to physical table 4 lvl */
+		// XXX Sv48 not yet supported
+		// XXX Consider inverting Lx
 		struct pmapvp1 *l1;	/* virtual to physical table 3 lvl */
 	} pm_vp;
-	bool have_4_level_pt;	// XXX This can be inferred from mode
-	uint8_t pm_mode;	// 4 Bits
-	uint16_t pm_asid;	// 16 Bits
-	uint64_t pm_pt0pa;
+	uint64_t pm_satp;
 	int pm_privileged;
 	int pm_refs;				/* ref count */
 	struct pmap_statistics  pm_stats;	/* pmap statistics */
@@ -111,8 +109,7 @@ struct pv_entry;
 /* investigate */
 #define pmap_unuse_final(p)		do { /* nothing */ } while (0)
 int	pmap_fault_fixup(pmap_t, vaddr_t, vm_prot_t, int);
-void pmap_postinit(void);
-void	pmap_map_early(paddr_t, psize_t);
+void	pmap_postinit(void);
 
 #endif /* _KERNEL && !_LOCORE */
 

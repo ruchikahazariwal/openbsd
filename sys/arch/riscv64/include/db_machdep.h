@@ -77,6 +77,7 @@ extern db_regs_t	ddb_regs;
 
 #define SOFTWARE_SSTEP
 
+void db_machine_init (void);
 db_addr_t db_branch_taken(u_int inst, db_addr_t pc, db_regs_t *regs);
 
 #define branch_taken(ins, pc, fun, regs) \

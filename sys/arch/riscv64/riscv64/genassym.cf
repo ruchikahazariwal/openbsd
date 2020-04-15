@@ -25,16 +25,24 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 
+include <sys/param.h>
+include <sys/proc.h>
+include <sys/systm.h>
+include <sys/mbuf.h>
+include <sys/resourcevar.h>
+include <sys/device.h>
+include <sys/user.h>
+include <sys/signal.h>
+include <sys/mbuf.h>
+include <sys/socketvar.h>
+include <netinet/in.h>
+include <netinet/ip.h>
+
 include <machine/frame.h>
 include <machine/pcb.h>
 include <machine/cpu.h>
 include <machine/param.h>
 include <machine/bootconfig.h>
-
-#export	PAGE_SIZE
-#export	VM_MAXUSER_ADDRESS
-#export	VM_MIN_KERNEL_ADDRESS
-#export	SSTATUS_SUM
 
 struct	trapframe
 member	tf_ra
@@ -48,6 +56,19 @@ member	tf_sepc
 member	tf_sstatus
 member	tf_stval
 member	tf_scause
+
+struct	switchframe
+member	sf_s
+member	sf_ra
+
+export	IPL_NONE
+
+struct	proc
+member	p_stat
+member	p_cpu
+member	p_addr
+
+export	SONPROC
 
 struct	sigframe
 member	sf_signum

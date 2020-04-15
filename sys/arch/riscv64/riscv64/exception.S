@@ -89,7 +89,7 @@
 	sd	t0, (TF_SCAUSE)(sp)
 .endm
 
-.macro load_registers el
+.macro restore_registers el
 	ld	t0, (TF_SSTATUS)(sp)
 .if \el == 0
 	/* Ensure user interrupts will be enabled on eret */
@@ -199,7 +199,7 @@ ENTRY(cpu_exception_handler_supervisor)
 	save_registers 1
 	mv	a0, sp
 	call	_C_LABEL(do_trap_supervisor)
-	load_registers 1
+	restore_registers 1
 	sret
 END(cpu_exception_handler_supervisor)
 
@@ -208,7 +208,13 @@ ENTRY(cpu_exception_handler_user)
 	mv	a0, sp
 	call	_C_LABEL(do_trap_user)
 	do_ast
-	load_registers 0
+	restore_registers 0
 	csrrw	sp, sscratch, sp
 	sret
 END(cpu_exception_handler_user)
+
+ENTRY(syscall_return)
+	do_ast		// XXX What is this?
+	restore_registers 0
+	ret
+END(syscall_return)

@@ -17,8 +17,6 @@
 * DDB
     * Completely unimplemented. Don't expect it to work.
 * PMAP
-    * Do not expect page table switch to work yet.
-    * PMAP structure's pm\_mode is not set. This will definitely cause issues later.
     * Consolidate pm\_mode / pm\_asid / pm\_ppn into single var -- pm\_satp?
     * Physmap vars necessary in bootconfig.h?
 * Interrupts
@@ -28,6 +26,11 @@
 * Context Switch
     * switchframe not being initialized on cpu\_fork
     * child\_return logic is best-guess. Consider re-evaluting at later point in time
+* System Calls
+    * Interrupts not restored during System Call
+    * Floating Point Registers not saved during System Call
+    * System Call does not signal success / failure
+    * Ensure that ERESTART error PC adjustment makes it back to process state
 * Misc
     * revisit settings in param.h (FDT / ACPI / U-Area / Clusters / Buffer)
     * Look into implementing riscv64/cpufunc.c, if necessary

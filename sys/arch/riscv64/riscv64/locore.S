@@ -244,11 +244,9 @@ va:					//XXX just a trampoline?
 	addi	s0, s0, 8
 	bltu	s0, s1, 1b
 
-#ifdef SMP			//Symmetric Multiprocessing, XXX defined in /config/GENERIC?
 	/* Store boot hart id. */
 	la	t0, boot_hart	//defined in machdep.c, the hart we booted on.
 	sw	a0, 0(t0)	//all above logic runs on this a0 hart.
-#endif
 
 	/* Fill riscv_bootparams */
 	addi	sp, sp, -RISCV_BOOTPARAMS_SIZEOF
@@ -338,7 +336,7 @@ hart_lottery:
 init_pt_va:
 	.quad pagetable_l2	/* XXX: Keep page tables VA */
 
-#ifndef SMP
+#ifndef MULTIPROCESSOR
 ENTRY(mpentry)
 1:
 	wfi

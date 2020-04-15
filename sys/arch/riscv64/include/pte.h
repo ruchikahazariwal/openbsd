@@ -74,7 +74,6 @@
 #define	PTE_SIZE	8
 
 #ifndef _LOCORE
-typedef	uint64_t	pd_entry_t;		/* page directory entry */
 typedef	uint64_t	pt_entry_t;		/* page table entry */
 typedef	uint64_t	pn_t;			/* page number */
 #endif /* !_LOCORE */

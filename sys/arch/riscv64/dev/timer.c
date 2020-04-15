@@ -204,28 +204,23 @@ riscv_timer_attach(struct device *parent, struct device *self, void *aux)
 }
 
 int
-riscv_timer_intr(void *arg)
+riscv_timer_intr(void *frame)
 {
 	struct riscv_timer_softc *sc;
 	uint64_t next;
-	u_int new_hz = 1000;
+	u_int new_hz = 100;
 
 #ifdef	DEBUG_TIMER
 	printf("RISC-V Timer Interrupt\n");
 #endif
-	sc = (struct riscv_timer_softc *)arg;
+	sc = riscv_timer_sc;
 
 	next = get_cycles() + sc->sc_ticks_per_second / new_hz;
 	sbi_set_timer(next);
 
 	csr_clear(sip, SIP_STIP);
 
-#if 0	// Not relevant? FreeBSD specific?
-	if (sc->et.et_active)
-		sc->et.et_event_cb(&sc->et, sc->et.et_arg);
-#endif
-
-	return (0); // Handled
+	return (1); // Handled
 }
 
 void

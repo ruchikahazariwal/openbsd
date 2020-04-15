@@ -28,6 +28,7 @@
 #include <dev/ofw/openfirm.h>
 #include <dev/ofw/fdt.h>
 
+#include "riscv64/dev/plic.h"
 #include "riscv_cpu_intc.h"
 
 struct intrhand {
@@ -42,6 +43,12 @@ struct interrupt_controller intc_ic;
 
 int	riscv_intc_match(struct device *, void *, void *);
 void	riscv_intc_attach(struct device *, struct device *, void *);
+
+void	riscv_intc_irq_handler(void *);
+void	*riscv_intc_intr_establish(int, int, int (*)(void *),
+		void *, char *);
+void	riscv_intc_intr_disestablish(void *);
+
 
 struct cfattach        intc_ca = {
        sizeof (struct device), riscv_intc_match, riscv_intc_attach
@@ -65,6 +72,11 @@ riscv_intc_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct fdt_attach_args *faa = aux;/* should only use fa_node field */
 
+	riscv_init_smask();
+
+	/* hook the intr_handler */
+	riscv_set_intr_handler(riscv_intc_irq_handler);
+
 	intc_ic.ic_node = faa->fa_node;
 	intc_ic.ic_cookie = &intc_ic;
 
@@ -77,10 +89,15 @@ riscv_intc_attach(struct device *parent, struct device *self, void *aux)
 
 	riscv_intr_register_fdt(&intc_ic);
 
-	/* XXX right time to enable interrupts ?? */
+	/*
+	 * XXX right time to enable interrupts ??
+	 * might need to postpone untile autoconf is finished
+	 */
 	enable_interrupts();
 }
 
+
+/* global interrupt handler */
 void
 riscv_intc_irq_handler(void *frame)
 {
@@ -98,7 +115,7 @@ riscv_intc_irq_handler(void *frame)
 #endif
 
 	ih = intc_handler[irq];
-	if (ih->ih_func(frame))
+	if (ih->ih_func(frame) == 0)
 		printf("fail in handleing irq %d\n", irq);
 }
 
@@ -106,13 +123,13 @@ void *
 riscv_intc_intr_establish(int irqno, int dummy_level, int (*func)(void *),
     void *arg, char *name)
 {
-	int psw;
+	int sie;
 	struct intrhand *ih;
 
 	if (irqno < 0 || irqno >= INTC_NIRQS)
 		panic("intc_intr_establish: bogus irqnumber %d: %s",
 		     irqno, name);
-	psw = disable_interrupts();
+	sie = disable_interrupts();
 
 	ih = malloc(sizeof(*ih), M_DEVBUF, M_WAITOK);
 	ih->ih_func = func;
@@ -122,22 +139,22 @@ riscv_intc_intr_establish(int irqno, int dummy_level, int (*func)(void *),
 
 	intc_handler[irqno] = ih;
 #ifdef DEBUG_INTC
-	printf("intc_intr_establish irq %d [%s]\n", irqno, name);
+	printf("\nintc_intr_establish irq %d [%s]\n", irqno, name);
 #endif
-	restore_interrupts(psw);
+	restore_interrupts(sie);
 	return (ih);
 }
 
 void
 riscv_intc_intr_disestablish(void *cookie)
 {
-	int psw;
+	int sie;
 	struct intrhand *ih = cookie;
 	int irqno = ih->ih_irq;
-	psw = disable_interrupts();
+	sie = disable_interrupts();
 
 	intc_handler[irqno] = NULL;
 	free(ih, M_DEVBUF, 0);
 
-	restore_interrupts(psw);
+	restore_interrupts(sie);
 }

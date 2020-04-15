@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2020 Mars Li <mengshi.li.mars@gmai..com>
+ * Copyright (c) 2020, Mars Li <mengshi.li.mars@gmail.com>
+ * Copyright (c) 2020, Brian Bamsch <bbamsch@google.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -14,14 +15,22 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#ifndef _RISCV_CPU_INTC_H_
-#define _RISCV_CPU_INTC_H_
+#ifndef _RISCV_PLIC_H_
+#define _RISCV_PLIC_H_
 
-void 	*riscv_intc_intr_establish(int, int, int (*func)(void *),
+#ifndef _LOCORE
+
+void	plic_splx(int);
+int	plic_spllower(int);
+int	plic_splraise(int);
+void	plic_setipl(int);
+
+void 	*plic_intr_establish(int, int, int (*)(void *),
 		void *, char *);
-void 	*riscv_intc_intr_establish_fdt(void *, int *, int, int (*)(void *),
-		void *, char *);
-void 	riscv_intc_intr_disestablish(void *cookie);
+void 	*plic_intr_establish_fdt(void *, int *, int,
+		int (*)(void *), void *, char *);
+void 	plic_intr_disestablish(void *);
 
-#endif /* _RISCV_CPU_INTC_H_ */
+#endif /* ! _LOCORE */
 
+#endif /* _RISCV_PLIC_H_*/

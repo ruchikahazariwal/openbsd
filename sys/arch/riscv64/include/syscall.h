@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 Mars Li <mengshi.li.mars@gmai..com>
+ * Copyright (c) 2020 Brian Bamsch <bbamsch@google.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -14,14 +14,14 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#ifndef _RISCV_CPU_INTC_H_
-#define _RISCV_CPU_INTC_H_
+#ifndef _MACHINE_SYSCALL_H_
+#define _MACHINE_SYSCALL_H_
 
-void 	*riscv_intc_intr_establish(int, int, int (*func)(void *),
-		void *, char *);
-void 	*riscv_intc_intr_establish_fdt(void *, int *, int, int (*)(void *),
-		void *, char *);
-void 	riscv_intc_intr_disestablish(void *cookie);
+#ifdef _KERNEL
 
-#endif /* _RISCV_CPU_INTC_H_ */
+// syscall.c
+void svc_handler	(trapframe_t *);
 
+#endif
+
+#endif /* !_MACHINE_SYSCALL_H_ */

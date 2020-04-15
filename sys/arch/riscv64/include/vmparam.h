@@ -116,8 +116,16 @@
 #define	VM_MIN_KERNEL_ADDRESS	(0xffffffc000000000UL)
 #define	VM_MAX_KERNEL_ADDRESS	(0xffffffc800000000UL)
 
+// Kernel L1 Page Table Range
+#define	L1_KERN_BASE		(256)
+#define	L1_KERN_ENTRIES		(288 - L1_KERN_BASE)
+
 #define	DMAP_MIN_ADDRESS	(0xffffffd000000000UL)
 #define	DMAP_MAX_ADDRESS	(0xfffffff000000000UL)
+
+// DMAP L1 Page Table Range
+#define	L1_DMAP_BASE		(320)
+#define	L1_DMAP_ENTRIES		(448 - L1_DMAP_BASE)
 
 #define	DMAP_MIN_PHYSADDR	(dmap_phys_base)
 #define	DMAP_MAX_PHYSADDR	(dmap_phys_max)
