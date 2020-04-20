@@ -28,6 +28,7 @@
 
 #include <machine/riscvreg.h>
 #include <machine/syscall.h>
+#include <machine/db_machdep.h>
 
 /* Called from trap.S */
 void do_trap_supervisor(struct trapframe *);

@@ -54,7 +54,6 @@ db_stack_trace_print(db_expr_t addr, int have_addr, db_expr_t count,
 	Elf_Sym *	sym;
 	char		*name;
 	int		kernel_only = 1;
-	int		trace_thread = 0;
 
 	while ((c = *cp++) != 0) {
 		if (c == 'u')

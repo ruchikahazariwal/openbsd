@@ -38,7 +38,7 @@
 
 #include <uvm/uvm_extern.h>
 
-#include <riscv64/db_machdep.h>
+#include <machine/db_machdep.h>
 #include <ddb/db_access.h>
 #include <ddb/db_command.h>
 #include <ddb/db_output.h>
@@ -49,7 +49,6 @@
 #include <ddb/db_interface.h>
 #include <dev/cons.h>
 
-int db_trapper(vaddr_t, u_int, trapframe_t *, int);
 
 struct db_variable db_regs[] = {
 	{ "ra", (long *)&DDB_REGS->tf_ra, FCN_NULL, },		/* x1 */
