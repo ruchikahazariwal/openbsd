@@ -50,7 +50,6 @@ plic*		at simplebus? early 1
 
 scsibus*        at scsi?
 sd*		at scsibus?
-st*		at scsibus?
 cd*		at scsibus?
 ch*		at scsibus?
 uk*		at scsibus?
