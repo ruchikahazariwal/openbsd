@@ -173,7 +173,7 @@ mainbus_attach_node(struct device *self, int node, cfmatch_t submatch)
 
 	len = OF_getproplen(node, "reg");
 	line = (sc->sc_acells + sc->sc_scells) * sizeof(uint32_t);
-	if (len > 0 && (len % line) == 0) {
+	if (len > 0 && line > 0 && (len % line) == 0) {
 		reg = malloc(len, M_TEMP, M_WAITOK);
 		OF_getpropintarray(node, "reg", reg, len);
 
@@ -267,7 +267,7 @@ mainbus_attach_cpus(struct device *self, cfmatch_t match)
 			ncpusfound++;
 
 #ifdef DEBUG_AUTOCONF
-	       printf("scanning cpus subnode: %d\n", node);
+                printf("scanning cpus subnode: %d\n", node);
 #endif
 		mainbus_attach_node(self, node, match);
 	}

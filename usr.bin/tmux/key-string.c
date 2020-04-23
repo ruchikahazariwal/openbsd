@@ -1,4 +1,4 @@
-/* $OpenBSD: key-string.c,v 1.53 2020/02/19 14:25:00 nicm Exp $ */
+/* $OpenBSD: key-string.c,v 1.56 2020/04/09 13:52:31 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -100,6 +100,9 @@ static const struct {
 	KEYC_MOUSE_STRING(MOUSEDRAGEND3, MouseDragEnd3),
 	KEYC_MOUSE_STRING(WHEELUP, WheelUp),
 	KEYC_MOUSE_STRING(WHEELDOWN, WheelDown),
+	KEYC_MOUSE_STRING(SECONDCLICK1, SecondClick1),
+	KEYC_MOUSE_STRING(SECONDCLICK2, SecondClick2),
+	KEYC_MOUSE_STRING(SECONDCLICK3, SecondClick3),
 	KEYC_MOUSE_STRING(DOUBLECLICK1, DoubleClick1),
 	KEYC_MOUSE_STRING(DOUBLECLICK2, DoubleClick2),
 	KEYC_MOUSE_STRING(DOUBLECLICK3, DoubleClick3),
@@ -226,10 +229,8 @@ key_string_lookup_string(const char *string)
 			key -= 64;
 		else if (key == 32)
 			key = 0;
-		else if (key == '?')
-			key = 127;
 		else if (key == 63)
-			key = KEYC_BSPACE;
+			key = 127;
 		else
 			return (KEYC_UNKNOWN);
 		modifiers &= ~KEYC_CTRL;
@@ -256,6 +257,10 @@ key_string_lookup_key(key_code key)
 		snprintf(out, sizeof out, "%c", (int)(key & 0xff));
 		return (out);
 	}
+
+	/* Display C-@ as C-Space. */
+	if ((key & KEYC_MASK_KEY) == 0)
+		key = ' ' | KEYC_CTRL | (key & KEYC_MASK_MOD);
 
 	/* Fill in the modifiers. */
 	if (key & KEYC_CTRL)
@@ -328,15 +333,6 @@ key_string_lookup_key(key_code key)
 		strlcat(out, tmp, sizeof out);
 		return (out);
 	}
-
-	/*
-	 * Special case: display C-@ as C-Space. Could do this below in
-	 * the (key >= 0 && key <= 32), but this way we let it be found
-	 * in key_string_table, for the unlikely chance that we might
-	 * change its name.
-	 */
-	if ((key & KEYC_MASK_KEY) == 0)
-	    key = ' ' | KEYC_CTRL | (key & KEYC_MASK_MOD);
 
 	/* Try the key against the string table. */
 	for (i = 0; i < nitems(key_string_table); i++) {

@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-parse.y,v 1.23 2020/01/28 13:10:14 nicm Exp $ */
+/* $OpenBSD: cmd-parse.y,v 1.26 2020/04/13 18:59:41 nicm Exp $ */
 
 /*
  * Copyright (c) 2019 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -99,6 +99,7 @@ static void	 cmd_parse_print_commands(struct cmd_parse_input *, u_int,
 }
 
 %token ERROR
+%token HIDDEN
 %token IF
 %token ELSE
 %token ELIF
@@ -134,6 +135,11 @@ statements	: statement '\n'
 		}
 
 statement	: /* empty */
+		{
+			$$ = xmalloc (sizeof *$$);
+			TAILQ_INIT($$);
+		}
+		| hidden_assignment
 		{
 			$$ = xmalloc (sizeof *$$);
 			TAILQ_INIT($$);
@@ -204,8 +210,19 @@ assignment	: EQUALS
 
 			if ((~flags & CMD_PARSE_PARSEONLY) &&
 			    (ps->scope == NULL || ps->scope->flag))
-				environ_put(global_environ, $1);
+				environ_put(global_environ, $1, 0);
 			free($1);
+		}
+
+hidden_assignment : HIDDEN EQUALS
+		{
+			struct cmd_parse_state	*ps = &parse_state;
+			int			 flags = ps->input->flags;
+
+			if ((~flags & CMD_PARSE_PARSEONLY) &&
+			    (ps->scope == NULL || ps->scope->flag))
+				environ_put(global_environ, $2, ENVIRON_HIDDEN);
+			free($2);
 		}
 
 if_open		: IF expanded
@@ -683,15 +700,17 @@ cmd_parse_build_commands(struct cmd_parse_commands *cmds,
 
 	/*
 	 * Parse each command into a command list. Create a new command list
-	 * for each line so they get a new group (so the queue knows which ones
-	 * to remove if a command fails when executed).
+	 * for each line (unless the flag is set) so they get a new group (so
+	 * the queue knows which ones to remove if a command fails when
+	 * executed).
 	 */
 	result = cmd_list_new();
 	TAILQ_FOREACH(cmd, cmds, entry) {
 		log_debug("%s: %u %s", __func__, cmd->line, cmd->name);
 		cmd_log_argv(cmd->argc, cmd->argv, __func__);
 
-		if (cmdlist == NULL || cmd->line != line) {
+		if (cmdlist == NULL ||
+		    ((~pi->flags & CMD_PARSE_ONEGROUP) && cmd->line != line)) {
 			if (cmdlist != NULL) {
 				cmd_parse_print_commands(pi, line, cmdlist);
 				cmd_list_move(result, cmdlist);
@@ -758,7 +777,72 @@ cmd_parse_from_file(FILE *f, struct cmd_parse_input *pi)
 struct cmd_parse_result *
 cmd_parse_from_string(const char *s, struct cmd_parse_input *pi)
 {
+	struct cmd_parse_input	input;
+
+	if (pi == NULL) {
+		memset(&input, 0, sizeof input);
+		pi = &input;
+	}
+
+	/*
+	 * When parsing a string, put commands in one group even if there are
+	 * multiple lines. This means { a \n b } is identical to "a ; b" when
+	 * given as an argument to another command.
+	 */
+	pi->flags |= CMD_PARSE_ONEGROUP;
 	return (cmd_parse_from_buffer(s, strlen(s), pi));
+}
+
+enum cmd_parse_status
+cmd_parse_and_insert(const char *s, struct cmd_parse_input *pi,
+    struct cmdq_item *after, struct cmdq_state *state, char **error)
+{
+	struct cmd_parse_result	*pr;
+	struct cmdq_item	*item;
+
+	pr = cmd_parse_from_string(s, pi);
+	switch (pr->status) {
+	case CMD_PARSE_EMPTY:
+		break;
+	case CMD_PARSE_ERROR:
+		if (error != NULL)
+			*error = pr->error;
+		else
+			free(pr->error);
+		break;
+	case CMD_PARSE_SUCCESS:
+		item = cmdq_get_command(pr->cmdlist, state);
+		cmdq_insert_after(after, item);
+		cmd_list_free(pr->cmdlist);
+		break;
+	}
+	return (pr->status);
+}
+
+enum cmd_parse_status
+cmd_parse_and_append(const char *s, struct cmd_parse_input *pi,
+    struct client *c, struct cmdq_state *state, char **error)
+{
+	struct cmd_parse_result	*pr;
+	struct cmdq_item	*item;
+
+	pr = cmd_parse_from_string(s, pi);
+	switch (pr->status) {
+	case CMD_PARSE_EMPTY:
+		break;
+	case CMD_PARSE_ERROR:
+		if (error != NULL)
+			*error = pr->error;
+		else
+			free(pr->error);
+		break;
+	case CMD_PARSE_SUCCESS:
+		item = cmdq_get_command(pr->cmdlist, state);
+		cmdq_append(c, item);
+		cmd_list_free(pr->cmdlist);
+		break;
+	}
+	return (pr->status);
 }
 
 struct cmd_parse_result *
@@ -1079,6 +1163,10 @@ yylex(void)
 			if (*cp == '\0')
 				return (TOKEN);
 			ps->condition = 1;
+			if (strcmp(yylval.token, "%hidden") == 0) {
+				free(yylval.token);
+				return (HIDDEN);
+			}
 			if (strcmp(yylval.token, "%if") == 0) {
 				free(yylval.token);
 				return (IF);

@@ -174,8 +174,8 @@ struct viombh_dev {
 	int irq;
 	uint32_t vm_id;
 
-	// num_pages
-	// actual
+	uint32_t num_pages;
+	uint32_t actual;
 };
 
 struct viornd_dev {

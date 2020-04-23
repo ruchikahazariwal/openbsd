@@ -287,8 +287,9 @@ cpu_match(struct device *parent, void *cfdata, void *aux)
 	    strcmp(buf, "cpu") != 0)
 		return 0;
 
-	if (ncpus <= MAXCPUS)	//XXX to force return 1
+	if (ncpus < MAXCPUS || faa->fa_reg[0].addr == boot_hart) /* the primary cpu */
 		return 1;
+
 	return 0;
 }
 

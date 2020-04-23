@@ -391,9 +391,10 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	tf = p->p_addr->u_pcb.pcb_tf;
 
 	memset (tf,0, sizeof(*tf));
-	tf->tf_sp = stack;
+	tf->tf_a[0] = stack; // XXX Inherited from FreeBSD. Why?
+	tf->tf_sp = STACKALIGN(stack);
 	tf->tf_ra = pack->ep_entry;
-	tf->tf_gp = pack->ep_entry; //XXX 
+	tf->tf_sepc = pack->ep_entry;
 
 	retval[1] = 0;
 }

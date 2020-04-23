@@ -42,6 +42,8 @@
 
 #include <dev/pv/virtioreg.h>
 #include <dev/pv/virtiovar.h>
+#include <dev/pci/virtio_pcireg.h>
+
 
 extern struct uvmexp uvmexp;
 extern struct bcachestats bcstats;
@@ -220,7 +222,6 @@ viomb_attach(struct device *parent, struct device *self, void *aux)
 	     sizeof(u_int32_t) * PGS_PER_REQ, 1, "deflate") != 0))
 		goto err;
 	vsc->sc_nvqs++;
-
 	if ((virtio_alloc_vq(vsc, &sc->sc_vq[VQ_STATS], VQ_STATS,
 	     VIOMB_STATS_MAX * sizeof(struct virtio_balloon_stat), 1, "stats") != 0))
 		goto err;
@@ -231,7 +232,7 @@ viomb_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_vq[VQ_STATS].vq_done = viomb_stats_intr;
 	virtio_start_vq_intr(vsc, &sc->sc_vq[VQ_INFLATE]);
 	virtio_start_vq_intr(vsc, &sc->sc_vq[VQ_DEFLATE]);
-	virtio_start_vq_intr(vsc, &sc->sc_vq[VQ_STATS]);
+//	virtio_start_vq_intr(vsc, &sc->sc_vq[VQ_STATS]);
 
 	viomb_read_config(sc);
 	TAILQ_INIT(&sc->sc_balloon_pages);
@@ -345,13 +346,13 @@ viomb_worker(void *arg1)
 	s = splbio();
 	viomb_read_config(sc);
 	if (sc->sc_npages > sc->sc_actual){
-		VIOMBDEBUG(sc, "inflating balloon from %u to %u.\n",
-			   sc->sc_actual, sc->sc_npages);
+		printf("%s: inflating balloon from %u to %u.\n", __func__,
+		   sc->sc_actual, sc->sc_npages);
 		viomb_inflate(sc);
 		}
 	else if (sc->sc_npages < sc->sc_actual){
-		VIOMBDEBUG(sc, "deflating balloon from %u to %u.\n",
-			   sc->sc_actual, sc->sc_npages);
+		printf("%s: deflating balloon from %u to %u.\n", __func__,
+		   sc->sc_actual, sc->sc_npages);
 		viomb_deflate(sc);
 	}
 
@@ -369,7 +370,6 @@ viomb_stats_worker(void *arg1)
 
 	s = splbio();
 	printf("%s: entered\n", __func__);
-
 	printf("%s: getting memory statistics\n", __func__);
 	viomb_stats(sc);
 	for (i = 0; i < VIOMB_STATS_MAX; i++)
@@ -379,6 +379,9 @@ viomb_stats_worker(void *arg1)
 
 	printf("%s: leaving\n", __func__);
 	splx(s);
+
+	// XXX investigate why there is a stuck irq without this?
+	task_del(sc->sc_stats_taskq, &sc->sc_stats_task);
 }
 
 /*
@@ -395,12 +398,16 @@ viomb_inflate(struct viomb_softc *sc)
 	struct vm_page *p;
 	struct virtqueue *vq = &sc->sc_vq[VQ_INFLATE];
 	u_int32_t nvpages;
-	int slot, error, i = 0;
+	int slot, error, i = 0, j = 0;
 
 	nvpages = sc->sc_npages - sc->sc_actual;
 	if (nvpages > PGS_PER_REQ)
 		nvpages = PGS_PER_REQ;
 	b = &sc->sc_req;
+
+	TAILQ_INIT(&b->bl_pglist);
+
+	printf("%d: bl_pglist is empty\n", TAILQ_EMPTY(&b->bl_pglist));
 
 	/*  API call for allocating pages
 	 *
@@ -409,7 +416,8 @@ viomb_inflate(struct viomb_softc *sc)
 	 *  - bl_pglist will be the list of free pages to give to host
 	 */
 	if ((error = uvm_pglistalloc(nvpages * PAGE_SIZE, 0,
-				     dma_constraint.ucr_high,
+				     //dma_constraint.ucr_high,
+					 -1, //or uint64_t or 500 megs
 				     0, 0, &b->bl_pglist, nvpages,
 				     UVM_PLA_NOWAIT))) {
 		printf("%s unable to allocate %u physmem pages,"
@@ -418,6 +426,9 @@ viomb_inflate(struct viomb_softc *sc)
 	}
 
 	b->bl_nentries = nvpages;
+
+	TAILQ_FOREACH(p, &b->bl_pglist, pageq)
+		printf("%s: page %d # 0x%llx \n", __func__, j++, (uint64_t)p->phys_addr);
 
 	TAILQ_FOREACH(p, &b->bl_pglist, pageq)
 		b->bl_pages[i++] = p->phys_addr / VIRTIO_PAGE_SIZE;
@@ -440,10 +451,16 @@ viomb_inflate(struct viomb_softc *sc)
 	virtio_enqueue_p(vq, slot, b->bl_dmamap, 0,
 			 sizeof(u_int32_t) * nvpages, VRING_READ);
 
+	sc->sc_actual = sc->sc_actual + nvpages;
+	printf("virtio_write_device_config_4 updating actual: %d \n", sc->sc_actual);
+	virtio_write_device_config_4(vsc, VIRTIO_BALLOON_CONFIG_ACTUAL,
+		sc->sc_actual);
+
 	virtio_enqueue_commit(vsc, vq, slot, VRING_NOTIFY);
 	return;
 err:
 	uvm_pglistfree(&b->bl_pglist);
+	printf("%s, err: vq->vq_num: %u \n", __func__, vq->vq_num);
 	return;
 }
 
@@ -671,8 +688,8 @@ viomb_stats_intr(struct virtqueue *vq)
 		return(1);
 
 	bus_dmamap_sync(vsc->sc_dmat, sc->sc_stats_dmamap, 0,
-			VIOMB_STATS_MAX * sizeof(struct virtio_balloon_stat),
-			BUS_DMASYNC_POSTWRITE);
+	    VIOMB_STATS_MAX * sizeof(struct virtio_balloon_stat),
+	    BUS_DMASYNC_POSTWRITE);
 
 	task_add(sc->sc_stats_taskq, &sc->sc_stats_task);
 

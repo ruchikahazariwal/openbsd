@@ -1,4 +1,4 @@
-# $OpenBSD: GENERIC,v 1.145 2020/03/04 22:23:03 patrick Exp $
+# $OpenBSD: GENERIC,v 1.150 2020/04/14 21:20:47 kettenis Exp $
 #
 # GENERIC machine description file
 #
@@ -78,6 +78,7 @@ sdmmc*		at sdhc?
 bwfm*		at sdmmc?	# Broadcom FullMAC
 xhci*		at fdt?
 ccp*		at fdt?		# AMD Cryptographic Co-processor
+ipmi*		at fdt?
 
 # NS16550 compatible serial ports
 com*		at fdt?
@@ -127,20 +128,23 @@ fec*		at fdt?
 imxuart*	at fdt?
 imxiic*		at fdt?
 iic*		at imxiic?
+bdpmic*		at iic?
 imxesdhc*	at fdt?
 sdmmc*		at imxesdhc?
+imxpwm*		at fdt?
 imxspi*		at fdt?
 ssdfb*		at iic?
 ssdfb*		at spi?
 wsdisplay*	at ssdfb?
 imxtmu*		at fdt?
 
-# Raspberry Pi 3
+# Raspberry Pi 3/4
 bcmaux*		at fdt?
 bcmintc*	at fdt?
 bcmdog*		at fdt?
 bcmrng*		at fdt?
 bcmtemp*	at fdt?
+bse*		at acpi?
 dwctwo*		at fdt?
 usb*		at dwctwo?
 
@@ -202,6 +206,7 @@ iic*		at rkiic?
 rkpcie*		at fdt?
 pci*		at rkpcie?
 rkpwm*		at fdt?
+rkrng*		at fdt?
 rktemp*		at fdt?
 rkvop*		at fdt?
 rkdwusb*	at fdt?
@@ -379,6 +384,7 @@ bwfm*		at uhub?		# Broadcom FullMAC
 
 amphy*		at mii?			# AMD 79C873 PHYs
 atphy*		at mii?			# Attansic F1 PHYs
+brgphy*		at mii?			# Broadcom Gigabit PHYs
 eephy*		at mii?			# Marvell 88E1000 series PHY
 rgephy*		at mii?			# Realtek 8169S/8110S PHY
 rlphy*		at mii?			# Realtek 8139 internal PHYs

@@ -1,4 +1,4 @@
-/* $OpenBSD: window-tree.c,v 1.44 2020/01/08 06:38:55 nicm Exp $ */
+/* $OpenBSD: window-tree.c,v 1.46 2020/04/09 15:35:27 nicm Exp $ */
 
 /*
  * Copyright (c) 2017 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -54,8 +54,8 @@ static void		 window_tree_key(struct window_mode_entry *,
 	"}"
 
 static const struct menu_item window_tree_menu_items[] = {
-	{ "Select", 'E', NULL },
-	{ "Expand", 'R', NULL },
+	{ "Select", '\r', NULL },
+	{ "Expand", KEYC_RIGHT, NULL },
 	{ "", KEYC_NONE, NULL },
 	{ "Tag", 't', NULL },
 	{ "Tag All", '\024', NULL },
@@ -833,7 +833,7 @@ window_tree_search(__unused void *modedata, void *itemdata, const char *ss)
 			return (0);
 		retval = (strstr(cmd, ss) != NULL);
 		free(cmd);
-		return retval;
+		return (retval);
 	}
 	return (0);
 }

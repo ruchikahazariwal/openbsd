@@ -67,6 +67,7 @@ struct	proc
 member	p_stat
 member	p_cpu
 member	p_addr
+member	p_astpending	p_md.md_astpending
 
 export	SONPROC
 

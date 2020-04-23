@@ -42,9 +42,9 @@ ENTRY(copystr)
 
 	mv	a5, x0
 
-1:	ld	t0, 0(a0)
+1:	lb	t0, 0(a0)
 	addi	a0, a0, 1
-	sd	t0, 0(a1)
+	sb	t0, 0(a1)
 	addi	a1, a1, 1
 	addi	a2, a2, -1
 	addi	a5, a5, 1
@@ -98,9 +98,9 @@ ENTRY(copyinstr)
 
 	li	t1, VM_MAXUSER_ADDRESS
 1:	bgt	a0, t1, .Lcopyiostrfault_user
-	ld	t0, 0(a0)
+	lb	t0, 0(a0)
 	addi	a0, a0, 1
-	sd	t0, 0(a1)
+	sb	t0, 0(a1)
 	addi	a1, a1, 1
 	addi	a2, a2, -1
 	addi	a5, a5, 1
@@ -129,14 +129,14 @@ ENTRY(copyoutstr)
 
 	li	t1, VM_MAXUSER_ADDRESS
 1:	bgt	a1, t1, .Lcopyiostrfault_user
-	ld	t0, 0(a0)
+	lb	t0, 0(a0)
 	addi	a0, a0, 1
-	sd	t0, 0(a1)
+	sb	t0, 0(a1)
 	addi	a1, a1, 1
 	addi	a2, a2, -1
 	addi	a5, a5, 1
 	beqz	t0, .Lcopyiostrsuccess_user
-	beqz	a2, 1b
+	bnez	a2, 1b
 
 	j	.Lcopyiostrtoolong_user
 END(copyoutstr)

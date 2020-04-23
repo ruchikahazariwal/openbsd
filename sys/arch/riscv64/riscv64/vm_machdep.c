@@ -87,6 +87,12 @@ cpu_fork(struct proc *p1, struct proc *p2, void *stack, void *tcb,
 	if (tcb != NULL)
 		pcb->pcb_tcb = tcb;
 
+	/* Arguments for child */
+	tf->tf_a[0] = 0;
+	tf->tf_a[1] = 0;
+	tf->tf_sstatus |= (SSTATUS_SPIE); /* Enable interrupts. */
+	tf->tf_sstatus &= ~(SSTATUS_SPP); /* Enter user mode. */
+
 	sf = (struct switchframe *)tf - 1;
 	sf->sf_s[0] = (uint64_t)func;
 	sf->sf_s[1] = (uint64_t)arg;

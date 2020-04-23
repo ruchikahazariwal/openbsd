@@ -77,6 +77,7 @@ extern db_regs_t	ddb_regs;
 
 #define SOFTWARE_SSTEP
 
+int db_trapper(vaddr_t, u_int, trapframe_t *, int);
 void db_machine_init (void);
 db_addr_t db_branch_taken(u_int inst, db_addr_t pc, db_regs_t *regs);
 

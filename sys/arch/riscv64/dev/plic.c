@@ -640,10 +640,12 @@ plic_set_threshold(int cpu, uint32_t threshold)
 	struct plic_softc	*sc = plic;
 	uint32_t		prival;
 
-	if(threshold <= 4 || threshold >= 12)//invalid input
-		prival = IPL_HIGH - 4;//effectively disable this intr source
-	else
-		prival = threshold - 4;
+	if (threshold < 4) // enable everything (as far as plic is concerned)
+		prival = 0;
+	else if (threshold >= 12) // invalid priority level ?
+		prival = IPL_HIGH - 4; // XXX Device-specific high threshold
+	else // everything else
+		prival = threshold - 4; // XXX Device-specific threshold offset
 
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh,
 			PLIC_THRESHOLD(sc, cpu), prival);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tal.c,v 1.16 2019/11/29 17:29:28 benno Exp $ */
+/*	$OpenBSD: tal.c,v 1.18 2020/04/11 15:52:24 deraadt Exp $ */
 /*
  * Copyright (c) 2019 Kristaps Dzonsons <kristaps@bsd.lv>
  *
@@ -107,7 +107,7 @@ tal_parse_buffer(const char *fn, char *buf)
 	}
 
 	/* Now the BASE64-encoded public key. */
-	sz = ((sz + 2) / 3) * 4 + 1;
+	sz = ((sz + 3) / 4) * 3 + 1;
 	if ((b64 = malloc(sz)) == NULL)
 		err(1, NULL);
 	if ((b64sz = b64_pton(buf, b64, sz)) < 0)
@@ -142,7 +142,7 @@ struct tal *
 tal_parse(const char *fn, char *buf)
 {
 	struct tal	*p;
-	char		*d;
+	const char	*d;
 	size_t		 dlen;
 
 	p = tal_parse_buffer(fn, buf);
@@ -150,9 +150,11 @@ tal_parse(const char *fn, char *buf)
 		return NULL;
 
 	/* extract the TAL basename (without .tal suffix) */
-	d = basename(fn);
+	d = strrchr(fn, '/');
 	if (d == NULL)
-		err(1, "%s: basename", fn);
+		d = fn;
+	else
+		d++;
 	dlen = strlen(d);
 	if (strcasecmp(d + dlen - 4, ".tal") == 0)
 		dlen -= 4;

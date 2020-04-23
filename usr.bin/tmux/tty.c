@@ -1,4 +1,4 @@
-/* $OpenBSD: tty.c,v 1.342 2020/01/29 15:07:49 nicm Exp $ */
+/* $OpenBSD: tty.c,v 1.347 2020/04/09 12:16:16 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -330,20 +330,17 @@ tty_start_tty(struct tty *tty)
 		log_debug("%s: using UTF-8 for ACS", c->name);
 
 	tty_putcode(tty, TTYC_CNORM);
-	if (tty_term_has(tty->term, TTYC_KMOUS))
-		tty_puts(tty, "\033[?1000l\033[?1002l\033[?1006l\033[?1005l");
+	if (tty_term_has(tty->term, TTYC_KMOUS)) {
+		tty_puts(tty, "\033[?1000l\033[?1002l\033[?1003l");
+		tty_puts(tty, "\033[?1006l\033[?1005l");
+	}
 
 	if (tty_term_flag(tty->term, TTYC_XT)) {
 		if (options_get_number(global_options, "focus-events")) {
 			tty->flags |= TTY_FOCUS;
 			tty_puts(tty, "\033[?1004h");
 		}
-		if (~tty->flags & TTY_HAVEDA)
-			tty_puts(tty, "\033[c");
-		if (~tty->flags & TTY_HAVEDSR)
-			tty_puts(tty, "\033[1337n");
-	} else
-		tty->flags |= (TTY_HAVEDA|TTY_HAVEDSR);
+	}
 
 	evtimer_set(&tty->start_timer, tty_start_timer_callback, tty);
 	evtimer_add(&tty->start_timer, &tv);
@@ -357,6 +354,21 @@ tty_start_tty(struct tty *tty)
 	tty->mouse_drag_flag = 0;
 	tty->mouse_drag_update = NULL;
 	tty->mouse_drag_release = NULL;
+}
+
+void
+tty_send_requests(struct tty *tty)
+{
+	if (~tty->flags & TTY_STARTED)
+		return;
+
+	if (tty_term_flag(tty->term, TTYC_XT)) {
+		if (~tty->flags & TTY_HAVEDA)
+			tty_puts(tty, "\033[c");
+		if (~tty->flags & TTY_HAVEDSR)
+			tty_puts(tty, "\033[1337n");
+	} else
+		tty->flags |= (TTY_HAVEDA|TTY_HAVEDSR);
 }
 
 void
@@ -404,8 +416,10 @@ tty_stop_tty(struct tty *tty)
 		tty_raw(tty, tty_term_string(tty->term, TTYC_CR));
 
 	tty_raw(tty, tty_term_string(tty->term, TTYC_CNORM));
-	if (tty_term_has(tty->term, TTYC_KMOUS))
-		tty_raw(tty, "\033[?1000l\033[?1002l\033[?1006l\033[?1005l");
+	if (tty_term_has(tty->term, TTYC_KMOUS)) {
+		tty_raw(tty, "\033[?1000l\033[?1002l\033[?1003l");
+		tty_raw(tty, "\033[?1006l\033[?1005l");
+	}
 
 	if (tty_term_flag(tty->term, TTYC_XT)) {
 		if (tty->flags & TTY_FOCUS) {
@@ -654,7 +668,8 @@ tty_force_cursor_colour(struct tty *tty, const char *ccolour)
 void
 tty_update_mode(struct tty *tty, int mode, struct screen *s)
 {
-	int	changed;
+	struct client	*c = tty->client;
+	int		 changed;
 
 	if (s != NULL && strcmp(s->ccolour, tty->ccolour) != 0)
 		tty_force_cursor_colour(tty, s->ccolour);
@@ -663,6 +678,8 @@ tty_update_mode(struct tty *tty, int mode, struct screen *s)
 		mode &= ~MODE_CURSOR;
 
 	changed = mode ^ tty->mode;
+	log_debug("%s: update mode %x to %x", c->name, tty->mode, mode);
+
 	if (changed & MODE_BLINKING) {
 		if (tty_term_has(tty->term, TTYC_CVVIS))
 			tty_putcode(tty, TTYC_CVVIS);
@@ -686,28 +703,31 @@ tty_update_mode(struct tty *tty, int mode, struct screen *s)
 		}
 		tty->cstyle = s->cstyle;
 	}
-	if (changed & ALL_MOUSE_MODES) {
-		if (mode & ALL_MOUSE_MODES) {
-			/*
-			 * Enable the SGR (1006) extension unconditionally, as
-			 * it is safe from misinterpretation.
-			 */
-			tty_puts(tty, "\033[?1006h");
-			if (mode & MODE_MOUSE_ALL)
-				tty_puts(tty, "\033[?1003h");
-			else if (mode & MODE_MOUSE_BUTTON)
-				tty_puts(tty, "\033[?1002h");
-			else if (mode & MODE_MOUSE_STANDARD)
-				tty_puts(tty, "\033[?1000h");
-		} else {
-			if (tty->mode & MODE_MOUSE_ALL)
-				tty_puts(tty, "\033[?1003l");
-			else if (tty->mode & MODE_MOUSE_BUTTON)
-				tty_puts(tty, "\033[?1002l");
-			else if (tty->mode & MODE_MOUSE_STANDARD)
-				tty_puts(tty, "\033[?1000l");
+	if ((changed & ALL_MOUSE_MODES) &&
+	    tty_term_has(tty->term, TTYC_KMOUS)) {
+		if ((mode & ALL_MOUSE_MODES) == 0)
 			tty_puts(tty, "\033[?1006l");
-		}
+		if ((changed & MODE_MOUSE_STANDARD) &&
+		    (~mode & MODE_MOUSE_STANDARD))
+			tty_puts(tty, "\033[?1000l");
+		if ((changed & MODE_MOUSE_BUTTON) &&
+		    (~mode & MODE_MOUSE_BUTTON))
+			tty_puts(tty, "\033[?1002l");
+		if ((changed & MODE_MOUSE_ALL) &&
+		    (~mode & MODE_MOUSE_ALL))
+			tty_puts(tty, "\033[?1003l");
+
+		if (mode & ALL_MOUSE_MODES)
+			tty_puts(tty, "\033[?1006h");
+		if ((changed & MODE_MOUSE_STANDARD) &&
+		    (mode & MODE_MOUSE_STANDARD))
+			tty_puts(tty, "\033[?1000h");
+		if ((changed & MODE_MOUSE_BUTTON) &&
+		    (mode & MODE_MOUSE_BUTTON))
+			tty_puts(tty, "\033[?1002h");
+		if ((changed & MODE_MOUSE_ALL) &&
+		    (mode & MODE_MOUSE_ALL))
+			tty_puts(tty, "\033[?1003h");
 	}
 	if (changed & MODE_BRACKETPASTE) {
 		if (mode & MODE_BRACKETPASTE)
@@ -1240,6 +1260,16 @@ tty_check_codeset(struct tty *tty, const struct grid_cell *gc)
 	return (&new);
 }
 
+static int
+tty_check_overlay(struct tty *tty, u_int px, u_int py)
+{
+	struct client	*c = tty->client;
+
+	if (c->overlay_check == NULL)
+		return (1);
+	return (c->overlay_check(c, px, py));
+}
+
 void
 tty_draw_line(struct tty *tty, struct window_pane *wp, struct screen *s,
     u_int px, u_int py, u_int nx, u_int atx, u_int aty)
@@ -1319,7 +1349,8 @@ tty_draw_line(struct tty *tty, struct window_pane *wp, struct screen *s,
 		grid_view_get_cell(gd, px + i, py, &gc);
 		gcp = tty_check_codeset(tty, &gc);
 		if (len != 0 &&
-		    ((gcp->attr & GRID_ATTR_CHARSET) ||
+		    (!tty_check_overlay(tty, atx + ux + width, aty) ||
+		    (gcp->attr & GRID_ATTR_CHARSET) ||
 		    gcp->flags != last.flags ||
 		    gcp->attr != last.attr ||
 		    gcp->fg != last.fg ||
@@ -1348,7 +1379,9 @@ tty_draw_line(struct tty *tty, struct window_pane *wp, struct screen *s,
 			screen_select_cell(s, &last, gcp);
 		else
 			memcpy(&last, gcp, sizeof last);
-		if (ux + gcp->data.width > nx) {
+		if (!tty_check_overlay(tty, atx + ux, aty))
+			ux += gcp->data.width;
+		else if (ux + gcp->data.width > nx) {
 			tty_attributes(tty, &last, wp);
 			tty_cursor(tty, atx + ux, aty);
 			for (j = 0; j < gcp->data.width; j++) {
@@ -1362,7 +1395,7 @@ tty_draw_line(struct tty *tty, struct window_pane *wp, struct screen *s,
 			tty_cursor(tty, atx + ux, aty);
 			for (j = 0; j < gcp->data.size; j++)
 				tty_putc(tty, gcp->data.data[j]);
-			ux += gc.data.width;
+			ux += gcp->data.width;
 		} else {
 			memcpy(buf + len, gcp->data.data, gcp->data.size);
 			len += gcp->data.size;

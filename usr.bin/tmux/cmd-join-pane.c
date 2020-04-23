@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-join-pane.c,v 1.38 2020/01/02 13:44:17 nicm Exp $ */
+/* $OpenBSD: cmd-join-pane.c,v 1.43 2020/04/13 14:46:04 nicm Exp $ */
 
 /*
  * Copyright (c) 2011 George Nachman <tmux@georgester.com>
@@ -51,7 +51,7 @@ const struct cmd_entry cmd_move_pane_entry = {
 	.alias = "movep",
 
 	.args = { "bdhvp:l:s:t:", 0, 0 },
-	.usage = "[-bdhv] [-p percentage|-l size] " CMD_SRCDST_PANE_USAGE,
+	.usage = "[-bdhv] [-l size] " CMD_SRCDST_PANE_USAGE,
 
 	.source = { 's', CMD_FIND_PANE, CMD_FIND_DEFAULT_MARKED },
 	.target = { 't', CMD_FIND_PANE, 0 },
@@ -63,34 +63,34 @@ const struct cmd_entry cmd_move_pane_entry = {
 static enum cmd_retval
 cmd_join_pane_exec(struct cmd *self, struct cmdq_item *item)
 {
-	struct args		*args = self->args;
-	struct cmd_find_state	*current = &item->shared->current;
+	struct args		*args = cmd_get_args(self);
+	struct cmd_find_state	*current = cmdq_get_current(item);
+	struct cmd_find_state	*target = cmdq_get_target(item);
+	struct cmd_find_state	*source = cmdq_get_source(item);
 	struct session		*dst_s;
 	struct winlink		*src_wl, *dst_wl;
 	struct window		*src_w, *dst_w;
 	struct window_pane	*src_wp, *dst_wp;
-	char			*cause, *copy;
-	const char		*errstr, *p;
-	size_t			 plen;
+	char			*cause = NULL;
 	int			 size, percentage, dst_idx, not_same_window;
 	int			 flags;
 	enum layout_type	 type;
 	struct layout_cell	*lc;
 
-	if (self->entry == &cmd_join_pane_entry)
+	if (cmd_get_entry(self) == &cmd_join_pane_entry)
 		not_same_window = 1;
 	else
 		not_same_window = 0;
 
-	dst_s = item->target.s;
-	dst_wl = item->target.wl;
-	dst_wp = item->target.wp;
+	dst_s = target->s;
+	dst_wl = target->wl;
+	dst_wp = target->wp;
 	dst_w = dst_wl->window;
 	dst_idx = dst_wl->idx;
 	server_unzoom_window(dst_w);
 
-	src_wl = item->source.wl;
-	src_wp = item->source.wp;
+	src_wl = source->wl;
+	src_wp = source->wp;
 	src_w = src_wl->window;
 	server_unzoom_window(src_w);
 
@@ -108,40 +108,27 @@ cmd_join_pane_exec(struct cmd *self, struct cmdq_item *item)
 		type = LAYOUT_LEFTRIGHT;
 
 	size = -1;
-	if ((p = args_get(args, 'l')) != NULL) {
-		plen = strlen(p);
-		if (p[plen - 1] == '%') {
-			copy = xstrdup(p);
-			copy[plen - 1] = '\0';
-			percentage = strtonum(copy, 0, INT_MAX, &errstr);
-			free(copy);
-			if (errstr != NULL) {
-				cmdq_error(item, "percentage %s", errstr);
-				return (CMD_RETURN_ERROR);
-			}
+	if (args_has(args, 'l')) {
+		if (type == LAYOUT_TOPBOTTOM) {
+			size = args_percentage(args, 'l', 0, INT_MAX,
+			    dst_wp->sy, &cause);
+		} else {
+			size = args_percentage(args, 'l', 0, INT_MAX,
+			    dst_wp->sx, &cause);
+		}
+	} else if (args_has(args, 'p')) {
+		percentage = args_strtonum(args, 'p', 0, 100, &cause);
+		if (cause == NULL) {
 			if (type == LAYOUT_TOPBOTTOM)
 				size = (dst_wp->sy * percentage) / 100;
 			else
 				size = (dst_wp->sx * percentage) / 100;
-		} else {
-			size = args_strtonum(args, 'l', 0, INT_MAX, &cause);
-			if (cause != NULL) {
-				cmdq_error(item, "size %s", cause);
-				free(cause);
-				return (CMD_RETURN_ERROR);
-			}
 		}
-	} else if (args_has(args, 'p')) {
-		percentage = args_strtonum(args, 'p', 0, 100, &cause);
-		if (cause != NULL) {
-			cmdq_error(item, "percentage %s", cause);
-			free(cause);
-			return (CMD_RETURN_ERROR);
-		}
-		if (type == LAYOUT_TOPBOTTOM)
-			size = (dst_wp->sy * percentage) / 100;
-		else
-			size = (dst_wp->sx * percentage) / 100;
+	}
+	if (cause != NULL) {
+		cmdq_error(item, "size %s", cause);
+		free(cause);
+		return (CMD_RETURN_ERROR);
 	}
 
 	flags = 0;

@@ -1682,7 +1682,7 @@ pmap_pte_update(struct pte_desc *pted, uint64_t *pl3)
 	else
 		access_bits = ap_bits_user[pted->pted_pte & PROT_MASK];
 
-	pte = VP_Lx(pted->pted_pte) | access_bits;
+	pte = VP_Lx(pted->pted_pte) | access_bits | PTE_V;
 	*pl3 = pte;
 }
 

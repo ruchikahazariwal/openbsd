@@ -1,4 +1,4 @@
-/*	$OpenBSD: types.h,v 1.32 2020/01/16 20:05:00 tobhe Exp $	*/
+/*	$OpenBSD: types.h,v 1.35 2020/04/09 19:55:20 tobhe Exp $	*/
 
 /*
  * Copyright (c) 2019 Tobias Heider <tobias.heider@stusta.de>
@@ -46,9 +46,7 @@
 
 #define IKED_OPT_VERBOSE	0x00000001
 #define IKED_OPT_NOACTION	0x00000002
-#define IKED_OPT_NONATT		0x00000004
-#define IKED_OPT_NATT		0x00000008
-#define IKED_OPT_PASSIVE	0x00000010
+#define IKED_OPT_PASSIVE	0x00000004
 
 #define IKED_IKE_PORT		500
 #define IKED_NATT_PORT		4500
@@ -105,6 +103,8 @@ enum imsg_type {
 	IMSG_CTL_MOBIKE,
 	IMSG_CTL_FRAGMENTATION,
 	IMSG_CTL_NATTPORT,
+	IMSG_CTL_RESET_ID,
+	IMSG_CTL_SHOW_SA,
 	IMSG_COMPILE,
 	IMSG_UDP_SOCKET,
 	IMSG_PFKEY_SOCKET,

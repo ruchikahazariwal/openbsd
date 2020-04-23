@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmmvar.h,v 1.68 2020/01/22 03:29:58 mlarkin Exp $	*/
+/*	$OpenBSD: vmmvar.h,v 1.70 2020/04/08 07:39:48 pd Exp $	*/
 /*
  * Copyright (c) 2014 Mike Larkin <mlarkin@openbsd.org>
  *
@@ -18,6 +18,9 @@
 /*
  * CPU capabilities for VMM operation
  */
+
+#include <uvm/uvm_extern.h>
+
 #ifndef _MACHINE_VMMVAR_H_
 #define _MACHINE_VMMVAR_H_
 
@@ -322,6 +325,10 @@ enum {
 };
 
 enum {
+	VEE_FAULT_PROTECT
+};
+
+enum {
 	VMM_CPU_MODE_REAL,
 	VMM_CPU_MODE_PROT,
 	VMM_CPU_MODE_PROT32,
@@ -349,6 +356,12 @@ struct vm_exit_inout {
 	uint8_t			vei_encoding;	/* operand encoding */
 	uint16_t		vei_port;	/* port */
 	uint32_t		vei_data;	/* data */
+};
+/*
+ *  vm_exit_eptviolation	: describes an EPT VIOLATION exit
+ */
+struct vm_exit_eptviolation {
+	uint8_t		vee_fault_type;
 };
 
 /*
@@ -447,7 +460,8 @@ struct vm_mem_range {
  */
 struct vm_exit {
 	union {
-		struct vm_exit_inout	vei;		/* IN/OUT exit */
+		struct vm_exit_inout		vei;	/* IN/OUT exit */
+		struct vm_exit_eptviolation	vee;	/* EPT VIOLATION exit*/
 	};
 
 	struct vcpu_reg_state		vrs;
@@ -533,6 +547,14 @@ struct vm_inswap_balloon {
 	int			vib_host_is_swapping;
 };
 
+#define BALLOON_MAX_PAGES 256
+struct vm_inflate_balloon_params {
+	/* Input parameters to VMM_IOC_BALLOON_INFLATE */
+	uint32_t		vibp_vm_id;
+	uint32_t		buf_bl_pglist[BALLOON_MAX_PAGES];
+	size_t 			bl_pglist_sz;
+};
+
 #define VM_RWVMPARAMS_PVCLOCK_SYSTEM_GPA 0x1	/* read/write pvclock gpa */
 #define VM_RWVMPARAMS_PVCLOCK_VERSION	 0x2	/* read/write pvclock version */
 #define VM_RWVMPARAMS_ALL	(VM_RWVMPARAMS_PVCLOCK_SYSTEM_GPA | \
@@ -566,6 +588,15 @@ struct vm_rwregs_params {
 	struct vcpu_reg_state	vrwp_regs;
 };
 
+struct vm_mprotect_ept_params {
+	/* Input parameters to VMM_IOC_MPROTECT_EPT */
+	uint32_t		vmep_vm_id;
+	uint32_t		vmep_vcpu_id;
+	vaddr_t			vmep_sgpa;
+	size_t			vmep_size;
+	int			vmep_prot;
+};
+
 /* IOCTL definitions */
 #define VMM_IOC_CREATE _IOWR('V', 1, struct vm_create_params) /* Create VM */
 #define VMM_IOC_RUN _IOWR('V', 2, struct vm_run_params) /* Run VCPU */
@@ -579,9 +610,11 @@ struct vm_rwregs_params {
 #define VMM_IOC_READVMPARAMS _IOWR('V', 9, struct vm_rwvmparams_params)
 /* Set VM params */
 #define VMM_IOC_WRITEVMPARAMS _IOW('V', 10, struct vm_rwvmparams_params)
+/* Control the protection of ept pages*/
+#define VMM_IOC_MPROTECT_EPT _IOW('V', 11, struct vm_mprotect_ept_params)
 /* Check if host is about to swap */
-#define VMM_IOC_BALLOON _IOWR('V', 11, struct vm_inswap_balloon)
-
+#define VMM_IOC_BALLOON _IOWR('V', 12, struct vm_inswap_balloon)
+#define VMM_IOC_BALLOON_INFLATE _IOWR('V', 13, struct vm_inflate_balloon_params)
 
 /* CPUID masks */
 /*
@@ -943,6 +976,8 @@ struct vcpu {
 	vaddr_t vc_vmx_msr_entry_load_va;
 	paddr_t vc_vmx_msr_entry_load_pa;
 	uint8_t vc_vmx_vpid_enabled;
+	uint64_t vc_vmx_cr0_fixed1;
+	uint64_t vc_vmx_cr0_fixed0;
 
 	/* SVM only */
 	vaddr_t vc_svm_hsa_va;

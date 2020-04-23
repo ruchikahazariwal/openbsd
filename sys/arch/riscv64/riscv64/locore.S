@@ -51,15 +51,15 @@ _start_kern_bootstrap:
 		/* Set the global pointer */
 .option push
 .option norelax
-	lla	gp, __global_pointer$		//XXX where?
+	lla	gp, __global_pointer$
 .option pop
 
 	/* Get the physical address kernel loaded to */ 
 	lla	t0, virt_map	//virt_map is a phy addr where its own va is stored.
-	ld	t1, 0(t0)	//load Double-word data. XXX WHEN is (t0) filled
+	ld	t1, 0(t0)
 	sub	t1, t1, t0	//t1 = t1 - t0 = va - pa, va<-->pa offset
-	li	t2, KERNBASE	//load immediate, KERNBASE is virtual addr
-	sub	s9, t2, t1	// s9 = physmem base of kernel
+	li	t2, KERNBASE	//KERNBASE is virtual addr
+	sub	s9, t2, t1	//s9 = physmem base of kernel
 
 	//registers passed by bbl.
 	/* 
@@ -68,19 +68,19 @@ _start_kern_bootstrap:
 	 */
 
 	/* Pick a hart to run the boot process. */
-	lla	t0, hart_lottery	//t0 points to hart_lottery
-	li	t1, 1				//load immediate, t1 = 1
+	lla	t0, hart_lottery
+	li	t1, 1
 	//atomic memory operation, read-modify-write: 
 		//only the first hart can read 0 and modify it to 1, 
 		//all other harts will read 1.
-	amoadd.w t2, t1, (t0)	//XXX changed first operand from t0 to t2,affecting line82
+	amoadd.w t2, t1, (t0)
 	
 	/*
 	 * We must jump to mpentry in the non-BSP case because the offset is
 	 * too large to fit in a 12-bit branch immediate.
 	 */
 	beqz	t2, 1f
-	j	mpentry		//harts that lose the lottery will jump to mpentry
+	j	mpentry
 
 1:	//only one hart(which just won the lottery) runs the main boot procedure.
 	/*
@@ -150,7 +150,7 @@ _start_kern_bootstrap:
 
 
 	/* step3)  Create an L1 entry for early devmap */
-	lla	s1, pagetable_l1				//pa
+	lla	s1, pagetable_l1	//pa
 	
 	//calculate PTE based on pa: (PPN) + privilege/permission + ...
 	lla	s2, pagetable_l2_devmap	/* Link to next level PN */ //pa
@@ -167,7 +167,7 @@ _start_kern_bootstrap:
 	/* Store single level1 PTE entry to position */
 	li	a6, PTE_SIZE
 	mulw	a5, a5, a6		//offset in Bytes
-	add	t0, s1, a5		//find the physical add to write 
+	add	t0, s1, a5		//find the physical add to write
 	sd	t6, (t0)
 
 
@@ -177,7 +177,7 @@ _start_kern_bootstrap:
 	//calc PTE based on pa
 	mv	s2, a1			//passed by bbl
 	srli	s2, s2, PAGE_SHIFT	//12
-	slli	t2, s2, PTE_PPN0_S	//10,	
+	slli	t2, s2, PTE_PPN0_S	//10
 	li	t0, (PTE_KERN)
 	or	t0, t0, t2		//PTE contructed
 
@@ -191,13 +191,11 @@ _start_kern_bootstrap:
 	/* Page tables END */
 
 
-	/* Setup supervisor trap vector */ //Supervisor Trap Vector Base Address
-	lla	t0, va			//loading a physical addr, va defined below
-	sub	t0, t0, s9		//offset comparing to phymem base
-	li	t1, KERNBASE		//virt addr		
-	add	t0, t0, t1		
-	csrw	stvec, t0		//virt addr
-	mv	s3, t0
+	/* Calculate virtual address of the first instruction after enable paging */
+	lla	s3, va			//va is a physical addr!
+	sub	s3, s3, s9		//offset comparing to phymem base
+	li	t0, KERNBASE		//virt addr
+	add	s3, s3, t0
 
 	/* Set page tables base register */
 	lla	s2, pagetable_l1	//pa
@@ -209,7 +207,7 @@ _start_kern_bootstrap:
 	jr	s3
 
 	.align 2
-va:					//XXX just a trampoline?
+va:
 	/* Set the global pointer again, this time with the virtual address. */
 .option push
 .option norelax
@@ -222,7 +220,7 @@ va:					//XXX just a trampoline?
 
 
 	/* Setup supervisor trap vector */
-	la	t0, cpu_exception_handler	//-->where the real setup happens
+	la	t0, cpu_trap_handler
 	csrw	stvec, t0
 
 	/* Ensure sscratch is zero */
@@ -237,7 +235,7 @@ va:					//XXX just a trampoline?
 	addi	sp, sp, -(PCB_SIZEOF + RISCV_BOOTPARAMS_SIZEOF) & ~STACKALIGNBYTES
 
 	/* Clear BSS */
-	la	s0, _C_LABEL(__bss_start)	//XXX not found in code, determined by linker?
+	la	s0, _C_LABEL(__bss_start)
 	la	s1, _C_LABEL(_end)
 1:
 	sd	zero, 0(s0)
@@ -245,7 +243,7 @@ va:					//XXX just a trampoline?
 	bltu	s0, s1, 1b
 
 	/* Store boot hart id. */
-	la	t0, boot_hart	//defined in machdep.c, the hart we booted on.
+	la	t0, boot_hart	//the hart we booted on.
 	sw	a0, 0(t0)	//all above logic runs on this a0 hart.
 
 	/* Fill riscv_bootparams */
@@ -269,7 +267,7 @@ va:					//XXX just a trampoline?
 	call	_C_LABEL(initriscv)	// Off we go, defined in machdep.c
 	call	_C_LABEL(main)		//defined in openbsd/kern/init_main.c
 
-	.data//XXX otherwise would fall into text region
+	.data
 	.align  4
 initstack:
 	.space  (PAGE_SIZE * KSTACK_PAGES)
@@ -284,14 +282,14 @@ sigfillsiz:
 	.data
 	.quad	esigfill - sigfill
 
-	.text//XXX right place to restart text
+	.text
 ENTRY(sigcode)
        mv      a0, sp
        addi    a0, a0, SF_SC //actual saved context
 
 1:
        li      t0, SYS_sigreturn
-       ecall  //make a system call from a lower privilege level to a higher mode
+       ecall                //make a syscall from lower privilege to higher
 	
        .globl _C_LABEL(sigcoderet)
 _C_LABEL(sigcoderet):
@@ -320,7 +318,7 @@ _C_LABEL(esym): .quad	_C_LABEL(end)
 	.align	12
 pagetable_l1:
 	.space	PAGE_SIZE
-	.globl	pagetable_l2	// Used in pmap.c
+	.globl	pagetable_l2
 pagetable_l2:
 	.space	PAGE_SIZE
 pagetable_l2_devmap:
@@ -347,6 +345,7 @@ END(mpentry)
  * mpentry(unsigned long)
  *
  * Called by a core / hart when it is being brought online.
+ * XXX: [CMPE] This needs to be updated
  */
 ENTRY(mpentry)
 	/*
@@ -356,16 +355,16 @@ ENTRY(mpentry)
 	li	t1, 4			//t1 = 4, each core occupies a word
 	mulw	t1, t1, a0		//t1 = a0*4, offset in Bytes for #a0 core
 	/* Get the pointer */
-	lla	t0, __riscv_boot_ap	//mp_machdep.c, t0 = base addr for all cores		
+	lla	t0, __riscv_boot_ap
 	add	t0, t0, t1		//t0 = starting addr for current core
 
 1:
 	/* Wait the kernel to be ready */
-	lw	t1, 0(t0)			//when kernel is ready, 0(t0) should NOT euqal 0
-	beqz	t1, 1b				//see __riscv_boot_ap
+	lw	t1, 0(t0)		//when kernel is ready, 0(t0) should NOT euqal 0
+	beqz	t1, 1b			//see __riscv_boot_ap
 
 	/* Setup stack pointer */	//now kernel is ready
-	lla	t0, secondary_stacks  //mp_machdep.c. pa, size: #core x #pages/kernel x pg_size
+	lla	t0, secondary_stacks  //pa, size: #core x #pages/kernel x pg_size
 	li	t1, (PAGE_SIZE * KSTACK_PAGES)	// size of kernel stack for one core
 	mulw	t2, t1, a0			//offset for this hart
 	add	t0, t0, t2			//end of stack for this hart
@@ -398,14 +397,14 @@ mpva:
 .option pop
 
 	/* Setup supervisor trap vector */
-	la	t0, cpu_exception_handler
+	la	t0, cpu_trap_handler
 	csrw	stvec, t0
 
 	/* Ensure sscratch is zero */
 	li	t0, 0
 	csrw	sscratch, t0		//Scratch Register for Supervisor Mode Trap Handler
 
-	call	init_secondary		//defined in freebsd/machine/mp_machdep.c
+	call	init_secondary
 END(mpentry)
 #endif
 

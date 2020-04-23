@@ -1,4 +1,4 @@
-/* $OpenBSD: grid.c,v 1.101 2019/12/03 10:47:22 nicm Exp $ */
+/* $OpenBSD: grid.c,v 1.105 2020/04/09 13:53:50 nicm Exp $ */
 
 /*
  * Copyright (c) 2008 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -258,7 +258,10 @@ grid_create(u_int sx, u_int sy, u_int hlimit)
 	gd->sx = sx;
 	gd->sy = sy;
 
-	gd->flags = GRID_HISTORY;
+	if (hlimit != 0)
+		gd->flags = GRID_HISTORY;
+	else
+		gd->flags = 0;
 
 	gd->hscrolled = 0;
 	gd->hsize = 0;
@@ -346,6 +349,19 @@ grid_collect_history(struct grid *gd)
 	gd->hsize -= ny;
 	if (gd->hscrolled > gd->hsize)
 		gd->hscrolled = gd->hsize;
+}
+
+/* Remove lines from the bottom of the history. */
+void
+grid_remove_history(struct grid *gd, u_int ny)
+{
+	u_int	yy;
+
+	if (ny > gd->hsize)
+		return;
+	for (yy = 0; yy < ny; yy++)
+		grid_free_line(gd, gd->hsize + gd->sy - 1 - yy);
+	gd->hsize -= ny;
 }
 
 /*
@@ -755,15 +771,15 @@ grid_string_cells_bg(const struct grid_cell *gc, int *values)
 		case 8:
 			values[n++] = 49;
 			break;
-		case 100:
-		case 101:
-		case 102:
-		case 103:
-		case 104:
-		case 105:
-		case 106:
-		case 107:
-			values[n++] = gc->bg - 10;
+		case 90:
+		case 91:
+		case 92:
+		case 93:
+		case 94:
+		case 95:
+		case 96:
+		case 97:
+			values[n++] = gc->bg + 10;
 			break;
 		}
 	}
@@ -1327,17 +1343,13 @@ grid_wrap_position(struct grid *gd, u_int px, u_int py, u_int *wx, u_int *wy)
 void
 grid_unwrap_position(struct grid *gd, u_int *px, u_int *py, u_int wx, u_int wy)
 {
-	u_int	yy, ax = 0, ay = 0;
+	u_int	yy, ay = 0;
 
 	for (yy = 0; yy < gd->hsize + gd->sy - 1; yy++) {
 		if (ay == wy)
 			break;
-		if (gd->linedata[yy].flags & GRID_LINE_WRAPPED)
-			ax += gd->linedata[yy].cellused;
-		else {
-			ax = 0;
+		if (~gd->linedata[yy].flags & GRID_LINE_WRAPPED)
 			ay++;
-		}
 	}
 
 	/*

@@ -1,4 +1,4 @@
-/* $OpenBSD: format.c,v 1.226 2020/03/11 14:17:55 nicm Exp $ */
+/* $OpenBSD: format.c,v 1.241 2020/04/13 20:51:57 nicm Exp $ */
 
 /*
  * Copyright (c) 2011 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -354,7 +354,7 @@ format_job_get(struct format_tree *ft, const char *cmd)
 	if (force || (fj->job == NULL && fj->last != t)) {
 		fj->job = job_run(expanded, NULL,
 		    server_client_get_cwd(ft->client, NULL), format_job_update,
-		    format_job_complete, NULL, fj, JOB_NOWAIT);
+		    format_job_complete, NULL, fj, JOB_NOWAIT, -1, -1);
 		if (fj->job == NULL) {
 			free(fj->out);
 			xasprintf(&fj->out, "<'%s' didn't start>", fj->cmd);
@@ -741,6 +741,21 @@ format_cb_current_command(struct format_tree *ft, struct format_entry *fe)
 	free(cmd);
 }
 
+/* Callback for pane_current_path. */
+static void
+format_cb_current_path(struct format_tree *ft, struct format_entry *fe)
+{
+	struct window_pane	*wp = ft->wp;
+	char			*cwd;
+
+	if (wp == NULL)
+		return;
+
+	cwd = get_proc_cwd(wp->fd);
+	if (cwd != NULL)
+		fe->value = xstrdup(cwd);
+}
+
 /* Callback for history_bytes. */
 static void
 format_cb_history_bytes(struct format_tree *ft, struct format_entry *fe)
@@ -885,11 +900,12 @@ static void
 format_cb_pane_at_top(struct format_tree *ft, struct format_entry *fe)
 {
 	struct window_pane	*wp = ft->wp;
-	struct window		*w = wp->window;
+	struct window		*w;
 	int			 status, flag;
 
 	if (wp == NULL)
 		return;
+	w = wp->window;
 
 	status = options_get_number(w->options, "pane-border-status");
 	if (status == PANE_STATUS_TOP)
@@ -904,11 +920,12 @@ static void
 format_cb_pane_at_bottom(struct format_tree *ft, struct format_entry *fe)
 {
 	struct window_pane	*wp = ft->wp;
-	struct window		*w = wp->window;
+	struct window		*w;
 	int			 status, flag;
 
 	if (wp == NULL)
 		return;
+	w = wp->window;
 
 	status = options_get_number(w->options, "pane-border-status");
 	if (status == PANE_STATUS_BOTTOM)
@@ -948,7 +965,6 @@ format_grid_word(struct grid *gd, u_int x, u_int y)
 
 	ws = options_get_string(global_s_options, "word-separators");
 
-	y = gd->hsize + y;
 	for (;;) {
 		grid_get_cell(gd, x, y, &gc);
 		if (gc.flags & GRID_FLAG_PADDING)
@@ -1009,6 +1025,7 @@ static void
 format_cb_mouse_word(struct format_tree *ft, struct format_entry *fe)
 {
 	struct window_pane	*wp;
+	struct grid		*gd;
 	u_int			 x, y;
 	char			*s;
 
@@ -1017,12 +1034,19 @@ format_cb_mouse_word(struct format_tree *ft, struct format_entry *fe)
 	wp = cmd_mouse_pane(&ft->m, NULL, NULL);
 	if (wp == NULL)
 		return;
-	if (!TAILQ_EMPTY (&wp->modes))
-		return;
 	if (cmd_mouse_at(wp, &ft->m, &x, &y, 0) != 0)
 		return;
 
-	s = format_grid_word(wp->base.grid, x, y);
+	if (!TAILQ_EMPTY(&wp->modes)) {
+		if (TAILQ_FIRST(&wp->modes)->mode == &window_copy_mode ||
+		    TAILQ_FIRST(&wp->modes)->mode == &window_view_mode)
+			s = window_copy_get_word(wp, x, y);
+		else
+			s = NULL;
+	} else {
+		gd = wp->base.grid;
+		s = format_grid_word(gd, x, gd->hsize + y);
+	}
 	if (s != NULL)
 		fe->value = s;
 }
@@ -1037,7 +1061,6 @@ format_grid_line(struct grid *gd, u_int y)
 	size_t			 size = 0;
 	char			*s = NULL;
 
-	y = gd->hsize + y;
 	for (x = 0; x < grid_line_length(gd, y); x++) {
 		grid_get_cell(gd, x, y, &gc);
 		if (gc.flags & GRID_FLAG_PADDING)
@@ -1059,6 +1082,7 @@ static void
 format_cb_mouse_line(struct format_tree *ft, struct format_entry *fe)
 {
 	struct window_pane	*wp;
+	struct grid		*gd;
 	u_int			 x, y;
 	char			*s;
 
@@ -1067,18 +1091,25 @@ format_cb_mouse_line(struct format_tree *ft, struct format_entry *fe)
 	wp = cmd_mouse_pane(&ft->m, NULL, NULL);
 	if (wp == NULL)
 		return;
-	if (!TAILQ_EMPTY (&wp->modes))
-		return;
 	if (cmd_mouse_at(wp, &ft->m, &x, &y, 0) != 0)
 		return;
 
-	s = format_grid_line(wp->base.grid, y);
+	if (!TAILQ_EMPTY(&wp->modes)) {
+		if (TAILQ_FIRST(&wp->modes)->mode == &window_copy_mode ||
+		    TAILQ_FIRST(&wp->modes)->mode == &window_view_mode)
+			s = window_copy_get_line(wp, y);
+		else
+			s = NULL;
+	} else {
+		gd = wp->base.grid;
+		s = format_grid_line(gd, gd->hsize + y);
+	}
 	if (s != NULL)
 		fe->value = s;
 }
 
-/* Merge a format tree. */
-static void
+/* Merge one format tree into another. */
+void
 format_merge(struct format_tree *ft, struct format_tree *from)
 {
 	struct format_entry	*fe;
@@ -1093,19 +1124,13 @@ format_merge(struct format_tree *ft, struct format_tree *from)
 static void
 format_create_add_item(struct format_tree *ft, struct cmdq_item *item)
 {
-	struct mouse_event	*m;
+	struct key_event	*event = cmdq_get_event(item);
+	struct mouse_event	*m = &event->m;
 	struct window_pane	*wp;
 	u_int			 x, y;
 
-	if (item->cmd != NULL)
-		format_add(ft, "command", "%s", item->cmd->entry->name);
+	cmdq_merge_formats(item, ft);
 
-	if (item->shared == NULL)
-		return;
-	if (item->shared->formats != NULL)
-		format_merge(ft, item->shared->formats);
-
-	m = &item->shared->mouse;
 	if (m->valid && ((wp = cmd_mouse_pane(m, NULL, NULL)) != NULL)) {
 		format_add(ft, "mouse_pane", "%%%u", wp->id);
 		if (cmd_mouse_at(wp, m, &x, &y, 0) == 0) {
@@ -1586,7 +1611,7 @@ format_build_modifiers(struct format_tree *ft, const char **s, u_int *count)
 		return (NULL);
 	}
 	*s = cp + 1;
-	return list;
+	return (list);
 }
 
 /* Match against an fnmatch(3) pattern or regular expression. */
@@ -1878,7 +1903,7 @@ format_replace_expression(struct format_modifier *mexp, struct format_tree *ft,
 
 	free(right);
 	free(left);
-	return value;
+	return (value);
 
 fail:
 	free(right);
@@ -2392,7 +2417,7 @@ format_single(struct cmdq_item *item, const char *fmt, struct client *c,
 	char			*expanded;
 
 	if (item != NULL)
-		ft = format_create(item->client, item, FORMAT_NONE, 0);
+		ft = format_create(cmdq_get_client(item), item, FORMAT_NONE, 0);
 	else
 		ft = format_create(NULL, item, FORMAT_NONE, 0);
 	format_defaults(ft, c, s, wl, wp);
@@ -2402,11 +2427,23 @@ format_single(struct cmdq_item *item, const char *fmt, struct client *c,
 	return (expanded);
 }
 
+/* Expand a single string using target. */
+char *
+format_single_from_target(struct cmdq_item *item, const char *fmt)
+{
+	struct cmd_find_state	*target = cmdq_get_target(item);
+	struct client		*tc = cmdq_get_target_client(item);
+
+	return (format_single(item, fmt, tc, target->s, target->wl, target->wp));
+}
+
 /* Set defaults for any of arguments that are not NULL. */
 void
 format_defaults(struct format_tree *ft, struct client *c, struct session *s,
     struct winlink *wl, struct window_pane *wp)
 {
+	struct paste_buffer	*pb;
+
 	if (c != NULL && c->name != NULL)
 		log_debug("%s: c=%s", __func__, c->name);
 	else
@@ -2446,6 +2483,10 @@ format_defaults(struct format_tree *ft, struct client *c, struct session *s,
 		format_defaults_winlink(ft, wl);
 	if (wp != NULL)
 		format_defaults_pane(ft, wp);
+
+	pb = paste_get_top (NULL);
+	if (pb != NULL)
+		format_defaults_paste_buffer(ft, pb);
 }
 
 /* Set default format keys for a session. */
@@ -2457,6 +2498,7 @@ format_defaults_session(struct format_tree *ft, struct session *s)
 	ft->s = s;
 
 	format_add(ft, "session_name", "%s", s->name);
+	format_add(ft, "session_path", "%s", s->cwd);
 	format_add(ft, "session_windows", "%u", winlink_count(&s->windows));
 	format_add(ft, "session_id", "$%u", s->id);
 
@@ -2701,6 +2743,7 @@ format_defaults_pane(struct format_tree *ft, struct window_pane *wp)
 	format_add(ft, "pane_pid", "%ld", (long) wp->pid);
 	format_add_cb(ft, "pane_start_command", format_cb_start_command);
 	format_add_cb(ft, "pane_current_command", format_cb_current_command);
+	format_add_cb(ft, "pane_current_path", format_cb_current_path);
 
 	format_add(ft, "cursor_x", "%u", wp->base.cx);
 	format_add(ft, "cursor_y", "%u", wp->base.cy);
@@ -2709,9 +2752,11 @@ format_defaults_pane(struct format_tree *ft, struct window_pane *wp)
 	format_add(ft, "scroll_region_upper", "%u", wp->base.rupper);
 	format_add(ft, "scroll_region_lower", "%u", wp->base.rlower);
 
-	format_add(ft, "alternate_on", "%d", wp->saved_grid ? 1 : 0);
-	format_add(ft, "alternate_saved_x", "%u", wp->saved_cx);
-	format_add(ft, "alternate_saved_y", "%u", wp->saved_cy);
+	format_add(ft, "alternate_on", "%d", wp->base.saved_grid != NULL);
+	if (wp->base.saved_cx != UINT_MAX)
+		format_add(ft, "alternate_saved_x", "%u", wp->base.saved_cx);
+	if (wp->base.saved_cy != UINT_MAX)
+		format_add(ft, "alternate_saved_y", "%u", wp->base.saved_cy);
 
 	format_add(ft, "cursor_flag", "%d",
 	    !!(wp->base.mode & MODE_CURSOR));

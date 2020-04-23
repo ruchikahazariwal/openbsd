@@ -1,4 +1,4 @@
-/* $OpenBSD: tmux.c,v 1.193 2020/03/12 09:26:34 nicm Exp $ */
+/* $OpenBSD: tmux.c,v 1.196 2020/04/09 15:35:27 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -49,8 +49,8 @@ const char	*shell_command;
 static __dead void	 usage(void);
 static char		*make_label(const char *, char **);
 
+static int		 areshell(const char *);
 static const char	*getshell(void);
-static int		 checkshell(const char *);
 
 static __dead void
 usage(void)
@@ -79,7 +79,7 @@ getshell(void)
 	return (_PATH_BSHELL);
 }
 
-static int
+int
 checkshell(const char *shell)
 {
 	if (shell == NULL || *shell != '/')
@@ -91,7 +91,7 @@ checkshell(const char *shell)
 	return (1);
 }
 
-int
+static int
 areshell(const char *shell)
 {
 	const char	*progname, *ptr;
@@ -224,7 +224,7 @@ getversion(void)
 			fatalx("uname failed");
 		xasprintf(&version, "openbsd-%s", u.release);
 	}
-	return version;
+	return (version);
 }
 
 int
@@ -332,9 +332,9 @@ main(int argc, char **argv)
 
 	global_environ = environ_create();
 	for (var = environ; *var != NULL; var++)
-		environ_put(global_environ, *var);
+		environ_put(global_environ, *var, 0);
 	if ((cwd = find_cwd()) != NULL)
-		environ_set(global_environ, "PWD", "%s", cwd);
+		environ_set(global_environ, "PWD", 0, "%s", cwd);
 
 	global_options = options_create(NULL);
 	global_s_options = options_create(NULL);

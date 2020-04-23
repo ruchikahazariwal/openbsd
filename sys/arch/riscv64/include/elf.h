@@ -39,28 +39,6 @@
 #define	__ELF_WORD_SIZE	64	/* Used by <sys/elf_generic.h> */
 #include <sys/elf_generic.h>
 
-/*
- * Auxiliary vector entries for passing information to the interpreter.
- */
-
-typedef struct {	/* Auxiliary vector entry on initial stack */
-	int	a_type;			/* Entry type. */
-	union {
-		int	a_val;		/* Integer value. */
-	} a_un;
-} Elf32_Auxinfo;
-
-typedef struct {	/* Auxiliary vector entry on initial stack */
-	long	a_type;			/* Entry type. */
-	union {
-		long	a_val;		/* Integer value. */
-		void	*a_ptr;		/* Address. */
-		void	(*a_fcn)(void);	/* Function pointer (not used). */
-	} a_un;
-} Elf64_Auxinfo;
-
-__ElfType(Auxinfo);
-
 #define	ELF_ARCH	EM_RISCV
 
 #define	ELF_MACHINE_OK(x) ((x) == (ELF_ARCH))
