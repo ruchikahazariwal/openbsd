@@ -279,7 +279,7 @@ viombh_notifyq(void)
 		}
 
 		free(buf);
-		free(buf_pglist);
+		free(buf_bl_pages);
 	}
 	else if (viombh.cfg.queue_notify == 1) // deflate queue
 	{
@@ -292,7 +292,7 @@ viombh_notifyq(void)
 
 	return (ret);
 out:
-	free(buf_pglist);
+	free(buf_bl_pages);
 	return (ret);
 }
 
