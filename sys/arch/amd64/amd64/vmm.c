@@ -555,7 +555,7 @@ vm_inflate_balloon(struct vm_inflate_balloon_params *vibp)
 
 	pmap = vm->vm_map->pmap;
 
-	for (i = 0; i < vibp->vib_bl_pages_sz; i++) {
+	for (i = 0; i < vibp->vibp_bl_pages_sz; i++) {
 		printf("%s: got GPPN 0x%llx from vm for inflate "
 		    "%d/%llu\n", __func__, (uint64_t)vibp->vibp_buf_bl_pages[i], i,
 		    (uint64_t)(vibp->vibp_bl_pages_sz));
