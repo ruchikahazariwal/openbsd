@@ -2370,7 +2370,7 @@ pmap_remove_ept(struct pmap *pmap, vaddr_t sgpa, vaddr_t egpa)
 	struct vmx_invept_descriptor vid;
 #endif /* NVMM > 0 */
 
-	DPRINTF("%s: sgpa=0x%llx egpa=0x%llx\n", __func__, (uint64_t)sgpa,
+	printf("%s: sgpa=0x%llx egpa=0x%llx\n", __func__, (uint64_t)sgpa,
 	    (uint64_t)egpa);
 	for (v = sgpa; v < egpa + PAGE_SIZE; v += PAGE_SIZE)
 		pmap_do_remove_ept(pmap, v);
@@ -2379,7 +2379,7 @@ pmap_remove_ept(struct pmap *pmap, vaddr_t sgpa, vaddr_t egpa)
 	if (pmap->eptp != 0) {
 		memset(&vid, 0, sizeof(vid));
 		vid.vid_eptp = pmap->eptp;
-		DPRINTF("%s: flushing EPT TLB for EPTP 0x%llx\n", __func__,
+		printf("%s: flushing EPT TLB for EPTP 0x%llx\n", __func__,
 		    vid.vid_eptp);
 		invept(IA32_VMX_INVEPT_SINGLE_CTX, &vid);
 	}

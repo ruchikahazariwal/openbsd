@@ -41,7 +41,7 @@
 #include <dev/isa/isareg.h>
 #include <dev/pv/pvreg.h>
 
-/* #define VMM_DEBUG */
+#define VMM_DEBUG
 
 void *l1tf_flush_region;
 
@@ -538,9 +538,7 @@ vm_get_balloon_info(struct vm_inswap_balloon *vib)
 int
 vm_inflate_balloon(struct vm_inflate_balloon_params *vibp)
 {
-	struct vm_page **buf_vm_pages;
 	struct vm_page *p;
-	struct pglist bl_pglist;
 	uint64_t hpa;
 	struct vm *vm;
 	struct pmap *pmap;
@@ -557,15 +555,9 @@ vm_inflate_balloon(struct vm_inflate_balloon_params *vibp)
 
 	pmap = vm->vm_map->pmap;
 
-	buf_vm_pages = (struct vm_page **)km_alloc(
-	    sizeof(struct vm_page *) * (vibp->bl_pglist_sz / 4),
-	    &kv_page, &kp_zero, &kd_waitok);
-
-	TAILQ_INIT(&bl_pglist);
-
 	for (i = 0; i < (vibp->bl_pglist_sz / 4); i++) {
-		printf("%s: got GPPN 0x%llx from vm for inflate\n"
-		    "%d/%llu", __func__, (uint64_t)vibp->buf_bl_pglist[i], i,
+		printf("%s: got GPPN 0x%llx from vm for inflate "
+		    "%d/%llu\n", __func__, (uint64_t)vibp->buf_bl_pglist[i], i,
 		    (uint64_t)(vibp->bl_pglist_sz / 4));
 
 		if (!pmap_extract(pmap, (vibp->buf_bl_pglist[i] * PAGE_SIZE),
@@ -573,23 +565,27 @@ vm_inflate_balloon(struct vm_inflate_balloon_params *vibp)
 			printf("%s: unable to extract HPA for GPA 0x%llx\n",
 			    __func__,
 			    (uint64_t)(vibp->buf_bl_pglist[i] * PAGE_SIZE));
-			return 1;
+			continue;
 		}
+
 		printf("%s: GPA: 0x%llx -> HPA 0x%llx\n", __func__,
 		    (uint64_t)(vibp->buf_bl_pglist[i] * PAGE_SIZE),
 		    hpa);
 
-		buf_vm_pages[i] = PHYS_TO_VM_PAGE(hpa);
+		p = PHYS_TO_VM_PAGE(hpa);
 
-		TAILQ_INSERT_TAIL(&bl_pglist, buf_vm_pages[i], pageq);
+		printf("%s: removing EPT entry for GPA 0x%llx\n",
+		    __func__,
+		    (uint64_t)(vibp->buf_bl_pglist[i] * PAGE_SIZE));
+		pmap_remove(pmap, (vibp->buf_bl_pglist[i] * PAGE_SIZE),
+		    ((vibp->buf_bl_pglist[i] + 1) * PAGE_SIZE));
+
+		printf("%s: freeing vm_page 0x%llx\n", __func__,
+		    (uint64_t)p);
+
+		uvm_pagefree(p);
 	}
 
-	i = 0;
-	TAILQ_FOREACH(p, &bl_pglist, pageq)
-		printf("%s: page %d # 0x%llx \n", __func__, i++, (uint64_t)p->phys_addr);
-
-//	uvm_pglistfree
-//	km_free
 	printf("%s: balloon inflate completed\n", __func__);
 	return (0);
 }
