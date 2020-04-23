@@ -197,16 +197,13 @@ viombh_notifyq(void)
 	size_t sz;
 	int ret;
 	uint32_t i;
-	uint32_t *buf_pglist;
-	//struct vm_page *buf_vm_pages;
-	//struct pglist *host_bl_pglist;
+	uint32_t *buf_bl_pages;
 	uint16_t aidx, uidx;
 	char *buf;
 	struct vring_desc *desc;
 	struct vring_avail *avail;
 	struct vring_used *used;
 	struct vm_inflate_balloon_params vibp;
-	//struct vm_page *p;
 
 	ret = 0;
 
@@ -240,15 +237,12 @@ viombh_notifyq(void)
 
 	sz = desc[avail->ring[aidx]].len;
 
-	printf("size of the desc: %zu", sz);
-
 	printf("%s: being called for %d queue\n", __func__, viombh.cfg.queue_notify);
 	if (viombh.cfg.queue_notify == 0) // inflate queue
 	{
-		buf_pglist = calloc(1, sz);
-		//buf_vm_pages = calloc(1, sizeof(struct vm_page) * (sz / 4));
+		buf_bl_pages = calloc(1, sz);
 
-		if (read_mem(desc[avail->ring[aidx]].addr, buf_pglist, sz)) {
+		if (read_mem(desc[avail->ring[aidx]].addr, buf_bl_pages, sz)) {
 			printf("error from %s", __func__);
 			goto out;
 		}
@@ -257,12 +251,12 @@ viombh_notifyq(void)
 
 		for (i = 0; i < (sz / 4); i++) {
 			printf("%s: got page number 0x%llx from vm for inflate\n"
-			    "%d/%llu", __func__, (uint64_t)buf_pglist[i],
+			    "%d/%llu", __func__, (uint64_t)buf_bl_pages[i],
 			    i, (uint64_t)(sz / 4));
-			vibp.buf_bl_pglist[i] = (uint64_t)buf_pglist[i];
+			vibp.vibp_buf_bl_pages[i] = (uint64_t)buf_bl_pages[i];
 		}
 
-		vibp.bl_pglist_sz = sz;
+		vibp.vibp_bl_pages_sz = sz/4;
 		vibp.vibp_vm_id = viombh.vm_id;
 
 		if (ioctl(env->vmd_fd, VMM_IOC_BALLOON_INFLATE, &vibp) == -1) {
@@ -272,7 +266,9 @@ viombh_notifyq(void)
 		}
 
 		ret = 1;
+		viombh.num_pages = viombh.num_pages - vibp.vibp_actual;
 		viombh.cfg.isr_status = 1;
+		viombh.cfg.isr_status |= VIRTIO_CONFIG_ISR_CONFIG_CHANGE;
 		used->ring[uidx].id = avail->ring[aidx] &
 			VIOMBH_QUEUE_MASK;
 		used->ring[uidx].len = desc[avail->ring[aidx]].len;
@@ -293,11 +289,6 @@ viombh_notifyq(void)
 	{
 
 	}
-
-	// free the pages via another vmm ioctl (TBD)
-
-	/* ret == 1 -> interrupt needed */
-	/* XXX check VIRTIO_F_NO_INTR */
 
 	return (ret);
 out:
@@ -2693,7 +2684,7 @@ int doInflateOnce = 0;
 
 /* move below into separate file XXX */
 void
-viombh_do_inflate(struct vmd_vm *vm)
+viombh_send_inflate_request(struct vmd_vm *vm)
 {
 	viombh.num_pages = 10;
 

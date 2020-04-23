@@ -269,7 +269,7 @@ vm_balloon_thread_fn(void *p)
 			    strerror(errno));
 		} else if (vib.vib_host_is_swapping || ct > 120 ) {
 			log_debug("host in swap, requesting inflate");
-			viombh_do_inflate(vm);
+			viombh_send_inflate_request(vm);
 		} else {
 			log_debug("host not in swap");
 		}

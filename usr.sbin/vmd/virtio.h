@@ -369,4 +369,4 @@ void viombh_update_qa(void);
 int viombh_notifyq(void);
 int viombh_restore(int, struct vm_create_params *);
 int viombh_dump(int);
-void viombh_do_inflate(struct vmd_vm *);
+void viombh_send_inflate_request(struct vmd_vm *);
