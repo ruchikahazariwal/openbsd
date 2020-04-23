@@ -1,4 +1,4 @@
-/*	$OpenBSD: systm.h,v 1.142 2019/07/03 22:39:33 cheloha Exp $	*/
+/*	$OpenBSD: systm.h,v 1.145 2020/03/20 03:37:08 cheloha Exp $	*/
 /*	$NetBSD: systm.h,v 1.50 1996/06/09 04:55:09 briggs Exp $	*/
 
 /*-
@@ -228,7 +228,6 @@ void	realitexpire(void *);
 
 struct clockframe;
 void	hardclock(struct clockframe *);
-void	softclock(void *);
 void	statclock(struct clockframe *);
 
 void	initclocks(void);
@@ -247,7 +246,7 @@ struct sleep_state;
 void	sleep_setup(struct sleep_state *, const volatile void *, int,
 	    const char *);
 void	sleep_setup_timeout(struct sleep_state *, int);
-void	sleep_setup_signal(struct sleep_state *, int);
+void	sleep_setup_signal(struct sleep_state *);
 void	sleep_finish(struct sleep_state *, int);
 int	sleep_finish_timeout(struct sleep_state *);
 int	sleep_finish_signal(struct sleep_state *);
@@ -260,6 +259,7 @@ void	cond_wait(struct cond *, const char *);
 void	cond_signal(struct cond *);
 
 #define	INFSLP	UINT64_MAX
+#define	MAXTSLP	(UINT64_MAX - 1)
 
 struct mutex;
 struct rwlock;

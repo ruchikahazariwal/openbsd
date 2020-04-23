@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pdaemon.c,v 1.83 2019/07/03 22:39:33 cheloha Exp $	*/
+/*	$OpenBSD: uvm_pdaemon.c,v 1.86 2020/04/04 22:08:02 kettenis Exp $	*/
 /*	$NetBSD: uvm_pdaemon.c,v 1.23 2000/08/20 10:24:14 bjh21 Exp $	*/
 
 /* 
@@ -80,6 +80,16 @@
 #endif
 
 #include <uvm/uvm.h>
+
+#if defined(__amd64__) || defined(__arm64__) || \
+    defined(__i386__) || defined(__loongson__) || \
+    defined(__macppc__) || defined(__sparc64__)
+#include "drm.h"
+#endif
+
+#if NDRM > 0
+extern void drmbackoff(long);
+#endif
 
 /*
  * UVMPD_NUMDIRTYREACTS is how many dirty pages the pagedaemon will reactivate
@@ -200,7 +210,6 @@ uvm_pageout(void *arg)
 {
 	struct uvm_constraint_range constraint;
 	struct uvm_pmalloc *pma;
-	int work_done;
 	int npages = 0;
 
 	/* ensure correct priority and set paging parameters... */
@@ -213,12 +222,11 @@ uvm_pageout(void *arg)
 
 	for (;;) {
 		long size;
-	  	work_done = 0; /* No work done this iteration. */
 
 		uvm_lock_fpageq();
 		if (!uvm_nowait_failed && TAILQ_EMPTY(&uvm.pmr_control.allocs)) {
-			msleep(&uvm.pagedaemon, &uvm.fpageqlock, PVM,
-			    "pgdaemon", 0);
+			msleep_nsec(&uvm.pagedaemon, &uvm.fpageqlock, PVM,
+			    "pgdaemon", INFSLP);
 			uvmexp.pdwoke++;
 		}
 
@@ -262,6 +270,9 @@ uvm_pageout(void *arg)
 			size = 16; /* XXX */
 		uvm_unlock_pageq();
 		(void) bufbackoff(&constraint, size * 2);
+#if NDRM > 0
+		drmbackoff(size * 2);
+#endif
 		uvm_lock_pageq();
 
 		/* Scan if needed to meet our targets. */
@@ -269,7 +280,6 @@ uvm_pageout(void *arg)
 		    ((uvmexp.free - BUFPAGES_DEFICIT) < uvmexp.freetarg) ||
 		    ((uvmexp.inactive + BUFPAGES_INACT) < uvmexp.inactarg)) {
 			uvmpd_scan();
-			work_done = 1; /* XXX we hope... */
 		}
 
 		/*
@@ -283,15 +293,18 @@ uvm_pageout(void *arg)
 		}
 
 		if (pma != NULL) {
+			/* 
+			 * XXX If UVM_PMA_FREED isn't set, no pages
+			 * were freed.  Should we set UVM_PMA_FAIL in
+			 * that case?
+			 */
 			pma->pm_flags &= ~UVM_PMA_BUSY;
-			if (!work_done)
-				pma->pm_flags |= UVM_PMA_FAIL;
-			if (pma->pm_flags & (UVM_PMA_FAIL | UVM_PMA_FREED)) {
+			if (pma->pm_flags & UVM_PMA_FREED) {
 				pma->pm_flags &= ~UVM_PMA_LINKED;
 				TAILQ_REMOVE(&uvm.pmr_control.allocs, pma,
 				    pmq);
+				wakeup(pma);
 			}
-			wakeup(pma);
 		}
 		uvm_unlock_fpageq();
 
@@ -322,8 +335,8 @@ uvm_aiodone_daemon(void *arg)
 		 */
 		mtx_enter(&uvm.aiodoned_lock);
 		while ((bp = TAILQ_FIRST(&uvm.aio_done)) == NULL)
-			msleep(&uvm.aiodoned, &uvm.aiodoned_lock,
-			    PVM, "aiodoned", 0);
+			msleep_nsec(&uvm.aiodoned, &uvm.aiodoned_lock,
+			    PVM, "aiodoned", INFSLP);
 		/* Take the list for ourselves. */
 		TAILQ_INIT(&uvm.aio_done);
 		mtx_leave(&uvm.aiodoned_lock);
@@ -825,6 +838,7 @@ uvmpd_scan(void)
 	 * we need to unlock the page queues for this.
 	 */
 	if (free < uvmexp.freetarg) {
+		uvmexp.inswap = 1;
 		uvmexp.pdswout++;
 		uvm_unlock_pageq();
 		uvm_swapout_threads();

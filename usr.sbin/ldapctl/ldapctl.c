@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldapctl.c,v 1.12 2019/06/27 18:03:37 deraadt Exp $	*/
+/*	$OpenBSD: ldapctl.c,v 1.14 2020/03/05 07:39:25 martijn Exp $	*/
 
 /*
  * Copyright (c) 2009, 2010 Martin Hedenfalk <martin@bzero.se>
@@ -150,7 +150,7 @@ index_namespace(struct namespace *ns, const char *datadir)
 
 	log_info("indexing namespace %s", ns->suffix);
 
-	if (asprintf(&path, "%s/%s_data.db", DATADIR, ns->suffix) == -1)
+	if (asprintf(&path, "%s/%s_data.db", datadir, ns->suffix) == -1)
 		return -1;
 	data_db = btree_open(path, BT_NOSYNC | BT_REVERSEKEY, 0644);
 	free(path);
@@ -196,7 +196,7 @@ index_namespace(struct namespace *ns, const char *datadir)
 			if ((elm = db2ber(&val, ns->compression_level)) == NULL)
 				continue;
 			rc = index_entry(ns, &key, elm);
-			ber_free_elements(elm);
+			ober_free_elements(elm);
 			btval_reset(&key);
 			btval_reset(&val);
 			if (rc != 0)

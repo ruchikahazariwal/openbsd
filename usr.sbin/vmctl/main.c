@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.58 2019/08/23 07:55:20 mlarkin Exp $	*/
+/*	$OpenBSD: main.c,v 1.62 2020/01/03 05:32:00 pd Exp $	*/
 
 /*
  * Copyright (c) 2015 Reyk Floeter <reyk@openbsd.org>
@@ -45,8 +45,8 @@
 #define QCOW2_FMT	"qcow2"
 
 static const char	*socket_name = SOCKET_NAME;
-static int		 ctl_sock = -1;
-static int		 tty_autoconnect = 0;
+static int		 	ctl_sock = -1;
+static int		 	tty_autoconnect = 0;
 
 __dead void	 usage(void);
 __dead void	 ctl_usage(struct ctl_command *);
@@ -68,6 +68,7 @@ int		 ctl_pause(struct parse_result *, int, char *[]);
 int		 ctl_unpause(struct parse_result *, int, char *[]);
 int		 ctl_send(struct parse_result *, int, char *[]);
 int		 ctl_receive(struct parse_result *, int, char *[]);
+int		 ctl_getStats(struct parse_result *, int, char *[]);
 
 struct ctl_command ctl_commands[] = {
 	{ "console",	CMD_CONSOLE,	ctl_console,	"id" },
@@ -88,6 +89,7 @@ struct ctl_command ctl_commands[] = {
 	{ "stop",	CMD_STOP,	ctl_stop,	"[-fw] [id | -a]" },
 	{ "unpause",	CMD_UNPAUSE,	ctl_unpause,	"id" },
 	{ "wait",	CMD_WAITFOR,	ctl_waitfor,	"id" },
+	{ "stats",	CMD_GETSTATS,	ctl_getStats,	"[id | -a]" },
 	{ NULL }
 };
 
@@ -236,6 +238,7 @@ vmmaction(struct parse_result *res)
 	case CMD_STATUS:
 	case CMD_CONSOLE:
 	case CMD_STOPALL:
+		printf("CMPE - %s -%d", res->name, res->flags);
 		get_info_vm(res->id, res->name, res->action, res->flags);
 		break;
 	case CMD_LOAD:
@@ -265,9 +268,13 @@ vmmaction(struct parse_result *res)
 	case CMD_SEND:
 		send_vm(res->id, res->name);
 		done = 1;
+		ret = 0;
 		break;
 	case CMD_RECEIVE:
 		vm_receive(res->id, res->name);
+		break;
+	case CMD_GETSTATS:
+		vm_getStats(res->id, res->name, res->action);
 		break;
 	case CMD_CREATE:
 	case NONE:
@@ -336,6 +343,10 @@ vmmaction(struct parse_result *res)
 			case CMD_UNPAUSE:
 				done = unpause_vm_complete(&imsg, &ret);
 				break;
+			case CMD_GETSTATS:
+				get_num_vm(&imsg, &ret);
+				done = 1;
+				break;
 			default:
 				done = 1;
 				break;
@@ -373,9 +384,9 @@ parse_ifs(struct parse_result *res, char *word, int val)
 	const char	*error;
 
 	if (word != NULL) {
-		val = strtonum(word, 0, INT_MAX, &error);
+		val = strtonum(word, 1, INT_MAX, &error);
 		if (error != NULL)  {
-			warnx("invalid count \"%s\": %s", word, error);
+			warnx("count is %s: %s", error, word);
 			return (-1);
 		}
 	}
@@ -407,8 +418,10 @@ parse_network(struct parse_result *res, char *word)
 }
 
 int
-parse_size(struct parse_result *res, char *word, long long val)
+parse_size(struct parse_result *res, char *word)
 {
+	long long val = 0;
+
 	if (word != NULL) {
 		if (scan_scaled(word, &val) != 0) {
 			warn("invalid size: %s", word);
@@ -576,7 +589,7 @@ ctl_create(struct parse_result *res, int argc, char *argv[])
 				err(1, "unveil");
 			break;
 		case 's':
-			if (parse_size(res, optarg, 0) != 0)
+			if (parse_size(res, optarg) != 0)
 				errx(1, "invalid size: %s", optarg);
 			break;
 		default:
@@ -872,7 +885,7 @@ ctl_start(struct parse_result *res, int argc, char *argv[])
 		case 'm':
 			if (res->size)
 				errx(1, "memory specified multiple times");
-			if (parse_size(res, optarg, 0) != 0)
+			if (parse_size(res, optarg) != 0)
 				errx(1, "invalid memory size: %s", optarg);
 			break;
 		case 'n':
@@ -1045,6 +1058,19 @@ ctl_openconsole(const char *name)
 	closefrom(STDERR_FILENO + 1);
 	if (unveil(VMCTL_CU, "x") == -1)
 		err(1, "unveil");
-	execl(VMCTL_CU, VMCTL_CU, "-l", name, "-s", "115200", (char *)NULL);
+	execl(VMCTL_CU, VMCTL_CU, "-r", "-l", name, "-s", "115200",
+	    (char *)NULL);
 	err(1, "failed to open the console");
+}
+
+int
+ctl_getStats(struct parse_result *res, int argc, char *argv[])
+{
+	if (argc == 2) {
+		if (parse_vmid(res, argv[1], 0) == -1)
+			errx(1, "invalid id: %s", argv[1]);
+	} else if (argc != 2)
+		ctl_usage(res->ctl);
+
+	return (vmmaction(res));
 }

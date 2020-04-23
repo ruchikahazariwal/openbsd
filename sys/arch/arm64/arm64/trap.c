@@ -1,4 +1,4 @@
-/* $OpenBSD: trap.c,v 1.25 2019/09/06 12:22:01 deraadt Exp $ */
+/* $OpenBSD: trap.c,v 1.27 2020/01/06 12:37:30 kettenis Exp $ */
 /*-
  * Copyright (c) 2014 Andrew Turner
  * All rights reserved.
@@ -111,7 +111,8 @@ data_abort(struct trapframe *frame, uint64_t esr, uint64_t far,
 	if (exe)
 		access_type = PROT_EXEC;
 	else
-		access_type = ((esr >> 6) & 1) ? PROT_WRITE : PROT_READ;
+		access_type = (!(esr & ISS_DATA_CM) && (esr & ISS_DATA_WnR)) ?
+		    PROT_WRITE : PROT_READ;
 
 	ftype = VM_FAULT_INVALID; // should check for failed permissions.
 
@@ -160,7 +161,8 @@ data_abort(struct trapframe *frame, uint64_t esr, uint64_t far,
 				frame->tf_elr = (register_t)pcb->pcb_onfault;
 				return;
 			}
-			panic("uvm_fault failed: %lx", frame->tf_elr);
+			panic("uvm_fault failed: %lx esr %llx far %llx",
+			    frame->tf_elr, esr, far);
 		}
 	}
 }

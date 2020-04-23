@@ -3,8 +3,8 @@
 # THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
 # generated from:
 #
-#	OpenBSD: etc.loongson/MAKEDEV.md,v 1.27 2017/05/21 13:00:53 visa Exp 
-#	OpenBSD: MAKEDEV.common,v 1.103 2019/06/11 14:48:56 jcs Exp 
+#	OpenBSD: etc.loongson/MAKEDEV.md,v 1.30 2020/01/23 02:47:28 dlg Exp 
+#	OpenBSD: MAKEDEV.common,v 1.109 2020/01/23 02:47:29 dlg Exp 
 #	OpenBSD: MAKEDEV.mi,v 1.83 2016/09/11 03:06:31 deraadt Exp 
 #	OpenBSD: MAKEDEV.sub,v 1.14 2005/02/07 06:14:18 david Exp 
 #
@@ -56,6 +56,7 @@
 #	uall	All USB devices
 #	ugen*	Generic USB devices
 #	uhid*	Generic HID devices
+#	fido	fido/* nodes
 #	ulpt*	Printer devices
 #	usb*	Bus control devices used by usbd for attach/detach
 # Special purpose devices:
@@ -63,6 +64,7 @@
 #	audio*	Audio devices
 #	bio	ioctl tunnel pseudo-device
 #	bpf	Berkeley Packet Filter
+#	dt	Dynamic Tracer
 #	diskmap	Disk mapper
 #	drm*	Direct Rendering Manager
 #	fd	fd/* nodes
@@ -71,6 +73,7 @@
 #	pci*	PCI bus devices
 #	pf*	Packet Filter
 #	pppx*	PPP Multiplexer
+#	pppac*	PPP Access Concentrator
 #	*random	In-kernel random data source
 #	tun*	Network tunnel driver
 #	tap*	Ethernet tunnel driver
@@ -249,6 +252,10 @@ tun*)
 	MKlist[${#MKlist[*]}]=";ln -s urandom random"
 	;;
 
+pppac*)
+	M pppac$U c 89 $U 600
+	;;
+
 pppx*)
 	M pppx$U c 71 $U 600
 	;;
@@ -286,6 +293,10 @@ diskmap)
 	M diskmap c 70 0 640 operator
 	;;
 
+dt)
+	M dt c 30 0 600
+	;;
+
 bpf)
 	M bpf c 12 0 600
 	M bpf0 c 12 0 600
@@ -309,29 +320,35 @@ apm*)
 
 usb*)
 	[ "$i" = "usb" ] && u= || u=$U
-	M usb$u c 61 $U 660
+	M usb$u c 61 $U 640
 	;;
 
 ulpt*)
-	M ulpt$U c 64 $U 660
+	M ulpt$U c 64 $U 600
+	;;
+
+fido)
+	RMlist[${#RMlist[*]}]=";mkdir -p fido;rm -f" n=0
+	while [ $n -lt 4 ];do M fido/$n c 88 $n 666;n=$(($n+1));done
+	MKlist[${#MKlist[*]}]=";chmod 555 fido"
 	;;
 
 uhid*)
-	M uhid$U c 62 $U 660
+	M uhid$U c 62 $U 600
 	;;
 
 ugen*)
 	n=$(($U*16))
 	for j in 0{0,1,2,3,4,5,6,7,8,9} 1{0,1,2,3,4,5}
 	do
-		M ugen$U.$j c 63 $(($n+10#$j)) 660
+		M ugen$U.$j c 63 $(($n+10#$j)) 600
 	done
 	;;
 
 uall)
 	R ttyU0 ttyU1 ttyU2 ttyU3 ugen0 ugen1 ugen2 ugen3 ugen4 ugen5
-	R ugen6 ugen7 ulpt0 ulpt1 uhid0 uhid1 uhid2 uhid3 uhid4 uhid5
-	R uhid6 uhid7 usb0 usb1 usb2 usb3 usb4 usb5 usb6 usb7
+	R ugen6 ugen7 ulpt0 ulpt1 fido uhid0 uhid1 uhid2 uhid3 uhid4
+	R uhid5 uhid6 uhid7 usb0 usb1 usb2 usb3 usb4 usb5 usb6 usb7
 	;;
 
 ttyU[0-9a-zA-Z])
@@ -451,11 +468,11 @@ all)
 	R drm0 drm1 drm2 drm3 switch0 switch1 switch2 switch3 vnd0
 	R vnd1 vnd2 vnd3 sd0 sd1 sd2 sd3 sd4 sd5 sd6 sd7 sd8 sd9 cd0
 	R cd1 rd0 tap0 tap1 tap2 tap3 tun0 tun1 tun2 tun3 bio pty0
-	R pty1 pty2 diskmap vscsi0 audio0 audio1 audio2 bpf fuse pppx
-	R hotplug ptm local wscons pci0 pci1 pci2 pci3 uall video0
-	R video1 uk0 random tty00 tty01 tty02 tty03 tty04 tty05 tty06
-	R tty07 tty08 tty09 tty0a tty0b apm pf wd0 wd1 wd2 wd3 std st0
-	R st1 fd
+	R pty1 pty2 diskmap vscsi0 audio0 audio1 audio2 dt bpf fuse
+	R pppac pppx hotplug ptm local wscons pci0 pci1 pci2 pci3 uall
+	R video0 video1 uk0 random tty00 tty01 tty02 tty03 tty04 tty05
+	R tty06 tty07 tty08 tty09 tty0a tty0b apm pf wd0 wd1 wd2 wd3
+	R std st0 st1 fd
 	;;
 
 wd*|sd*)

@@ -1,7 +1,7 @@
-/*	$OpenBSD: main.c,v 1.243 2019/07/28 19:41:01 schwarze Exp $ */
+/* $OpenBSD: main.c,v 1.251 2020/04/02 22:10:27 schwarze Exp $ */
 /*
+ * Copyright (c) 2010-2012, 2014-2020 Ingo Schwarze <schwarze@openbsd.org>
  * Copyright (c) 2008-2012 Kristaps Dzonsons <kristaps@bsd.lv>
- * Copyright (c) 2010-2012, 2014-2019 Ingo Schwarze <schwarze@openbsd.org>
  * Copyright (c) 2010 Joerg Sonnenberger <joerg@netbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -15,8 +15,9 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * Main program for mandoc(1), man(1), apropos(1), whatis(1), and help(1).
  */
-
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/param.h>	/* MACHINE */
@@ -29,6 +30,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <glob.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -46,6 +48,7 @@
 #include "man.h"
 #include "mandoc_parse.h"
 #include "tag.h"
+#include "term_tag.h"
 #include "main.h"
 #include "manconf.h"
 #include "mansearch.h"
@@ -97,14 +100,15 @@ static	int		  fs_lookup(const struct manpaths *,
 static	int		  fs_search(const struct mansearch *,
 				const struct manpaths *, const char *,
 				struct manpage **, size_t *);
+static	void		  glob_esc(char **, const char *, const char *);
 static	void		  outdata_alloc(struct outstate *, struct manoutput *);
 static	void		  parse(struct mparse *, int, const char *,
 				struct outstate *, struct manoutput *);
 static	void		  passthrough(int, int);
 static	void		  process_onefile(struct mparse *, struct manpage *,
 				int, struct outstate *, struct manconf *);
-static	void		  run_pager(struct tag_files *);
-static	pid_t		  spawn_pager(struct tag_files *);
+static	void		  run_pager(struct tag_files *, char *);
+static	pid_t		  spawn_pager(struct tag_files *, char *);
 static	void		  usage(enum argmode) __attribute__((__noreturn__));
 static	int		  woptions(char *, enum mandoc_os *, int *);
 
@@ -308,7 +312,8 @@ main(int argc, char *argv[])
 
 	/* Postprocess options. */
 
-	if (outmode == OUTMODE_DEF) {
+	switch (outmode) {
+	case OUTMODE_DEF:
 		switch (search.argmode) {
 		case ARG_FILE:
 			outmode = OUTMODE_ALL;
@@ -321,6 +326,16 @@ main(int argc, char *argv[])
 			outmode = OUTMODE_LST;
 			break;
 		}
+		break;
+	case OUTMODE_FLN:
+		if (search.argmode == ARG_FILE)
+			outmode = OUTMODE_ALL;
+		break;
+	case OUTMODE_ALL:
+		break;
+	case OUTMODE_LST:
+	case OUTMODE_ONE:
+		abort();
 	}
 
 	if (oarg != NULL) {
@@ -415,8 +430,20 @@ main(int argc, char *argv[])
 	/* man(1): Resolve each name individually. */
 
 	if (search.argmode == ARG_NAME) {
-		if (argc < 1)
-			usage(ARG_NAME);
+		if (argc < 1) {
+			if (outmode != OUTMODE_FLN)
+				usage(ARG_NAME);
+			if (conf.manpath.sz == 0) {
+				warnx("The manpath is empty.");
+				mandoc_msg_setrc(MANDOCLEVEL_BADARG);
+			} else {
+				for (i = 0; i + 1 < conf.manpath.sz; i++)
+					printf("%s:", conf.manpath.paths[i]);
+				printf("%s\n", conf.manpath.paths[i]);
+			}
+			manconf_free(&conf);
+			return (int)mandoc_msg_getrc();
+		}
 		for (res = NULL, ressz = 0; argc > 0; argc--, argv++) {
 			(void)mansearch(&search, &conf.manpath,
 			    1, argv, &resn, &resnsz);
@@ -552,7 +579,6 @@ main(int argc, char *argv[])
 	 * readable: Maybe it won't be needed after all.
 	 */
 	startdir = open(".", O_RDONLY | O_DIRECTORY);
-
 	for (i = 0; i < ressz; i++) {
 		process_onefile(mp, res + i, startdir, &outst, &conf);
 		if (outst.wstop && mandoc_msg_getrc() != MANDOCLEVEL_OK)
@@ -562,7 +588,10 @@ main(int argc, char *argv[])
 		(void)fchdir(startdir);
 		close(startdir);
 	}
-
+	if (conf.output.tag != NULL && conf.output.tag_found == 0) {
+		mandoc_msg(MANDOCERR_TAG, 0, 0, "%s", conf.output.tag);
+		conf.output.tag = NULL;
+	}
 	if (outst.outdata != NULL) {
 		switch (outst.outtype) {
 		case OUTT_HTML:
@@ -591,10 +620,9 @@ out:
 		manconf_free(&conf);
 
 	if (outst.tag_files != NULL) {
-		fclose(stdout);
-		tag_write();
-		run_pager(outst.tag_files);
-		tag_unlink();
+		if (term_tag_close() != -1)
+			run_pager(outst.tag_files, conf.output.tag);
+		term_tag_unlink();
 	} else if (outst.had_output && outst.outtype != OUTT_LINT)
 		mandoc_msg_summary();
 
@@ -629,6 +657,18 @@ usage(enum argmode argmode)
 	exit((int)MANDOCLEVEL_BADARG);
 }
 
+static void
+glob_esc(char **dst, const char *src, const char *suffix)
+{
+	while (*src != '\0') {
+		if (strchr("*?[", *src) != NULL)
+			*(*dst)++ = '\\';
+		*(*dst)++ = *src++;
+	}
+	while (*suffix != '\0')
+		*(*dst)++ = *suffix++;
+}
+
 static int
 fs_lookup(const struct manpaths *paths, size_t ipath,
 	const char *sec, const char *arch, const char *name,
@@ -637,9 +677,13 @@ fs_lookup(const struct manpaths *paths, size_t ipath,
 	struct stat	 sb;
 	glob_t		 globinfo;
 	struct manpage	*page;
-	char		*file;
+	char		*file, *cp;
 	int		 globres;
 	enum form	 form;
+
+	const char *const slman = "/man";
+	const char *const slash = "/";
+	const char *const sglob = ".[01-9]*";
 
 	form = FORM_SRC;
 	mandoc_asprintf(&file, "%s/man%s/%s.%s",
@@ -664,8 +708,13 @@ fs_lookup(const struct manpaths *paths, size_t ipath,
 		free(file);
 	}
 
-	mandoc_asprintf(&file, "%s/man%s/%s.[01-9]*",
-	    paths->paths[ipath], sec, name);
+	cp = file = mandoc_malloc(strlen(paths->paths[ipath]) * 2 +
+	    strlen(slman) + strlen(sec) * 2 + strlen(slash) +
+	    strlen(name) * 2 + strlen(sglob) + 1);
+	glob_esc(&cp, paths->paths[ipath], slman);
+	glob_esc(&cp, sec, slash);
+	glob_esc(&cp, name, sglob);
+	*cp = '\0';
 	globres = glob(file, 0, NULL, &globinfo);
 	if (globres != 0 && globres != GLOB_NOMATCH)
 		mandoc_msg(MANDOCERR_GLOB, 0, 0,
@@ -766,9 +815,8 @@ process_onefile(struct mparse *mp, struct manpage *resp, int startdir,
 
 	if (outst->use_pager) {
 		outst->use_pager = 0;
-		outst->tag_files = tag_init(conf->output.tag);
+		outst->tag_files = term_tag_init();
 	}
-
 	if (outst->had_output && outst->outtype <= OUTT_UTF8) {
 		if (outst->outdata == NULL)
 			outdata_alloc(outst, &conf->output);
@@ -786,7 +834,7 @@ process_onefile(struct mparse *mp, struct manpage *resp, int startdir,
 		if (outst->tag_files != NULL) {
 			mandoc_msg(MANDOCERR_WRITE, 0, 0, "%s: %s",
 			    outst->tag_files->ofn, strerror(errno));
-			tag_unlink();
+			term_tag_unlink();
 			outst->tag_files = NULL;
 		} else
 			mandoc_msg(MANDOCERR_WRITE, 0, 0, "%s",
@@ -881,6 +929,9 @@ parse(struct mparse *mp, int fd, const char *file,
 			break;
 		}
 	}
+	if (outconf->tag != NULL && outconf->tag_found == 0 &&
+	    tag_exists(outconf->tag))
+		outconf->tag_found = 1;
 	if (mandoc_msg_getmin() < MANDOCERR_STYLE)
 		check_xr();
 }
@@ -1071,7 +1122,7 @@ woptions(char *arg, enum mandoc_os *os_e, int *wstop)
  * then fork the pager and wait for the user to close it.
  */
 static void
-run_pager(struct tag_files *tag_files)
+run_pager(struct tag_files *tag_files, char *tag_target)
 {
 	int	 signum, status;
 	pid_t	 man_pgid, tc_pgid;
@@ -1086,10 +1137,10 @@ run_pager(struct tag_files *tag_files)
 	for (;;) {
 		/* Stop here until moved to the foreground. */
 
-		tc_pgid = tcgetpgrp(tag_files->ofd);
+		tc_pgid = tcgetpgrp(STDOUT_FILENO);
 		if (tc_pgid != man_pgid) {
 			if (tc_pgid == pager_pid) {
-				(void)tcsetpgrp(tag_files->ofd, man_pgid);
+				(void)tcsetpgrp(STDOUT_FILENO, man_pgid);
 				if (signum == SIGTTIN)
 					continue;
 			} else
@@ -1101,10 +1152,10 @@ run_pager(struct tag_files *tag_files)
 		/* Once in the foreground, activate the pager. */
 
 		if (pager_pid) {
-			(void)tcsetpgrp(tag_files->ofd, pager_pid);
+			(void)tcsetpgrp(STDOUT_FILENO, pager_pid);
 			kill(pager_pid, SIGCONT);
 		} else
-			pager_pid = spawn_pager(tag_files);
+			pager_pid = spawn_pager(tag_files, tag_target);
 
 		/* Wait for the pager to stop or exit. */
 
@@ -1125,7 +1176,7 @@ run_pager(struct tag_files *tag_files)
 }
 
 static pid_t
-spawn_pager(struct tag_files *tag_files)
+spawn_pager(struct tag_files *tag_files, char *tag_target)
 {
 	const struct timespec timeout = { 0, 100000000 };  /* 0.1s */
 #define MAX_PAGER_ARGS 16
@@ -1135,6 +1186,9 @@ spawn_pager(struct tag_files *tag_files)
 	size_t		 cmdlen;
 	int		 argc, use_ofn;
 	pid_t		 pager_pid;
+
+	assert(tag_files->ofd == -1);
+	assert(tag_files->tfs == NULL);
 
 	pager = getenv("MANPAGER");
 	if (pager == NULL || *pager == '\0')
@@ -1169,9 +1223,9 @@ spawn_pager(struct tag_files *tag_files)
 		if (strcmp(cp, "less") == 0 || strcmp(cp, "more") == 0) {
 			argv[argc++] = mandoc_strdup("-T");
 			argv[argc++] = tag_files->tfn;
-			if (tag_files->tagname != NULL) {
+			if (tag_target != NULL) {
 				argv[argc++] = mandoc_strdup("-t");
-				argv[argc++] = tag_files->tagname;
+				argv[argc++] = tag_target;
 				use_ofn = 0;
 			}
 		}
@@ -1188,7 +1242,7 @@ spawn_pager(struct tag_files *tag_files)
 		break;
 	default:
 		(void)setpgid(pager_pid, 0);
-		(void)tcsetpgrp(tag_files->ofd, pager_pid);
+		(void)tcsetpgrp(STDOUT_FILENO, pager_pid);
 		if (pledge("stdio rpath tmppath tty proc", NULL) == -1) {
 			mandoc_msg(MANDOCERR_PLEDGE, 0, 0,
 			    "%s", strerror(errno));
@@ -1198,16 +1252,10 @@ spawn_pager(struct tag_files *tag_files)
 		return pager_pid;
 	}
 
-	/* The child process becomes the pager. */
-
-	if (dup2(tag_files->ofd, STDOUT_FILENO) == -1) {
-		mandoc_msg(MANDOCERR_DUP, 0, 0, "%s", strerror(errno));
-		_exit(mandoc_msg_getrc());
-	}
-	close(tag_files->ofd);
-	assert(tag_files->tfd == -1);
-
-	/* Do not start the pager before controlling the terminal. */
+	/*
+	 * The child process becomes the pager.
+	 * Do not start it before controlling the terminal.
+	 */
 
 	while (tcgetpgrp(STDOUT_FILENO) != getpid())
 		nanosleep(&timeout, NULL);

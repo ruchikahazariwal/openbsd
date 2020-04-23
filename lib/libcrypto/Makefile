@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.36 2019/09/09 16:49:03 jsing Exp $
+# $OpenBSD: Makefile,v 1.39 2020/01/22 07:58:27 jsing Exp $
 
 LIB=	crypto
 LIBREBUILD=y
@@ -96,6 +96,11 @@ SRCS+= chacha.c
 
 # cmac/
 SRCS+= cmac.c cm_ameth.c cm_pmeth.c
+
+# cms/
+SRCS+= cms_asn1.c cms_att.c cms_cd.c cms_dd.c cms_enc.c cms_env.c cms_err.c
+SRCS+= cms_ess.c cms_io.c cms_kari.c cms_lcl.h cms_lib.c cms_pwri.c cms_sd.c
+SRCS+= cms_smime.c
 
 # comp/
 SRCS+= comp_lib.c comp_err.c c_rle.c c_zlib.c
@@ -406,17 +411,20 @@ HDRS_GEN=\
 
 prereq: obj_mac.h
 
+check_includes: prereq
+	@cd ${.CURDIR}; for i in $(HDRS) $(HDRS_GEN); do \
+	    j="cmp -s $$i ${DESTDIR}/usr/include/openssl/`basename $$i` || \
+		(echo \"`basename $$i` differs from installed version; \" \
+	        \"did you forget 'make includes'?\" && false)"; \
+	    eval "$$j"; \
+	done;
+
+all: check_includes
+
 includes: prereq
 	@test -d ${DESTDIR}/usr/include/openssl || \
 	    mkdir ${DESTDIR}/usr/include/openssl
-	@for i in $(HDRS); do \
-	    j="cmp -s $$i ${DESTDIR}/usr/include/openssl/`basename $$i` || \
-	    ${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} -m 444 $$i\
-		${DESTDIR}/usr/include/openssl"; \
-	    echo $$j; \
-	    eval "$$j"; \
-	done; \
-	for i in $(HDRS_GEN); do \
+	@for i in $(HDRS) $(HDRS_GEN); do \
 	    j="cmp -s $$i ${DESTDIR}/usr/include/openssl/`basename $$i` || \
 	    ${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} -m 444 $$i\
 		${DESTDIR}/usr/include/openssl"; \

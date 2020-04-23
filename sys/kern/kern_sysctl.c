@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.366 2019/08/21 20:44:09 cheloha Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.371 2020/03/09 19:59:53 millert Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -79,6 +79,7 @@
 #include <sys/sched.h>
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
+#include <sys/wait.h>
 #include <sys/witness.h>
 
 #include <uvm/uvm_extern.h>
@@ -128,6 +129,7 @@ extern int audio_record_enable;
 #endif
 
 int allowkmem;
+int allowdt;
 
 int sysctl_diskinit(int, struct proc *);
 int sysctl_proc_args(int *, u_int, void *, size_t *, struct proc *);
@@ -357,12 +359,14 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 			return (EPERM);
 		securelevel = level;
 		return (0);
+	case KERN_ALLOWDT:
+		if (securelevel > 0)
+			return (sysctl_rdint(oldp, oldlenp, newp, allowdt));
+		return (sysctl_int(oldp, oldlenp, newp, newlen,  &allowdt));
 	case KERN_ALLOWKMEM:
 		if (securelevel > 0)
-			return (sysctl_rdint(oldp, oldlenp, newp,
-			    allowkmem));
-		return (sysctl_int(oldp, oldlenp, newp, newlen,
-		    &allowkmem));
+			return (sysctl_rdint(oldp, oldlenp, newp, allowkmem));
+		return (sysctl_int(oldp, oldlenp, newp, newlen, &allowkmem));
 	case KERN_HOSTNAME:
 		error = sysctl_tstring(oldp, oldlenp, newp, newlen,
 		    hostname, sizeof(hostname));
@@ -520,17 +524,20 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		CPU_INFO_ITERATOR cii;
 		struct cpu_info *ci;
 		long cp_time[CPUSTATES];
-		int i;
+		int i, n = 0;
 
 		memset(cp_time, 0, sizeof(cp_time));
 
 		CPU_INFO_FOREACH(cii, ci) {
+			if (!cpu_is_online(ci))
+				continue;
+			n++;
 			for (i = 0; i < CPUSTATES; i++)
 				cp_time[i] += ci->ci_schedstate.spc_cp_time[i];
 		}
 
 		for (i = 0; i < CPUSTATES; i++)
-			cp_time[i] /= ncpus;
+			cp_time[i] /= n;
 
 		return (sysctl_rdstruct(oldp, oldlenp, newp, &cp_time,
 		    sizeof(cp_time)));
@@ -1494,7 +1501,7 @@ sysctl_doproc(int *name, u_int namelen, char *where, size_t *sizep)
 	buflen = where != NULL ? *sizep : 0;
 	needed = error = 0;
 
-	if (namelen != 4 || name[2] < 0 || name[3] < 0 ||
+	if (namelen != 4 || name[2] <= 0 || name[3] < 0 ||
 	    name[2] > sizeof(*kproc))
 		return (EINVAL);
 	op = name[0];
@@ -1637,7 +1644,7 @@ fill_kproc(struct process *pr, struct kinfo_proc *ki, struct proc *p,
 	struct session *s = pr->ps_session;
 	struct tty *tp;
 	struct vmspace *vm = pr->ps_vmspace;
-	struct timespec ut, st;
+	struct timespec booted, st, ut, utc;
 	int isthread;
 
 	isthread = p != NULL;
@@ -1673,6 +1680,12 @@ fill_kproc(struct process *pr, struct kinfo_proc *ki, struct proc *p,
 		ki->p_uutime_usec = ut.tv_nsec/1000;
 		ki->p_ustime_sec = st.tv_sec;
 		ki->p_ustime_usec = st.tv_nsec/1000;
+
+		/* Convert starting uptime to a starting UTC time. */
+		nanoboottime(&booted);
+		timespecadd(&booted, &pr->ps_start, &utc);
+		ki->p_ustart_sec = utc.tv_sec;
+		ki->p_ustart_usec = utc.tv_nsec / 1000;
 
 #ifdef MULTIPROCESSOR
 		if (p->p_cpu != NULL)

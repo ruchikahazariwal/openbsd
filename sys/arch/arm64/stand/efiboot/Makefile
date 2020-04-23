@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.9 2019/08/12 19:17:35 kettenis Exp $
+#	$OpenBSD: Makefile,v 1.12 2020/02/29 11:58:57 otto Exp $
 
 NOMAN=		#
 
@@ -24,13 +24,14 @@ LDFLAGS+=-nostdlib -T ${.CURDIR}/ldscript.arm64 -Bsymbolic -shared
 SRCS+=	boot.c cmd.c vars.c
 
 .PATH:	${S}/lib/libsa
-SRCS+=	alloc.c ctime.c exit.c getchar.c memcmp.c memcpy.c memmove.c memset.c \
+SRCS+=	alloc.c ctime.c exit.c getchar.c hexdump.c \
+	memcmp.c memcpy.c memmove.c memset.c \
 	printf.c putchar.c snprintf.c strchr.c strcmp.c strerror.c strncmp.c \
-	strncpy.c strtol.c
+	strncpy.c strtol.c strtoll.c
 SRCS+=	close.c closeall.c cons.c cread.c dev.c disklabel.c dkcksum.c fchmod.c \
 	fstat.c lseek.c open.c read.c readdir.c stat.c
-SRCS+=	loadfile.c
-SRCS+=	ufs.c
+SRCS+=	loadfile.c arc4.c
+SRCS+=	ufs.c ufs2.c
 SRCS+=	arp.c ether.c globals.c in_cksum.c net.c netif.c netudp.c tftp.c
 SRCS+=	aes_xts.c bcrypt_pbkdf.c blowfish.c explicit_bzero.c hmac_sha1.c \
 	pkcs5_pbkdf2.c rijndael.c sha1.c sha2.c softraid.c

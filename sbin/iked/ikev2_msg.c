@@ -1,4 +1,4 @@
-/*	$OpenBSD: ikev2_msg.c,v 1.56 2019/08/12 07:40:45 tobhe Exp $	*/
+/*	$OpenBSD: ikev2_msg.c,v 1.64 2020/03/10 09:42:40 tobhe Exp $	*/
 
 /*
  * Copyright (c) 2019 Tobias Heider <tobias.heider@stusta.de>
@@ -78,7 +78,7 @@ ikev2_msg_cb(int fd, short event, void *arg)
 		return;
 
 	if (socket_getport((struct sockaddr *)&msg.msg_local) ==
-	    IKED_NATT_PORT) {
+	    env->sc_nattport) {
 		if (memcmp(&natt, buf, sizeof(natt)) != 0)
 			return;
 		msg.msg_natt = 1;
@@ -94,6 +94,7 @@ ikev2_msg_cb(int fd, short event, void *arg)
 		return;
 
 	TAILQ_INIT(&msg.msg_proposals);
+	SLIST_INIT(&msg.msg_certreqs);
 	msg.msg_fd = fd;
 
 	if (hdr.ike_version == IKEV1_VERSION)
@@ -181,6 +182,8 @@ ikev2_msg_copy(struct iked *env, struct iked_message *msg)
 void
 ikev2_msg_cleanup(struct iked *env, struct iked_message *msg)
 {
+	struct iked_certreq	*cr;
+
 	if (msg == msg->msg_parent) {
 		ibuf_release(msg->msg_nonce);
 		ibuf_release(msg->msg_ke);
@@ -199,6 +202,11 @@ ikev2_msg_cleanup(struct iked *env, struct iked_message *msg)
 		msg->msg_cookie2 = NULL;
 
 		config_free_proposals(&msg->msg_proposals, 0);
+		while ((cr = SLIST_FIRST(&msg->msg_certreqs))) {
+			ibuf_release(cr->cr_data);
+			SLIST_REMOVE_HEAD(&msg->msg_certreqs, cr_entry);
+			free(cr);
+		}
 	}
 
 	if (msg->msg_data != NULL) {
@@ -211,16 +219,6 @@ int
 ikev2_msg_valid_ike_sa(struct iked *env, struct ike_header *oldhdr,
     struct iked_message *msg)
 {
-#if 0
-	/* XXX Disabled, see comment below */
-	struct iked_message		 resp;
-	struct ike_header		*hdr;
-	struct ikev2_payload		*pld;
-	struct ikev2_notify		*n;
-	struct ibuf			*buf;
-	struct iked_sa			 sa;
-#endif
-
 	if (msg->msg_sa != NULL && msg->msg_policy != NULL) {
 		if (msg->msg_sa->sa_state == IKEV2_STATE_CLOSED)
 			return (-1);
@@ -239,62 +237,6 @@ ikev2_msg_valid_ike_sa(struct iked *env, struct ike_header *oldhdr,
 		}
 		return (0);
 	}
-
-#if 0
-	/*
-	 * XXX Sending INVALID_IKE_SPIs notifications is disabled
-	 * XXX because it is not mandatory and ignored by most
-	 * XXX implementations.  We might want to enable it in
-	 * XXX combination with a rate-limitation to avoid DoS situations.
-	 */
-
-	/* Fail without error message */
-	if (msg->msg_response || msg->msg_policy == NULL)
-		return (-1);
-
-	/* Invalid IKE SA, return notification */
-	if ((buf = ikev2_msg_init(env, &resp,
-	    &msg->msg_peer, msg->msg_peerlen,
-	    &msg->msg_local, msg->msg_locallen, 1)) == NULL)
-		goto done;
-
-	resp.msg_fd = msg->msg_fd;
-
-	bzero(&sa, sizeof(sa));
-	if ((oldhdr->ike_flags & IKEV2_FLAG_INITIATOR) == 0)
-		sa.sa_hdr.sh_initiator = 1;
-	sa.sa_hdr.sh_ispi = betoh64(oldhdr->ike_ispi);
-	sa.sa_hdr.sh_rspi = betoh64(oldhdr->ike_rspi);
-
-	resp.msg_msgid = betoh32(oldhdr->ike_msgid);
-
-	/* IKE header */
-	if ((hdr = ikev2_add_header(buf, &sa, resp.msg_msgid,
-	    IKEV2_PAYLOAD_NOTIFY, IKEV2_EXCHANGE_INFORMATIONAL,
-	    IKEV2_FLAG_RESPONSE)) == NULL)
-		goto done;
-
-	/* SA payload */
-	if ((pld = ikev2_add_payload(buf)) == NULL)
-		goto done;
-	if ((n = ibuf_advance(buf, sizeof(*n))) == NULL)
-		goto done;
-	n->n_protoid = IKEV2_SAPROTO_IKE;
-	n->n_spisize = 0;
-	n->n_type = htobe16(IKEV2_N_INVALID_IKE_SPI);
-
-	if (ikev2_next_payload(pld, sizeof(*n), IKEV2_PAYLOAD_NONE) == -1)
-		goto done;
-
-	if (ikev2_set_header(hdr, ibuf_size(buf) - sizeof(*hdr)) == -1)
-		goto done;
-
-	(void)ikev2_pld_parse(env, hdr, &resp, 0);
-	(void)ikev2_msg_send(env, &resp);
-
- done:
-	ikev2_msg_cleanup(env, &resp);
-#endif
 
 	/* Always fail */
 	return (-1);
@@ -315,7 +257,7 @@ ikev2_msg_send(struct iked *env, struct iked_message *msg)
 	    msg->msg_offset, sizeof(*hdr))) == NULL)
 		return (-1);
 
-	isnatt = (msg->msg_natt || (msg->msg_sa && msg->msg_sa->sa_natt));
+	isnatt = (msg->msg_natt || (sa && sa->sa_natt));
 
 	exchange = hdr->ike_exchange;
 	flags = hdr->ike_flags;
@@ -338,19 +280,20 @@ ikev2_msg_send(struct iked *env, struct iked_message *msg)
 	if (sendtofrom(msg->msg_fd, ibuf_data(buf), ibuf_size(buf), 0,
 	    (struct sockaddr *)&msg->msg_peer, msg->msg_peerlen,
 	    (struct sockaddr *)&msg->msg_local, msg->msg_locallen) == -1) {
-		if (errno == EADDRNOTAVAIL) {
-			sa_state(env, msg->msg_sa, IKEV2_STATE_CLOSING);
-			timer_del(env, &msg->msg_sa->sa_timer);
-			timer_set(env, &msg->msg_sa->sa_timer,
-			    ikev2_ike_sa_timeout, msg->msg_sa);
-			timer_add(env, &msg->msg_sa->sa_timer,
+		log_warn("%s: sendtofrom", __func__);
+		if (sa != NULL && errno == EADDRNOTAVAIL) {
+			sa_state(env, sa, IKEV2_STATE_CLOSING);
+			timer_del(env, &sa->sa_timer);
+			timer_set(env, &sa->sa_timer,
+			    ikev2_ike_sa_timeout, sa);
+			timer_add(env, &sa->sa_timer,
 			    IKED_IKE_SA_DELETE_TIMEOUT);
 		}
-		log_warn("%s: sendtofrom", __func__);
-		return (-1);
+		if (sa != NULL)
+			return (-1);
 	}
 
-	if (!sa)
+	if (sa == NULL)
 		return (0);
 
 	if ((m = ikev2_msg_copy(env, msg)) == NULL) {
@@ -725,13 +668,13 @@ int
 ikev2_send_encrypted_fragments(struct iked *env, struct iked_sa *sa,
     struct ibuf *in, uint8_t exchange, uint8_t firstpayload, int response) {
 	struct iked_message		 resp;
-	struct ibuf			*buf, *e;
+	struct ibuf			*buf, *e = NULL;
 	struct ike_header		*hdr;
 	struct ikev2_payload		*pld;
 	struct ikev2_frag_payload	*frag;
 	sa_family_t			 sa_fam;
 	size_t				 ivlen, integrlen, blocklen;
-	size_t 				 max_len, left,  offset=0;;
+	size_t 				 max_len, left,  offset=0;
 	size_t				 frag_num = 1, frag_total;
 	uint8_t				*data;
 	uint32_t			 msgid;
@@ -783,7 +726,7 @@ ikev2_send_encrypted_fragments(struct iked *env, struct iked_sa *sa,
 
 		/* Encrypt message and add as an E payload */
 		data = ibuf_seek(in, offset, 0);
-		if((e=ibuf_new(data, MIN(left, max_len))) == NULL) {
+		if ((e = ibuf_new(data, MIN(left, max_len))) == NULL) {
 			goto done;
 		}
 		if ((e = ikev2_msg_encrypt(env, sa, e)) == NULL) {
@@ -1141,6 +1084,41 @@ ikev2_msg_lookup(struct iked *env, struct iked_msgqueue *queue,
 	return (m);
 }
 
+void
+ikev2_msg_lookup_dispose_all(struct iked *env, struct iked_msgqueue *queue,
+    struct iked_message *msg, struct ike_header *hdr)
+{
+	struct iked_message	*m = NULL, *tmp = NULL;
+
+	TAILQ_FOREACH_SAFE(m, queue, msg_entry, tmp) {
+		if (m->msg_msgid == msg->msg_msgid &&
+		    m->msg_exchange == hdr->ike_exchange) {
+			TAILQ_REMOVE(queue, m, msg_entry);
+			timer_del(env, &m->msg_timer);
+			ikev2_msg_cleanup(env, m);
+			free(m);
+		}
+	}
+}
+
+int
+ikev2_msg_lookup_retransmit_all(struct iked *env, struct iked_msgqueue *queue,
+    struct iked_message *msg, struct ike_header *hdr, struct iked_sa *sa)
+{
+	struct iked_message	*m = NULL, *tmp = NULL;
+	int count = 0;
+
+	TAILQ_FOREACH_SAFE(m, queue, msg_entry, tmp) {
+		if (m->msg_msgid == msg->msg_msgid &&
+		    m->msg_exchange == hdr->ike_exchange) {
+			if (ikev2_msg_retransmit_response(env, sa, m))
+				return -1;
+			count++;
+		}
+	}
+	return count;
+}
+
 int
 ikev2_msg_retransmit_response(struct iked *env, struct iked_sa *sa,
     struct iked_message *msg)
@@ -1179,6 +1157,7 @@ ikev2_msg_retransmit_timeout(struct iked *env, void *arg)
 		    (struct sockaddr *)&msg->msg_local,
 		    msg->msg_locallen) == -1) {
 			log_warn("%s: sendtofrom", __func__);
+			ikev2_ike_sa_setreason(sa, "retransmit failed");
 			sa_free(env, sa);
 			return;
 		}
@@ -1188,6 +1167,7 @@ ikev2_msg_retransmit_timeout(struct iked *env, void *arg)
 	} else {
 		log_debug("%s: retransmit limit reached for msgid %u",
 		    __func__, msg->msg_msgid);
+		ikev2_ike_sa_setreason(sa, "retransmit limit reached");
 		sa_free(env, sa);
 	}
 }

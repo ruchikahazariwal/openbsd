@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_vops.c,v 1.22 2019/08/26 18:56:29 anton Exp $	*/
+/*	$OpenBSD: vfs_vops.c,v 1.28 2020/04/08 08:07:51 mpi Exp $	*/
 /*
  * Copyright (c) 2010 Thordur I. Bjornsson <thib@openbsd.org> 
  *
@@ -46,7 +46,6 @@
 #include <sys/vnode.h>
 #include <sys/unistd.h>
 #include <sys/systm.h>
-#include <sys/lock.h>	/* LK_DRAIN */
 
 #ifdef VFSLCKDEBUG
 #include <sys/systm.h>		/* for panic() */
@@ -308,10 +307,11 @@ VOP_POLL(struct vnode *vp, int fflag, int events, struct proc *p)
 }
 
 int
-VOP_KQFILTER(struct vnode *vp, struct knote *kn)
+VOP_KQFILTER(struct vnode *vp, int fflag, struct knote *kn)
 {
 	struct vop_kqfilter_args a;
 	a.a_vp = vp;
+	a.a_fflag = fflag;
 	a.a_kn = kn;
 
 	if (vp->v_op->vop_kqfilter == NULL)
@@ -600,34 +600,19 @@ VOP_LOCK(struct vnode *vp, int flags)
 	if (vp->v_op->vop_lock == NULL)
 		return (EOPNOTSUPP);
 
-	if ((flags & LK_DRAIN) && vp->v_lockcount > 0) {
-		/*
-		 * Ensure that any thread currently waiting on the same lock has
-		 * observed that the vnode is about to be exclusively locked
-		 * before continuing.
-		 */
-		KASSERT(vp->v_flag & VXLOCK);
-		tsleep(&vp->v_lockcount, PINOD, "vop_lock", 0);
-		KASSERT(vp->v_lockcount == 0);
-	}
-
 	return ((vp->v_op->vop_lock)(&a));
 }
 
 int
 VOP_UNLOCK(struct vnode *vp)
 {
-	int r;
 	struct vop_unlock_args a;
 	a.a_vp = vp;
 
 	if (vp->v_op->vop_unlock == NULL)
 		return (EOPNOTSUPP);
 
-	vp->v_inflight++;
-	r = (vp->v_op->vop_unlock)(&a);
-	vp->v_inflight--;
-	return r;
+	return ((vp->v_op->vop_unlock)(&a));
 }
 
 int

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmm.c,v 1.93 2019/06/28 13:32:51 deraadt Exp $	*/
+/*	$OpenBSD: vmm.c,v 1.95 2019/12/11 06:45:17 pd Exp $	*/
 
 /*
  * Copyright (c) 2015 Mike Larkin <mlarkin@openbsd.org>
@@ -60,6 +60,7 @@ void vmm_run(struct privsep *, struct privsep_proc *, void *);
 void vmm_dispatch_vm(int, short, void *);
 int terminate_vm(struct vm_terminate_params *);
 int get_info_vm(struct privsep *, struct imsg *, int);
+int get_stats_vm(struct privsep *, struct imsg *, int);
 int opentap(char *);
 
 extern struct vmd *env;
@@ -241,6 +242,10 @@ vmm_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 		res = get_info_vm(ps, imsg, 0);
 		cmd = IMSG_VMDOP_GET_INFO_VM_END_DATA;
 		break;
+	case IMSG_VMDOP_GET_VM_STATS_REQUEST:
+		res = get_stats_vm(ps, imsg, 0);
+		cmd = IMSG_VMDOP_GET_VM_STATS_END_RESPONSE;
+		break;
 	case IMSG_VMDOP_CONFIG:
 		config_getconfig(env, imsg);
 		break;
@@ -316,6 +321,7 @@ vmm_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 		    imsg->hdr.peerid, vmc.vmc_owner.uid);
 		vm->vm_tty = imsg->fd;
 		vm->vm_state |= VM_STATE_RECEIVED;
+		vm->vm_state |= VM_STATE_PAUSED;
 		break;
 	case IMSG_VMDOP_RECEIVE_VM_END:
 		if ((vm = vm_getbyvmid(imsg->hdr.peerid)) == NULL) {
@@ -590,7 +596,7 @@ terminate_vm(struct vm_terminate_params *vtp)
  * Opens the next available tap device, up to MAX_TAP.
  *
  * Parameters
- *  ifname: an optional buffer of at least IF_NAMESIZE bytes.
+ *  ifname: a buffer of at least IF_NAMESIZE bytes.
  *
  * Returns a file descriptor to the tap node opened, or -1 if no tap
  * devices were available.
@@ -601,16 +607,15 @@ opentap(char *ifname)
 	int i, fd;
 	char path[PATH_MAX];
 
-	strlcpy(ifname, "tap", IF_NAMESIZE);
 	for (i = 0; i < MAX_TAP; i++) {
 		snprintf(path, PATH_MAX, "/dev/tap%d", i);
 		fd = open(path, O_RDWR | O_NONBLOCK);
 		if (fd != -1) {
-			if (ifname != NULL)
-				snprintf(ifname, IF_NAMESIZE, "tap%d", i);
+			snprintf(ifname, IF_NAMESIZE, "tap%d", i);
 			return (fd);
 		}
 	}
+	strlcpy(ifname, "tap", IF_NAMESIZE);
 
 	return (-1);
 }
@@ -802,6 +807,90 @@ get_info_vm(struct privsep *ps, struct imsg *imsg, int terminate)
 		vir.vir_info.vir_id = vm_id2vmid(info[i].vir_id, NULL);
 		if (proc_compose_imsg(ps, PROC_PARENT, -1,
 		    IMSG_VMDOP_GET_INFO_VM_DATA, imsg->hdr.peerid, -1,
+		    &vir, sizeof(vir)) == -1)
+			return (EIO);
+	}
+	free(info);
+	return (0);
+}
+
+
+/*
+ * CMPE get_stats_vm 
+ * NEED TO LOOK AGAIN
+ *
+ * Returns a list of VMs known to vmm(4).
+ *
+ * Parameters:
+ *  ps: the privsep context.
+ *  imsg: the received imsg including the peer id.
+ *  terminate: terminate the listed vm.
+ *
+ * Return values:
+ *  0: success
+ *  !0 : failure (eg, ENOMEM, EIO or another error code from vmm(4) ioctl)
+ */
+int
+get_stats_vm(struct privsep *ps, struct imsg *imsg, int terminate)
+{
+	int ret;
+	size_t ct, i;
+	struct vm_info_params vip;
+	struct vm_info_result *info;
+	struct vm_terminate_params vtp;
+	struct vmop_info_result vir;
+
+	/*
+	 * We issue the VMM_IOC_INFO ioctl twice, once with an input
+	 * buffer size of 0, which results in vmm(4) returning the
+	 * number of bytes required back to us in vip.vip_size,
+	 * and then we call it again after malloc'ing the required
+	 * number of bytes.
+	 *
+	 * It is possible that we could fail a second time (eg, if
+	 * another VM was created in the instant between the two
+	 * ioctls, but in that case the caller can just try again
+	 * as vmm(4) will return a zero-sized list in that case.
+	 */
+	vip.vip_size = 0;
+	info = NULL;
+	ret = 0;
+	memset(&vir, 0, sizeof(vir));
+
+	/* First ioctl to see how many bytes needed (vip.vip_size) */
+	if (ioctl(env->vmd_fd, VMM_IOC_INFO, &vip) == -1)
+		return (errno);
+
+	if (vip.vip_info_ct != 0)
+		return (EIO);
+
+	info = malloc(vip.vip_size);
+	if (info == NULL)
+		return (ENOMEM);
+
+	/* Second ioctl to get the actual list */
+	vip.vip_info = info;
+	if (ioctl(env->vmd_fd, VMM_IOC_INFO, &vip) == -1) {
+		ret = errno;
+		free(info);
+		return (ret);
+	}
+
+	/* Return info */
+	ct = vip.vip_size / sizeof(struct vm_info_result);
+	for (i = 0; i < ct; i++) {
+		if (terminate) {
+			vtp.vtp_vm_id = info[i].vir_id;
+			if ((ret = terminate_vm(&vtp)) != 0)
+				return (ret);
+			log_debug("%s: terminated vm %s (id %d)", __func__,
+			    info[i].vir_name, info[i].vir_id);
+			continue;
+		}
+		memcpy(&vir.vir_info, &info[i], sizeof(vir.vir_info));
+		vir.vir_info.vir_id = vm_id2vmid(info[i].vir_id, NULL);
+		if (proc_compose_imsg(ps, PROC_PARENT, -1,
+		    IMSG_VMDOP_GET_VM_STATS_RESPONSE, imsg->hdr.peerid, -1,
 		    &vir, sizeof(vir)) == -1)
 			return (EIO);
 	}

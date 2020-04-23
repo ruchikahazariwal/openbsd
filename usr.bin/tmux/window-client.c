@@ -1,4 +1,4 @@
-/* $OpenBSD: window-client.c,v 1.24 2019/08/16 11:49:12 nicm Exp $ */
+/* $OpenBSD: window-client.c,v 1.26 2020/01/28 08:06:11 nicm Exp $ */
 
 /*
  * Copyright (c) 2017 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -210,7 +210,7 @@ window_client_draw(__unused void *modedata, void *itemdata,
 	struct window_pane		*wp;
 	u_int				 cx = s->cx, cy = s->cy, lines, at;
 
-	if (c->session == NULL || (c->flags & (CLIENT_DEAD|CLIENT_DETACHING)))
+	if (c->session == NULL || (c->flags & CLIENT_UNATTACHEDFLAGS))
 		return;
 	wp = c->session->curw->window->active;
 
@@ -313,7 +313,7 @@ window_client_resize(struct window_mode_entry *wme, u_int sx, u_int sy)
 }
 
 static void
-window_client_do_detach(void* modedata, void *itemdata,
+window_client_do_detach(void *modedata, void *itemdata,
     __unused struct client *c, key_code key)
 {
 	struct window_client_modedata	*data = modedata;

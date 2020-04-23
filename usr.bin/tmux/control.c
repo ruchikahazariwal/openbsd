@@ -1,4 +1,4 @@
-/* $OpenBSD: control.c,v 1.24 2019/07/09 13:19:36 nicm Exp $ */
+/* $OpenBSD: control.c,v 1.30 2020/04/13 18:59:41 nicm Exp $ */
 
 /*
  * Copyright (c) 2012 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -30,30 +30,19 @@
 void
 control_write(struct client *c, const char *fmt, ...)
 {
-	va_list		 ap;
+	va_list	ap;
 
 	va_start(ap, fmt);
-	evbuffer_add_vprintf(c->stdout_data, fmt, ap);
+	file_vprint(c, fmt, ap);
+	file_print(c, "\n");
 	va_end(ap);
-
-	evbuffer_add(c->stdout_data, "\n", 1);
-	server_client_push_stdout(c);
-}
-
-/* Write a buffer, adding a terminal newline. Empties buffer. */
-void
-control_write_buffer(struct client *c, struct evbuffer *buffer)
-{
-	evbuffer_add_buffer(c->stdout_data, buffer);
-	evbuffer_add(c->stdout_data, "\n", 1);
-	server_client_push_stdout(c);
 }
 
 /* Control error callback. */
 static enum cmd_retval
 control_error(struct cmdq_item *item, void *data)
 {
-	struct client	*c = item->client;
+	struct client	*c = cmdq_get_client(item);
 	char		*error = data;
 
 	cmdq_guard(item, "begin", 1);
@@ -65,42 +54,43 @@ control_error(struct cmdq_item *item, void *data)
 }
 
 /* Control input callback. Read lines and fire commands. */
-void
-control_callback(struct client *c, int closed, __unused void *data)
+static void
+control_callback(__unused struct client *c, __unused const char *path,
+    int read_error, int closed, struct evbuffer *buffer, __unused void *data)
 {
-	char			*line;
-	struct cmdq_item	*item;
-	struct cmd_parse_result	*pr;
+	char			*line, *error;
+	struct cmdq_state	*state;
+	enum cmd_parse_status	 status;
 
-	if (closed)
+	if (closed || read_error != 0)
 		c->flags |= CLIENT_EXIT;
 
 	for (;;) {
-		line = evbuffer_readln(c->stdin_data, NULL, EVBUFFER_EOL_LF);
+		line = evbuffer_readln(buffer, NULL, EVBUFFER_EOL_LF);
 		if (line == NULL)
 			break;
+		log_debug("%s: %s", __func__, line);
 		if (*line == '\0') { /* empty line exit */
 			free(line);
 			c->flags |= CLIENT_EXIT;
 			break;
 		}
 
-		pr = cmd_parse_from_string(line, NULL);
-		switch (pr->status) {
-		case CMD_PARSE_EMPTY:
-			break;
-		case CMD_PARSE_ERROR:
-			item = cmdq_get_callback(control_error, pr->error);
-			cmdq_append(c, item);
-			break;
-		case CMD_PARSE_SUCCESS:
-			item = cmdq_get_command(pr->cmdlist, NULL, NULL, 0);
-			item->shared->flags |= CMDQ_SHARED_CONTROL;
-			cmdq_append(c, item);
-			cmd_list_free(pr->cmdlist);
-			break;
-		}
+		state = cmdq_new_state(NULL, NULL, CMDQ_STATE_CONTROL);
+		status = cmd_parse_and_append(line, NULL, c, state, &error);
+		if (status == CMD_PARSE_ERROR)
+			cmdq_append(c, cmdq_get_callback(control_error, error));
+		cmdq_free_state(state);
 
 		free(line);
 	}
+}
+
+void
+control_start(struct client *c)
+{
+	file_read(c, "-", control_callback, c);
+
+	if (c->flags & CLIENT_CONTROLCONTROL)
+		file_print(c, "\033P1000p");
 }

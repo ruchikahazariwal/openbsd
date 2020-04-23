@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.158 2019/08/19 07:07:35 jan Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.164 2020/04/06 08:31:04 mpi Exp $	*/
 
 /******************************************************************************
 
@@ -85,6 +85,15 @@ const struct pci_matchid ixgbe_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_X550EM_X_SFP },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_X550EM_X_10G_T },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_X550EM_X_1G_T },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_X550EM_A_KR },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_X550EM_A_KR_L },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_X550EM_A_SFP_N },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_X550EM_A_SFP },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_X550EM_A_SGMII },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_X550EM_A_SGMII_L },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_X550EM_A_10G_T },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_X550EM_A_1G_T },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_X550EM_A_1G_T_L }
 };
 
 /*********************************************************************
@@ -105,6 +114,8 @@ int	ixgbe_media_change(struct ifnet *);
 void	ixgbe_identify_hardware(struct ix_softc *);
 int	ixgbe_allocate_pci_resources(struct ix_softc *);
 int	ixgbe_allocate_legacy(struct ix_softc *);
+int	ixgbe_allocate_msix(struct ix_softc *);
+int	ixgbe_setup_msix(struct ix_softc *);
 int	ixgbe_allocate_queues(struct ix_softc *);
 void	ixgbe_free_pci_resources(struct ix_softc *);
 void	ixgbe_local_timer(void *);
@@ -131,6 +142,7 @@ void	ixgbe_initialize_rss_mapping(struct ix_softc *);
 int	ixgbe_rxfill(struct rx_ring *);
 void	ixgbe_rxrefill(void *);
 
+int	ixgbe_intr(struct ix_softc *sc);
 void	ixgbe_enable_intr(struct ix_softc *);
 void	ixgbe_disable_intr(struct ix_softc *);
 void	ixgbe_update_stats_counters(struct ix_softc *);
@@ -158,16 +170,20 @@ uint8_t	*ixgbe_mc_array_itr(struct ixgbe_hw *, uint8_t **, uint32_t *);
 void	ixgbe_setup_vlan_hw_support(struct ix_softc *);
 
 /* Support for pluggable optic modules */
-void	ixgbe_setup_optics(struct ix_softc *);
 void	ixgbe_handle_mod(struct ix_softc *);
 void	ixgbe_handle_msf(struct ix_softc *);
 void	ixgbe_handle_phy(struct ix_softc *);
 
 /* Legacy (single vector interrupt handler */
-int	ixgbe_intr(void *);
+int	ixgbe_legacy_intr(void *);
 void	ixgbe_enable_queue(struct ix_softc *, uint32_t);
+void	ixgbe_enable_queues(struct ix_softc *);
 void	ixgbe_disable_queue(struct ix_softc *, uint32_t);
 void	ixgbe_rearm_queue(struct ix_softc *, uint32_t);
+
+/* MSI-X (multiple vectors interrupt handlers)  */
+int	ixgbe_link_intr(void *);
+int	ixgbe_queue_intr(void *);
 
 /*********************************************************************
  *  OpenBSD Device Interface Entry Points
@@ -182,6 +198,7 @@ struct cfattach ix_ca = {
 };
 
 int ixgbe_smart_speed = ixgbe_smart_speed_on;
+int ixgbe_enable_msix = 0;
 
 /*********************************************************************
  *  Device identification routine
@@ -281,13 +298,13 @@ ixgbe_attach(struct device *parent, struct device *self, void *aux)
 		goto err_late;
 	}
 
-	/* Detect and set physical type */
-	ixgbe_setup_optics(sc);
-
 	bcopy(sc->hw.mac.addr, sc->arpcom.ac_enaddr,
 	    IXGBE_ETH_LENGTH_OF_ADDRESS);
 
-	error = ixgbe_allocate_legacy(sc);
+	if (sc->msix > 1)
+		error = ixgbe_allocate_msix(sc);
+	else
+		error = ixgbe_allocate_legacy(sc);
 	if (error)
 		goto err_late;
 
@@ -519,6 +536,7 @@ ixgbe_ioctl(struct ifnet * ifp, u_long command, caddr_t data)
 			ixgbe_disable_intr(sc);
 			ixgbe_iff(sc);
 			ixgbe_enable_intr(sc);
+			ixgbe_enable_queues(sc);
 		}
 		error = 0;
 	}
@@ -814,6 +832,12 @@ ixgbe_init(void *arg)
 		itr |= IXGBE_EITR_LLI_MOD | IXGBE_EITR_CNT_WDIS;
 	IXGBE_WRITE_REG(&sc->hw, IXGBE_EITR(0), itr);
 
+	if (sc->msix > 1) {
+		/* Set moderation on the Link interrupt */
+		IXGBE_WRITE_REG(&sc->hw, IXGBE_EITR(sc->linkvec),
+		    IXGBE_LINK_ITR);
+	}
+
 	/* Enable power to the phy */
 	if (sc->hw.phy.ops.set_phy_power)
 		sc->hw.phy.ops.set_phy_power(&sc->hw, TRUE);
@@ -829,6 +853,7 @@ ixgbe_init(void *arg)
 
 	/* And now turn on interrupts */
 	ixgbe_enable_intr(sc);
+	ixgbe_enable_queues(sc);
 
 	/* Now inform the stack we're ready */
 	ifp->if_flags |= IFF_RUNNING;
@@ -865,8 +890,8 @@ ixgbe_config_gpie(struct ix_softc *sc)
 	}
 
 	if (sc->hw.mac.type == ixgbe_mac_X540 ||
-	    hw->device_id == IXGBE_DEV_ID_X550EM_X_SFP ||
-	    hw->device_id == IXGBE_DEV_ID_X550EM_X_10G_T) {
+	    sc->hw.mac.type == ixgbe_mac_X550EM_x ||
+	    sc->hw.mac.type == ixgbe_mac_X550EM_a) {
 		/*
 		 * Thermal Failure Detection (X540)
 		 * Link Detection (X552 SFP+, X552/X557-AT)
@@ -906,6 +931,7 @@ ixgbe_config_delay_values(struct ix_softc *sc)
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_X550EM_a:
 		tmp = IXGBE_DV_X540(frame, frame);
 		break;
 	default:
@@ -921,6 +947,7 @@ ixgbe_config_delay_values(struct ix_softc *sc)
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_X550EM_a:
 		tmp = IXGBE_LOW_DV_X540(frame);
 		break;
 	default:
@@ -957,6 +984,16 @@ ixgbe_enable_queue(struct ix_softc *sc, uint32_t vector)
 }
 
 void
+ixgbe_enable_queues(struct ix_softc *sc)
+{
+	struct ix_queue *que;
+	int i;
+
+	for (i = 0, que = sc->queues; i < sc->num_queues; i++, que++)
+		ixgbe_enable_queue(sc, que->msix);
+}
+
+void
 ixgbe_disable_queue(struct ix_softc *sc, uint32_t vector)
 {
 	uint64_t queue = 1ULL << vector;
@@ -975,6 +1012,41 @@ ixgbe_disable_queue(struct ix_softc *sc, uint32_t vector)
 	}
 }
 
+/*
+ * MSIX Interrupt Handlers
+ */
+int
+ixgbe_link_intr(void *vsc)
+{
+	struct ix_softc	*sc = (struct ix_softc *)vsc;
+
+	return ixgbe_intr(sc);
+}
+
+int
+ixgbe_queue_intr(void *vque)
+{
+	struct ix_queue *que = vque;
+	struct ix_softc	*sc = que->sc;
+	struct ifnet	*ifp = &sc->arpcom.ac_if;
+	struct tx_ring	*txr = sc->tx_rings;
+
+	if (ISSET(ifp->if_flags, IFF_RUNNING)) {
+		ixgbe_rxeof(que);
+		ixgbe_txeof(txr);
+		if (ixgbe_rxfill(que->rxr)) {
+			/* Advance the Rx Queue "Tail Pointer" */
+			IXGBE_WRITE_REG(&sc->hw, IXGBE_RDT(que->rxr->me),
+			    que->rxr->last_desc_filled);
+		} else
+			timeout_add(&sc->rx_refill, 1);
+	}
+
+	ixgbe_enable_queue(sc, que->msix);
+
+	return (1);
+}
+
 /*********************************************************************
  *
  *  Legacy Interrupt Service routine
@@ -982,35 +1054,47 @@ ixgbe_disable_queue(struct ix_softc *sc, uint32_t vector)
  **********************************************************************/
 
 int
-ixgbe_intr(void *arg)
+ixgbe_legacy_intr(void *arg)
 {
 	struct ix_softc	*sc = (struct ix_softc *)arg;
-	struct ix_queue *que = sc->queues;
 	struct ifnet	*ifp = &sc->arpcom.ac_if;
 	struct tx_ring	*txr = sc->tx_rings;
-	struct ixgbe_hw	*hw = &sc->hw;
-	uint32_t	 reg_eicr, mod_mask, msf_mask;
-	int		 i, refill = 0;
+	int rv;
 
-	reg_eicr = IXGBE_READ_REG(&sc->hw, IXGBE_EICR);
-	if (reg_eicr == 0) {
-		ixgbe_enable_intr(sc);
+	rv = ixgbe_intr(sc);
+	if (rv == 0) {
+		ixgbe_enable_queues(sc);
 		return (0);
 	}
 
 	if (ISSET(ifp->if_flags, IFF_RUNNING)) {
+		struct ix_queue *que = sc->queues;
+
 		ixgbe_rxeof(que);
 		ixgbe_txeof(txr);
-		refill = 1;
-	}
-
-	if (refill) {
 		if (ixgbe_rxfill(que->rxr)) {
 			/* Advance the Rx Queue "Tail Pointer" */
 			IXGBE_WRITE_REG(&sc->hw, IXGBE_RDT(que->rxr->me),
 			    que->rxr->last_desc_filled);
 		} else
 			timeout_add(&sc->rx_refill, 1);
+	}
+
+	ixgbe_enable_queues(sc);
+	return (rv);
+}
+
+int
+ixgbe_intr(struct ix_softc *sc)
+{
+	struct ifnet	*ifp = &sc->arpcom.ac_if;
+	struct ixgbe_hw	*hw = &sc->hw;
+	uint32_t	 reg_eicr, mod_mask, msf_mask;
+
+	reg_eicr = IXGBE_READ_REG(&sc->hw, IXGBE_EICR);
+	if (reg_eicr == 0) {
+		ixgbe_enable_intr(sc);
+		return (0);
 	}
 
 	/* Link status change */
@@ -1083,9 +1167,6 @@ ixgbe_intr(void *arg)
 		KERNEL_UNLOCK();
 	}
 
-	for (i = 0; i < sc->num_queues; i++, que++)
-		ixgbe_enable_queue(sc, que->msix);
-
 	return (1);
 }
 
@@ -1101,6 +1182,7 @@ void
 ixgbe_media_status(struct ifnet * ifp, struct ifmediareq *ifmr)
 {
 	struct ix_softc *sc = ifp->if_softc;
+	uint64_t layer;
 
 	ifmr->ifm_active = IFM_ETHER;
 	ifmr->ifm_status = IFM_AVALID;
@@ -1108,47 +1190,110 @@ ixgbe_media_status(struct ifnet * ifp, struct ifmediareq *ifmr)
 	INIT_DEBUGOUT("ixgbe_media_status: begin");
 	ixgbe_update_link_status(sc);
 
-	if (LINK_STATE_IS_UP(ifp->if_link_state)) {
-		ifmr->ifm_status |= IFM_ACTIVE;
+	if (!LINK_STATE_IS_UP(ifp->if_link_state))
+		return;
 
+	ifmr->ifm_status |= IFM_ACTIVE;
+	layer = sc->phy_layer;
+
+	if (layer & IXGBE_PHYSICAL_LAYER_10GBASE_T ||
+	    layer & IXGBE_PHYSICAL_LAYER_1000BASE_T ||
+	    layer & IXGBE_PHYSICAL_LAYER_100BASE_TX ||
+	    layer & IXGBE_PHYSICAL_LAYER_10BASE_T) {
 		switch (sc->link_speed) {
+		case IXGBE_LINK_SPEED_10GB_FULL:
+			ifmr->ifm_active |= IFM_10G_T | IFM_FDX;
+			break;
+		case IXGBE_LINK_SPEED_1GB_FULL:
+			ifmr->ifm_active |= IFM_1000_T | IFM_FDX;
+			break;
 		case IXGBE_LINK_SPEED_100_FULL:
 			ifmr->ifm_active |= IFM_100_TX | IFM_FDX;
 			break;
-		case IXGBE_LINK_SPEED_1GB_FULL:
-			switch (sc->optics) {
-			case IFM_10G_SR: /* multi-speed fiber */
-				ifmr->ifm_active |= IFM_1000_SX | IFM_FDX;
-				break;
-			case IFM_10G_LR: /* multi-speed fiber */
-				ifmr->ifm_active |= IFM_1000_LX | IFM_FDX;
-				break;
-			default:
-				ifmr->ifm_active |= sc->optics | IFM_FDX;
-				break;
-			}
+		case IXGBE_LINK_SPEED_10_FULL:
+			ifmr->ifm_active |= IFM_10_T | IFM_FDX;
 			break;
+		}
+	}
+	if (layer & IXGBE_PHYSICAL_LAYER_SFP_PLUS_CU ||
+	    layer & IXGBE_PHYSICAL_LAYER_SFP_ACTIVE_DA) {
+		switch (sc->link_speed) {
 		case IXGBE_LINK_SPEED_10GB_FULL:
-			ifmr->ifm_active |= sc->optics | IFM_FDX;
+			ifmr->ifm_active |= IFM_10G_SFP_CU | IFM_FDX;
 			break;
 		}
+	}
+	if (layer & IXGBE_PHYSICAL_LAYER_10GBASE_LR) {
+		switch (sc->link_speed) {
+		case IXGBE_LINK_SPEED_10GB_FULL:
+			ifmr->ifm_active |= IFM_10G_LR | IFM_FDX;
+			break;
+		case IXGBE_LINK_SPEED_1GB_FULL:
+			ifmr->ifm_active |= IFM_1000_LX | IFM_FDX;
+			break;
+		}
+	}
+	if (layer & IXGBE_PHYSICAL_LAYER_10GBASE_SR ||
+	    layer & IXGBE_PHYSICAL_LAYER_1000BASE_SX) {
+		switch (sc->link_speed) {
+		case IXGBE_LINK_SPEED_10GB_FULL:
+			ifmr->ifm_active |= IFM_10G_SR | IFM_FDX;
+			break;
+		case IXGBE_LINK_SPEED_1GB_FULL:
+			ifmr->ifm_active |= IFM_1000_SX | IFM_FDX;
+			break;
+		}
+	}
+	if (layer & IXGBE_PHYSICAL_LAYER_10GBASE_CX4) {
+		switch (sc->link_speed) {
+		case IXGBE_LINK_SPEED_10GB_FULL:
+			ifmr->ifm_active |= IFM_10G_CX4 | IFM_FDX;
+			break;
+		}
+	}
+	if (layer & IXGBE_PHYSICAL_LAYER_10GBASE_KR) {
+		switch (sc->link_speed) {
+		case IXGBE_LINK_SPEED_10GB_FULL:
+			ifmr->ifm_active |= IFM_10G_KR | IFM_FDX;
+			break;
+		case IXGBE_LINK_SPEED_2_5GB_FULL:
+			ifmr->ifm_active |= IFM_2500_KX | IFM_FDX;
+			break;
+		case IXGBE_LINK_SPEED_1GB_FULL:
+			ifmr->ifm_active |= IFM_1000_KX | IFM_FDX;
+			break;
+		}
+	} else if (layer & IXGBE_PHYSICAL_LAYER_10GBASE_KX4 ||
+	    layer & IXGBE_PHYSICAL_LAYER_2500BASE_KX ||
+	    layer & IXGBE_PHYSICAL_LAYER_1000BASE_KX) {
+		switch (sc->link_speed) {
+		case IXGBE_LINK_SPEED_10GB_FULL:
+			ifmr->ifm_active |= IFM_10G_KX4 | IFM_FDX;
+			break;
+		case IXGBE_LINK_SPEED_2_5GB_FULL:
+			ifmr->ifm_active |= IFM_2500_KX | IFM_FDX;
+			break;
+		case IXGBE_LINK_SPEED_1GB_FULL:
+			ifmr->ifm_active |= IFM_1000_KX | IFM_FDX;
+			break;
+		}
+	}
 
-		switch (sc->hw.fc.current_mode) {
-		case ixgbe_fc_tx_pause:
-			ifmr->ifm_active |= IFM_FLOW | IFM_ETH_TXPAUSE;
-			break;
-		case ixgbe_fc_rx_pause:
-			ifmr->ifm_active |= IFM_FLOW | IFM_ETH_RXPAUSE;
-			break;
-		case ixgbe_fc_full:
-			ifmr->ifm_active |= IFM_FLOW | IFM_ETH_RXPAUSE |
-			    IFM_ETH_TXPAUSE;
-			break;
-		default:
-			ifmr->ifm_active &= ~(IFM_FLOW | IFM_ETH_RXPAUSE |
-			    IFM_ETH_TXPAUSE);
-			break;
-		}
+	switch (sc->hw.fc.current_mode) {
+	case ixgbe_fc_tx_pause:
+		ifmr->ifm_active |= IFM_FLOW | IFM_ETH_TXPAUSE;
+		break;
+	case ixgbe_fc_rx_pause:
+		ifmr->ifm_active |= IFM_FLOW | IFM_ETH_RXPAUSE;
+		break;
+	case ixgbe_fc_full:
+		ifmr->ifm_active |= IFM_FLOW | IFM_ETH_RXPAUSE |
+		    IFM_ETH_TXPAUSE;
+		break;
+	default:
+		ifmr->ifm_active &= ~(IFM_FLOW | IFM_ETH_RXPAUSE |
+		    IFM_ETH_TXPAUSE);
+		break;
 	}
 }
 
@@ -1178,22 +1323,36 @@ ixgbe_media_change(struct ifnet *ifp)
 		case IFM_AUTO:
 		case IFM_10G_T:
 			speed |= IXGBE_LINK_SPEED_100_FULL;
-		case IFM_10G_SR: /* KR, too */
-		case IFM_10G_LR:
-		case IFM_10G_CX4: /* KX4 */
 			speed |= IXGBE_LINK_SPEED_1GB_FULL;
+			speed |= IXGBE_LINK_SPEED_10GB_FULL;
+			break;
+		case IFM_10G_SR:
+		case IFM_10G_KR:
+		case IFM_10G_LR:
+		case IFM_10G_LRM:
+		case IFM_10G_CX4:
+		case IFM_10G_KX4:
+			speed |= IXGBE_LINK_SPEED_1GB_FULL;
+			speed |= IXGBE_LINK_SPEED_10GB_FULL;
+			break;
 		case IFM_10G_SFP_CU:
 			speed |= IXGBE_LINK_SPEED_10GB_FULL;
 			break;
 		case IFM_1000_T:
 			speed |= IXGBE_LINK_SPEED_100_FULL;
+			speed |= IXGBE_LINK_SPEED_1GB_FULL;
+			break;
 		case IFM_1000_LX:
 		case IFM_1000_SX:
-		case IFM_1000_CX: /* KX */
+		case IFM_1000_CX:
+		case IFM_1000_KX:
 			speed |= IXGBE_LINK_SPEED_1GB_FULL;
 			break;
 		case IFM_100_TX:
 			speed |= IXGBE_LINK_SPEED_100_FULL;
+			break;
+		case IFM_10_T:
+			speed |= IXGBE_LINK_SPEED_10_FULL;
 			break;
 		default:
 			return (EINVAL);
@@ -1512,44 +1671,6 @@ ixgbe_identify_hardware(struct ix_softc *sc)
 
 /*********************************************************************
  *
- *  Determine optic type
- *
- **********************************************************************/
-void
-ixgbe_setup_optics(struct ix_softc *sc)
-{
-	struct ixgbe_hw *hw = &sc->hw;
-	int		layer;
-
-	layer = hw->mac.ops.get_supported_physical_layer(hw);
-
-	if (layer & IXGBE_PHYSICAL_LAYER_10GBASE_T)
-		sc->optics = IFM_10G_T;
-	else if (layer & IXGBE_PHYSICAL_LAYER_1000BASE_T)
-		sc->optics = IFM_1000_T;
-	else if (layer & IXGBE_PHYSICAL_LAYER_100BASE_TX)
-		sc->optics = IFM_100_TX;
-	else if (layer & IXGBE_PHYSICAL_LAYER_SFP_PLUS_CU ||
-	    layer & IXGBE_PHYSICAL_LAYER_SFP_ACTIVE_DA)
-		sc->optics = IFM_10G_SFP_CU;
-	else if (layer & IXGBE_PHYSICAL_LAYER_10GBASE_LR ||
-	    layer & IXGBE_PHYSICAL_LAYER_10GBASE_LRM)
-		sc->optics = IFM_10G_LR;
-	else if (layer & IXGBE_PHYSICAL_LAYER_10GBASE_SR)
-		sc->optics = IFM_10G_SR;
-	else if (layer & IXGBE_PHYSICAL_LAYER_10GBASE_KX4 ||
-	    layer & IXGBE_PHYSICAL_LAYER_10GBASE_CX4)
-		sc->optics = IFM_10G_CX4;
-	else if (layer & IXGBE_PHYSICAL_LAYER_1000BASE_SX)
-		sc->optics = IFM_1000_SX;
-	else if (layer & IXGBE_PHYSICAL_LAYER_1000BASE_LX)
-		sc->optics = IFM_1000_LX;
-	else
-		sc->optics = IFM_AUTO;
-}
-
-/*********************************************************************
- *
  *  Setup the Legacy or MSI Interrupt handler
  *
  **********************************************************************/
@@ -1579,7 +1700,7 @@ ixgbe_allocate_legacy(struct ix_softc *sc)
 
 	intrstr = pci_intr_string(pc, ih);
 	sc->tag = pci_intr_establish(pc, ih, IPL_NET | IPL_MPSAFE,
-	    ixgbe_intr, sc, sc->dev.dv_xname);
+	    ixgbe_legacy_intr, sc, sc->dev.dv_xname);
 	if (sc->tag == NULL) {
 		printf(": couldn't establish interrupt");
 		if (intrstr != NULL)
@@ -1593,6 +1714,92 @@ ixgbe_allocate_legacy(struct ix_softc *sc)
 	sc->que_mask = IXGBE_EIMS_ENABLE_MASK;
 
 	return (0);
+}
+
+/*********************************************************************
+ *
+ *  Setup the MSI-X Interrupt handlers
+ *
+ **********************************************************************/
+int
+ixgbe_allocate_msix(struct ix_softc *sc)
+{
+	struct ixgbe_osdep	*os = &sc->osdep;
+	struct pci_attach_args	*pa  = &os->os_pa;
+	int			 vec, error = 0;
+	struct ix_queue		*que = sc->queues;
+	const char		*intrstr = NULL;
+	pci_chipset_tag_t	pc = pa->pa_pc;
+	pci_intr_handle_t	ih;
+
+	vec = 0;
+	if (pci_intr_map_msix(pa, vec, &ih)) {
+		printf(": couldn't map interrupt\n");
+		return (ENXIO);
+	}
+
+	que->msix = vec;
+	snprintf(que->name, sizeof(que->name), "%s:%d", sc->dev.dv_xname, vec);
+
+	intrstr = pci_intr_string(pc, ih);
+	que->tag = pci_intr_establish(pc, ih, IPL_NET | IPL_MPSAFE,
+	    ixgbe_queue_intr, que, que->name);
+	if (que->tag == NULL) {
+		printf(": couldn't establish interrupt");
+		if (intrstr != NULL)
+			printf(" at %s", intrstr);
+		printf("\n");
+		return (ENXIO);
+	}
+
+	/* Now the link status/control last MSI-X vector */
+	vec++;
+	if (pci_intr_map_msix(pa, vec, &ih)) {
+		printf(": couldn't map link vector\n");
+		error = ENXIO;
+		goto fail;
+	}
+
+	intrstr = pci_intr_string(pc, ih);
+	sc->tag = pci_intr_establish(pc, ih, IPL_NET | IPL_MPSAFE,
+	    ixgbe_link_intr, sc, sc->dev.dv_xname);
+	if (sc->tag == NULL) {
+		printf(": couldn't establish interrupt");
+		if (intrstr != NULL)
+			printf(" at %s", intrstr);
+		printf("\n");
+		error = ENXIO;
+		goto fail;
+	}
+
+	sc->linkvec = vec;
+	printf(", %s, %d queue%s", intrstr, vec, (vec > 1) ? "s" : "");
+
+	return (0);
+fail:
+	pci_intr_disestablish(pc, que->tag);
+	que->tag = NULL;
+	return (error);
+}
+
+int
+ixgbe_setup_msix(struct ix_softc *sc)
+{
+	struct ixgbe_osdep	*os = &sc->osdep;
+	struct pci_attach_args	*pa = &os->os_pa;
+	pci_intr_handle_t	 dummy;
+
+	if (!ixgbe_enable_msix)
+		return (0);
+
+	/*
+	 * Try a dummy map, maybe this bus doesn't like MSI, this function
+	 * has no side effects.
+	 */
+	if (pci_intr_map_msix(pa, 0, &dummy))
+		return (0);
+
+	return (2); /* queue vector + link vector */
 }
 
 int
@@ -1619,10 +1826,8 @@ ixgbe_allocate_pci_resources(struct ix_softc *sc)
 	sc->num_queues = 1;
 	sc->hw.back = os;
 
-#ifdef notyet
 	/* Now setup MSI or MSI/X, return us the number of supported vectors. */
 	sc->msix = ixgbe_setup_msix(sc);
-#endif
 
 	return (0);
 }
@@ -1699,9 +1904,10 @@ void
 ixgbe_add_media_types(struct ix_softc *sc)
 {
 	struct ixgbe_hw	*hw = &sc->hw;
-	int		layer;
+	uint64_t layer;
 
-	layer = hw->mac.ops.get_supported_physical_layer(hw);
+	sc->phy_layer = hw->mac.ops.get_supported_physical_layer(hw);
+	layer = sc->phy_layer;
 
 	if (layer & IXGBE_PHYSICAL_LAYER_10GBASE_T)
 		ifmedia_add(&sc->media, IFM_ETHER | IFM_10G_T, 0, NULL);
@@ -1728,11 +1934,13 @@ ixgbe_add_media_types(struct ix_softc *sc)
 	if (layer & IXGBE_PHYSICAL_LAYER_10GBASE_CX4)
 		ifmedia_add(&sc->media, IFM_ETHER | IFM_10G_CX4, 0, NULL);
 	if (layer & IXGBE_PHYSICAL_LAYER_10GBASE_KR)
-		ifmedia_add(&sc->media, IFM_ETHER | IFM_10G_SR, 0, NULL);
+		ifmedia_add(&sc->media, IFM_ETHER | IFM_10G_KR, 0, NULL);
 	if (layer & IXGBE_PHYSICAL_LAYER_10GBASE_KX4)
-		ifmedia_add(&sc->media, IFM_ETHER | IFM_10G_CX4, 0, NULL);
+		ifmedia_add(&sc->media, IFM_ETHER | IFM_10G_KX4, 0, NULL);
 	if (layer & IXGBE_PHYSICAL_LAYER_1000BASE_KX)
-		ifmedia_add(&sc->media, IFM_ETHER | IFM_1000_CX, 0, NULL);
+		ifmedia_add(&sc->media, IFM_ETHER | IFM_1000_KX, 0, NULL);
+	if (layer & IXGBE_PHYSICAL_LAYER_2500BASE_KX)
+		ifmedia_add(&sc->media, IFM_ETHER | IFM_2500_KX, 0, NULL);
 
 	if (hw->device_id == IXGBE_DEV_ID_82598AT) {
 		ifmedia_add(&sc->media, IFM_ETHER | IFM_1000_T | IFM_FDX, 0,
@@ -2682,10 +2890,10 @@ ixgbe_initialize_receive_units(struct ix_softc *sc)
 	rxcsum = IXGBE_READ_REG(hw, IXGBE_RXCSUM);
 	rxcsum &= ~IXGBE_RXCSUM_PCSD;
 
+	ixgbe_initialize_rss_mapping(sc);
+
 	/* Setup RSS */
 	if (sc->num_queues > 1) {
-		ixgbe_initialize_rss_mapping(sc);
-
 		/* RSS and RX IPP Checksum are mutually exclusive */
 		rxcsum |= IXGBE_RXCSUM_PCSD;
 	}
@@ -2716,6 +2924,7 @@ ixgbe_initialize_rss_mapping(struct ix_softc *sc)
 		break;
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_X550EM_a:
 		table_size = 512;
 		break;
 	default:
@@ -3034,9 +3243,7 @@ void
 ixgbe_enable_intr(struct ix_softc *sc)
 {
 	struct ixgbe_hw *hw = &sc->hw;
-	struct ix_queue *que = sc->queues;
 	uint32_t	mask, fwsm;
-	int i;
 
 	mask = (IXGBE_EIMS_ENABLE_MASK & ~IXGBE_EIMS_RTX_QUEUE);
 	/* Enable Fan Failure detection */
@@ -3061,6 +3268,7 @@ ixgbe_enable_intr(struct ix_softc *sc)
 		break;
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_X550EM_a:
 		mask |= IXGBE_EIMS_ECC;
 		/* MAC thermal sensor is automatically enabled */
 		mask |= IXGBE_EIMS_TS;
@@ -3082,14 +3290,6 @@ ixgbe_enable_intr(struct ix_softc *sc)
 		mask &= ~IXGBE_EIMS_LSC;
 		IXGBE_WRITE_REG(hw, IXGBE_EIAC, mask);
 	}
-
-	/*
-	 * Now enable all queues, this is done separately to
-	 * allow for handling the extended (beyond 32) MSIX
-	 * vectors that can be used by 82599
-	 */
-	for (i = 0; i < sc->num_queues; i++, que++)
-		ixgbe_enable_queue(sc, que->msix);
 
 	IXGBE_WRITE_FLUSH(hw);
 }
@@ -3183,6 +3383,7 @@ ixgbe_set_ivar(struct ix_softc *sc, uint8_t entry, uint8_t vector, int8_t type)
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_X550EM_a:
 		if (type == -1) { /* MISC IVAR */
 			index = (entry & 1) * 8;
 			ivar = IXGBE_READ_REG(hw, IXGBE_IVAR_MISC);
@@ -3205,15 +3406,11 @@ ixgbe_set_ivar(struct ix_softc *sc, uint8_t entry, uint8_t vector, int8_t type)
 void
 ixgbe_configure_ivars(struct ix_softc *sc)
 {
-#if notyet
 	struct ix_queue *que = sc->queues;
 	uint32_t newitr;
 	int i;
 
-	if (ixgbe_max_interrupt_rate > 0)
-		newitr = (4000000 / ixgbe_max_interrupt_rate) & 0x0FF8;
-	else
-		newitr = 0;
+	newitr = (4000000 / IXGBE_INTS_PER_SEC) & 0x0FF8;
 
 	for (i = 0; i < sc->num_queues; i++, que++) {
 		/* First the RX queue entry */
@@ -3227,7 +3424,6 @@ ixgbe_configure_ivars(struct ix_softc *sc)
 
 	/* For the Link interrupt */
 	ixgbe_set_ivar(sc, 1, sc->linkvec, -1);
-#endif
 }
 
 /*
@@ -3251,8 +3447,6 @@ ixgbe_handle_mod(struct ix_softc *sc)
 		    sc->dev.dv_xname);
 		return;
 	}
-	/* Set the optics type so system reports correctly */
-	ixgbe_setup_optics(sc);
 
 	ixgbe_handle_msf(sc);
 }

@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-command-prompt.c,v 1.46 2019/05/23 11:13:30 nicm Exp $ */
+/* $OpenBSD: cmd-command-prompt.c,v 1.51 2020/04/13 20:51:57 nicm Exp $ */
 
 /*
  * Copyright (c) 2008 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -40,11 +40,11 @@ const struct cmd_entry cmd_command_prompt_entry = {
 	.name = "command-prompt",
 	.alias = NULL,
 
-	.args = { "1iI:Np:t:", 0, 1 },
-	.usage = "[-1Ni] [-I inputs] [-p prompts] " CMD_TARGET_CLIENT_USAGE " "
+	.args = { "1kiI:Np:t:", 0, 1 },
+	.usage = "[-1kiN] [-I inputs] [-p prompts] " CMD_TARGET_CLIENT_USAGE " "
 		 "[template]",
 
-	.flags = 0,
+	.flags = CMD_CLIENT_TFLAG,
 	.exec = cmd_command_prompt_exec
 };
 
@@ -64,17 +64,14 @@ struct cmd_command_prompt_cdata {
 static enum cmd_retval
 cmd_command_prompt_exec(struct cmd *self, struct cmdq_item *item)
 {
-	struct args			*args = self->args;
+	struct args			*args = cmd_get_args(self);
+	struct client			*tc = cmdq_get_target_client(item);
 	const char			*inputs, *prompts;
 	struct cmd_command_prompt_cdata	*cdata;
-	struct client			*c;
 	char				*prompt, *ptr, *input = NULL;
 	size_t				 n;
 
-	if ((c = cmd_find_client(item, args_get(args, 't'), 0)) == NULL)
-		return (CMD_RETURN_ERROR);
-
-	if (c->prompt_string != NULL)
+	if (tc->prompt_string != NULL)
 		return (CMD_RETURN_NORMAL);
 
 	cdata = xcalloc(1, sizeof *cdata);
@@ -122,7 +119,9 @@ cmd_command_prompt_exec(struct cmd *self, struct cmdq_item *item)
 		cdata->flags |= PROMPT_NUMERIC;
 	else if (args_has(args, 'i'))
 		cdata->flags |= PROMPT_INCREMENTAL;
-	status_prompt_set(c, prompt, input, cmd_command_prompt_callback,
+	else if (args_has(args, 'k'))
+		cdata->flags |= PROMPT_KEY;
+	status_prompt_set(tc, prompt, input, cmd_command_prompt_callback,
 	    cmd_command_prompt_free, cdata, cdata->flags);
 	free(prompt);
 
@@ -134,10 +133,9 @@ cmd_command_prompt_callback(struct client *c, void *data, const char *s,
     int done)
 {
 	struct cmd_command_prompt_cdata	*cdata = data;
-	struct cmdq_item		*new_item;
-	char				*new_template, *prompt, *ptr;
+	char				*new_template, *prompt, *ptr, *error;
 	char				*input = NULL;
-	struct cmd_parse_result		*pr;
+	enum cmd_parse_status		 status;
 
 	if (s == NULL)
 		return (0);
@@ -164,21 +162,10 @@ cmd_command_prompt_callback(struct client *c, void *data, const char *s,
 		return (1);
 	}
 
-	pr = cmd_parse_from_string(new_template, NULL);
-	switch (pr->status) {
-	case CMD_PARSE_EMPTY:
-		new_item = NULL;
-		break;
-	case CMD_PARSE_ERROR:
-		new_item = cmdq_get_error(pr->error);
-		free(pr->error);
-		cmdq_append(c, new_item);
-		break;
-	case CMD_PARSE_SUCCESS:
-		new_item = cmdq_get_command(pr->cmdlist, NULL, NULL, 0);
-		cmd_list_free(pr->cmdlist);
-		cmdq_append(c, new_item);
-		break;
+	status = cmd_parse_and_append(new_template, NULL, c, NULL, &error);
+	if (status == CMD_PARSE_ERROR) {
+		cmdq_append(c, cmdq_get_error(error));
+		free(error);
 	}
 
 	if (!done)
