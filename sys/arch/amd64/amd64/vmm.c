@@ -41,7 +41,7 @@
 #include <dev/isa/isareg.h>
 #include <dev/pv/pvreg.h>
 
-#define VMM_DEBUG
+/* #define VMM_DEBUG */
 
 void *l1tf_flush_region;
 
