@@ -253,15 +253,14 @@ viombh_notifyq(void)
 			goto out;
 		}
 
-		//TAILQ_INIT(vibp.bl_pglist);
+		memset(&vibp, 0, sizeof(vibp));
 
 		for (i = 0; i < (sz / 4); i++) {
 			printf("%s: got page number 0x%llx from vm for inflate\n"
 			    "%d/%llu", __func__, (uint64_t)buf_pglist[i],
 			    i, (uint64_t)(sz / 4));
+			vibp.buf_bl_pglist[i] = (uint64_t)buf_pglist[i];
 		}
-
-		memset(&vibp, 0, sizeof(vibp));
 
 		vibp.bl_pglist_sz = sz;
 		vibp.vibp_vm_id = viombh.vm_id;

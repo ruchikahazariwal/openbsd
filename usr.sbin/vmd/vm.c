@@ -267,7 +267,7 @@ vm_balloon_thread_fn(void *p)
 		if (ioctl(env->vmd_fd, VMM_IOC_BALLOON, &vib) == -1) {
 			log_warn("balloon ioctl failed: %s",
 			    strerror(errno));
-		} else if (vib.vib_host_is_swapping || ct > 120) {
+		} else if (vib.vib_host_is_swapping || ct > 60) {
 			log_debug("host in swap, requesting inflate");
 			viombh_do_inflate(vm);
 		} else {
