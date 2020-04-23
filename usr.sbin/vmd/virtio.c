@@ -19,6 +19,7 @@
 
 #include <sys/param.h>	/* PAGE_SIZE */
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 
 #include <machine/vmmvar.h>
 #include <dev/pci/pcireg.h>
@@ -27,6 +28,8 @@
 #include <dev/pci/virtio_pcireg.h>
 #include <dev/pv/vioblkreg.h>
 #include <dev/pv/vioscsireg.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <net/if.h>
 #include <netinet/in.h>
@@ -60,6 +63,8 @@ struct viombh_dev viombh;
 
 int nr_vionet;
 int nr_vioblk;
+
+extern struct vmd *env;
 
 #define MAXPHYS	(64 * 1024)	/* max raw I/O transfer size */
 
@@ -191,11 +196,17 @@ viombh_notifyq(void)
 	uint32_t vr_sz;
 	size_t sz;
 	int ret;
+	uint32_t i;
+	uint32_t *buf_pglist;
+	//struct vm_page *buf_vm_pages;
+	//struct pglist *host_bl_pglist;
 	uint16_t aidx, uidx;
 	char *buf;
 	struct vring_desc *desc;
 	struct vring_avail *avail;
 	struct vring_used *used;
+	struct vm_inflate_balloon_params vibp;
+	//struct vm_page *p;
 
 	ret = 0;
 
@@ -228,27 +239,70 @@ viombh_notifyq(void)
 	uidx = used->idx & VIOMBH_QUEUE_MASK;
 
 	sz = desc[avail->ring[aidx]].len;
-	if (sz > MAXPHYS)
-		fatal("viombh descriptor size too large (%zu)", sz);
+
+	printf("size of the desc: %zu", sz);
+
+	printf("%s: being called for %d queue\n", __func__, viombh.cfg.queue_notify);
+	if (viombh.cfg.queue_notify == 0) // inflate queue
+	{
+		buf_pglist = calloc(1, sz);
+		//buf_vm_pages = calloc(1, sizeof(struct vm_page) * (sz / 4));
+
+		if (read_mem(desc[avail->ring[aidx]].addr, buf_pglist, sz)) {
+			printf("error from %s", __func__);
+			goto out;
+		}
+
+		//TAILQ_INIT(vibp.bl_pglist);
+
+		for (i = 0; i < (sz / 4); i++) {
+			printf("%s: got page number 0x%llx from vm for inflate\n"
+			    "%d/%llu", __func__, (uint64_t)buf_pglist[i],
+			    i, (uint64_t)(sz / 4));
+		}
+
+		memset(&vibp, 0, sizeof(vibp));
+
+		vibp.bl_pglist_sz = sz;
+		vibp.vibp_vm_id = viombh.vm_id;
+
+		if (ioctl(env->vmd_fd, VMM_IOC_BALLOON_INFLATE, &vibp) == -1) {
+			log_warn("balloon inflate ioctl failed: %s",
+				strerror(errno));
+			goto out;
+		}
+
+		ret = 1;
+		viombh.cfg.isr_status = 1;
+		used->ring[uidx].id = avail->ring[aidx] &
+			VIOMBH_QUEUE_MASK;
+		used->ring[uidx].len = desc[avail->ring[aidx]].len;
+			used->idx++;
+
+		if (write_mem(q_gpa, buf, vr_sz)) {
+			log_warnx("viombh: error writing vio ring");
+		}
+
+		free(buf);
+		free(buf_pglist);
+	}
+	else if (viombh.cfg.queue_notify == 1) // deflate queue
+	{
+
+	}
+	else if (viombh.cfg.queue_notify == 2) // stats queue
+	{
+
+	}
 
 	// free the pages via another vmm ioctl (TBD)
 
 	/* ret == 1 -> interrupt needed */
 	/* XXX check VIRTIO_F_NO_INTR */
 
-	ret = 1;
-	viombh.cfg.isr_status = 1;
-	used->ring[uidx].id = avail->ring[aidx] &
-	    VIOMBH_QUEUE_MASK;
-	used->ring[uidx].len = desc[avail->ring[aidx]].len;
-	used->idx++;
-
-	if (write_mem(q_gpa, buf, vr_sz)) {
-		log_warnx("viombh: error writing vio ring");
-	}
-
-	free(buf);
-
+	return (ret);
+out:
+	free(buf_pglist);
 	return (ret);
 }
 
@@ -263,6 +317,8 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
     void *unused, uint8_t sz)
 {
 	*intr = 0xFF;
+
+	printf("%s: reg: %u\n", __func__, reg);
 
 	// dir == 0 means writing
 	if (dir == 0) {
@@ -294,6 +350,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 4:
 			viombh.actual = *data;
+			printf("Driver updates Device actual: %d \n", viombh.actual);
 			break;
 		}
 	} else {
@@ -2633,15 +2690,18 @@ virtio_start(struct vm_create_params *vcp)
 	}
 }
 
+int doInflateOnce = 0;
+
 /* move below into separate file XXX */
 void
 viombh_do_inflate(struct vmd_vm *vm)
 {
-	viombh.num_pages = 40;
+	viombh.num_pages = 10;
 
-	if (viombh.num_pages > viombh.actual) {
+	if (viombh.num_pages > viombh.actual && !doInflateOnce) {
 		printf("%s: intr\n", __func__);
 		viombh.cfg.isr_status |= VIRTIO_CONFIG_ISR_CONFIG_CHANGE;
 		vcpu_assert_pic_irq(viombh.vm_id, 0, viombh.irq);
+		doInflateOnce = 1;
 	}
 }

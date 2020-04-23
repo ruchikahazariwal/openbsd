@@ -18,6 +18,9 @@
 /*
  * CPU capabilities for VMM operation
  */
+
+#include <uvm/uvm_extern.h>
+
 #ifndef _MACHINE_VMMVAR_H_
 #define _MACHINE_VMMVAR_H_
 
@@ -544,6 +547,14 @@ struct vm_inswap_balloon {
 	int			vib_host_is_swapping;
 };
 
+#define BALLOON_MAX_PAGES 256
+struct vm_inflate_balloon_params {
+	/* Input parameters to VMM_IOC_BALLOON_INFLATE */
+	uint32_t		vibp_vm_id;
+	uint32_t		buf_bl_pglist[BALLOON_MAX_PAGES];
+	size_t 			bl_pglist_sz;
+};
+
 #define VM_RWVMPARAMS_PVCLOCK_SYSTEM_GPA 0x1	/* read/write pvclock gpa */
 #define VM_RWVMPARAMS_PVCLOCK_VERSION	 0x2	/* read/write pvclock version */
 #define VM_RWVMPARAMS_ALL	(VM_RWVMPARAMS_PVCLOCK_SYSTEM_GPA | \
@@ -603,6 +614,7 @@ struct vm_mprotect_ept_params {
 #define VMM_IOC_MPROTECT_EPT _IOW('V', 11, struct vm_mprotect_ept_params)
 /* Check if host is about to swap */
 #define VMM_IOC_BALLOON _IOWR('V', 12, struct vm_inswap_balloon)
+#define VMM_IOC_BALLOON_INFLATE _IOWR('V', 13, struct vm_inflate_balloon_params)
 
 /* CPUID masks */
 /*

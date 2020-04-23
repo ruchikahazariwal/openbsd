@@ -42,6 +42,8 @@
 
 #include <dev/pv/virtioreg.h>
 #include <dev/pv/virtiovar.h>
+#include <dev/pci/virtio_pcireg.h>
+
 
 extern struct uvmexp uvmexp;
 extern struct bcachestats bcstats;
@@ -220,7 +222,6 @@ viomb_attach(struct device *parent, struct device *self, void *aux)
 	     sizeof(u_int32_t) * PGS_PER_REQ, 1, "deflate") != 0))
 		goto err;
 	vsc->sc_nvqs++;
-
 	if ((virtio_alloc_vq(vsc, &sc->sc_vq[VQ_STATS], VQ_STATS,
 	     VIOMB_STATS_MAX * sizeof(struct virtio_balloon_stat), 1, "stats") != 0))
 		goto err;
@@ -397,12 +398,16 @@ viomb_inflate(struct viomb_softc *sc)
 	struct vm_page *p;
 	struct virtqueue *vq = &sc->sc_vq[VQ_INFLATE];
 	u_int32_t nvpages;
-	int slot, error, i = 0;
+	int slot, error, i = 0, j = 0;
 
 	nvpages = sc->sc_npages - sc->sc_actual;
 	if (nvpages > PGS_PER_REQ)
 		nvpages = PGS_PER_REQ;
 	b = &sc->sc_req;
+
+	TAILQ_INIT(&b->bl_pglist);
+
+	printf("%d: bl_pglist is empty\n", TAILQ_EMPTY(&b->bl_pglist));
 
 	/*  API call for allocating pages
 	 *
@@ -411,7 +416,8 @@ viomb_inflate(struct viomb_softc *sc)
 	 *  - bl_pglist will be the list of free pages to give to host
 	 */
 	if ((error = uvm_pglistalloc(nvpages * PAGE_SIZE, 0,
-				     dma_constraint.ucr_high,
+				     //dma_constraint.ucr_high,
+					 -1, //or uint64_t or 500 megs
 				     0, 0, &b->bl_pglist, nvpages,
 				     UVM_PLA_NOWAIT))) {
 		printf("%s unable to allocate %u physmem pages,"
@@ -420,6 +426,9 @@ viomb_inflate(struct viomb_softc *sc)
 	}
 
 	b->bl_nentries = nvpages;
+
+	TAILQ_FOREACH(p, &b->bl_pglist, pageq)
+		printf("%s: page %d # 0x%llx \n", __func__, j++, (uint64_t)p->phys_addr);
 
 	TAILQ_FOREACH(p, &b->bl_pglist, pageq)
 		b->bl_pages[i++] = p->phys_addr / VIRTIO_PAGE_SIZE;
@@ -442,10 +451,16 @@ viomb_inflate(struct viomb_softc *sc)
 	virtio_enqueue_p(vq, slot, b->bl_dmamap, 0,
 			 sizeof(u_int32_t) * nvpages, VRING_READ);
 
+	sc->sc_actual = sc->sc_actual + nvpages;
+	printf("virtio_write_device_config_4 updating actual: %d \n", sc->sc_actual);
+	virtio_write_device_config_4(vsc, VIRTIO_BALLOON_CONFIG_ACTUAL,
+		sc->sc_actual);
+
 	virtio_enqueue_commit(vsc, vq, slot, VRING_NOTIFY);
 	return;
 err:
 	uvm_pglistfree(&b->bl_pglist);
+	printf("%s, err: vq->vq_num: %u \n", __func__, vq->vq_num);
 	return;
 }
 

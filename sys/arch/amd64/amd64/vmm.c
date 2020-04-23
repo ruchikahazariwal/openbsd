@@ -127,6 +127,7 @@ int vm_rwregs(struct vm_rwregs_params *, int);
 int vm_mprotect_ept(struct vm_mprotect_ept_params *);
 int vm_rwvmparams(struct vm_rwvmparams_params *, int);
 int vm_get_balloon_info(struct vm_inswap_balloon *);
+int vm_inflate_balloon(struct vm_inflate_balloon_params *);
 int vm_find(uint32_t, struct vm **);
 int vcpu_readregs_vmx(struct vcpu *, uint64_t, struct vcpu_reg_state *);
 int vcpu_readregs_svm(struct vcpu *, uint64_t, struct vcpu_reg_state *);
@@ -510,7 +511,9 @@ vmmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	case VMM_IOC_BALLOON:
 		ret = vm_get_balloon_info((struct vm_inswap_balloon *)data);
 		break;
-
+	case VMM_IOC_BALLOON_INFLATE:
+		ret = vm_inflate_balloon((struct vm_inflate_balloon_params *)data);
+		break;
 	default:
 		DPRINTF("%s: unknown ioctl code 0x%lx\n", __func__, cmd);
 		ret = ENOTTY;
@@ -526,6 +529,71 @@ vm_get_balloon_info(struct vm_inswap_balloon *vib)
 
 	return vib->vib_host_is_swapping;
 }
+
+/*
+ * vm_inflate_balloon
+ *
+ * pages should already be unmapped
+ */
+int
+vm_inflate_balloon(struct vm_inflate_balloon_params *vibp)
+{
+	struct vm_page **buf_vm_pages;
+	struct vm_page *p;
+	struct pglist bl_pglist;
+	uint64_t hpa;
+	struct vm *vm;
+	struct pmap *pmap;
+	int i, error;
+
+	/* Find the desired VM */
+	rw_enter_read(&vmm_softc->vm_lock);
+	error = vm_find(vibp->vibp_vm_id, &vm);
+	rw_exit_read(&vmm_softc->vm_lock);
+
+	/* Not found? exit. */
+	if (error != 0)
+		return (error);
+
+	pmap = vm->vm_map->pmap;
+
+	buf_vm_pages = (struct vm_page **)km_alloc(
+	    sizeof(struct vm_page *) * (vibp->bl_pglist_sz / 4),
+	    &kv_page, &kp_zero, &kd_waitok);
+
+	TAILQ_INIT(&bl_pglist);
+
+	for (i = 0; i < (vibp->bl_pglist_sz / 4); i++) {
+		printf("%s: got GPPN 0x%llx from vm for inflate\n"
+		    "%d/%llu", __func__, (uint64_t)vibp->buf_bl_pglist[i], i,
+		    (uint64_t)(vibp->bl_pglist_sz / 4));
+
+		if (!pmap_extract(pmap, (vibp->buf_bl_pglist[i] * PAGE_SIZE),
+		    (paddr_t *)&hpa)) {
+			printf("%s: unable to extract HPA for GPA 0x%llx\n",
+			    __func__,
+			    (uint64_t)(vibp->buf_bl_pglist[i] * PAGE_SIZE));
+			return 1;
+		}
+		printf("%s: GPA: 0x%llx -> HPA 0x%llx\n", __func__,
+		    (uint64_t)(vibp->buf_bl_pglist[i] * PAGE_SIZE),
+		    hpa);
+
+		buf_vm_pages[i] = PHYS_TO_VM_PAGE(hpa);
+
+		TAILQ_INSERT_TAIL(&bl_pglist, buf_vm_pages[i], pageq);
+	}
+
+	i = 0;
+	TAILQ_FOREACH(p, &bl_pglist, pageq)
+		printf("%s: page %d # 0x%llx \n", __func__, i++, (uint64_t)p->phys_addr);
+
+//	uvm_pglistfree
+//	km_free
+	printf("%s: balloon inflate completed\n", __func__);
+	return (0);
+}
+
 /*
  * pledge_ioctl_vmm
  *
@@ -553,6 +621,7 @@ pledge_ioctl_vmm(struct proc *p, long com)
 	case VMM_IOC_READVMPARAMS:
 	case VMM_IOC_WRITEVMPARAMS:
 	case VMM_IOC_BALLOON:
+	case VMM_IOC_BALLOON_INFLATE:
 		return (0);
 	}
 
