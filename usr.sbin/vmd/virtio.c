@@ -268,7 +268,7 @@ viombh_notifyq(void)
 		ret = 1;
 		viombh.num_pages = viombh.num_pages - vibp.vibp_actual;
 		printf("%s: numpages: %lu and vibp_actual: %lu\n", __func__,
-			viombh.num_pages, vibp.vibp_actual);
+			(uint32_t) viombh.num_pages, (uint32_t) vibp.vibp_actual);
 		viombh.cfg.isr_status = 1;
 		//viombh.cfg.isr_status |= VIRTIO_CONFIG_ISR_CONFIG_CHANGE;
 		used->ring[uidx].id = avail->ring[aidx] &
