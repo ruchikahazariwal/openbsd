@@ -307,7 +307,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 {
 	*intr = 0xFF;
 
-	printf("%s: reg: %u\n", __func__, reg);
+	printf("%s: reg: %u size: %u\n", __func__, reg, sz);
 
 	// dir == 0 means writing
 	if (dir == 0) {
@@ -338,8 +338,21 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 			viombh.cfg.device_status = *data;
 			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 4:
-			viombh.actual = *data;
-			printf("Driver updates Device actual: %d \n", viombh.actual);
+			switch (sz) {
+			case 4:
+				viombh.actual = (uint32_t)(*data);
+				break;
+			case 2:
+				viombh.actual &= 0xFFFF0000;
+				viombh.actual |= (uint32_t)(*data) & 0xFFFF;
+				break;
+			case 1:
+				viombh.actual &= 0xFFFFFF00;
+				viombh.actual |= (uint32_t)(*data) & 0xFF;
+				break;
+			}
+			/* XXX handle invalid sz */
+			printf("%s: updating viombh.actual to: %u",__func__,viombh.actual);
 			break;
 		}
 	} else {
