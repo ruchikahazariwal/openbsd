@@ -337,7 +337,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 		case VIRTIO_CONFIG_DEVICE_STATUS:
 			viombh.cfg.device_status = *data;
 			if (viombh.cfg.device_status == 0) {
-				log_debug("%s: device reset\n", __func__);
+				log_debug("%s: device reset", __func__);
 				viombh.cfg.guest_feature = 0;
 				viombh.cfg.queue_address = 0;
 				viombh_update_qa();
