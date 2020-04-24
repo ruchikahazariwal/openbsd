@@ -567,9 +567,6 @@ vm_inflate_balloon(struct vm_inflate_balloon_params *vibp)
 			    (uint64_t)(vibp->vibp_buf_bl_pages[i] * PAGE_SIZE));
 			continue;
 		}
-
-		vibp->vibp_actual++;
-
 		printf("%s: GPA: 0x%llx -> HPA 0x%llx\n", __func__,
 		    (uint64_t)(vibp->vibp_buf_bl_pages[i] * PAGE_SIZE),
 		    hpa);

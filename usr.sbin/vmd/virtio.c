@@ -250,8 +250,8 @@ viombh_notifyq(void)
 		memset(&vibp, 0, sizeof(vibp));
 
 		for (i = 0; i < (sz / 4); i++) {
-			printf("%s: got page number 0x%llx from vm for inflate\n"
-			    "%d/%llu", __func__, (uint64_t)buf_bl_pages[i],
+			printf("%s: got page number 0x%llx from vm for inflate"
+			    "%d/%llu\n", __func__, (uint64_t)buf_bl_pages[i],
 			    i, (uint64_t)(sz / 4));
 			vibp.vibp_buf_bl_pages[i] = (uint64_t)buf_bl_pages[i];
 		}
@@ -266,11 +266,7 @@ viombh_notifyq(void)
 		}
 
 		ret = 1;
-		viombh.num_pages = viombh.num_pages - vibp.vibp_actual;
-		printf("%s: numpages: %u and vibp_actual: %u\n", __func__,
-			(uint32_t) viombh.num_pages, (uint32_t) vibp.vibp_actual);
 		viombh.cfg.isr_status = 1;
-		//viombh.cfg.isr_status |= VIRTIO_CONFIG_ISR_CONFIG_CHANGE;
 		used->ring[uidx].id = avail->ring[aidx] &
 			VIOMBH_QUEUE_MASK;
 		used->ring[uidx].len = desc[avail->ring[aidx]].len;
