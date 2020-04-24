@@ -336,6 +336,23 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 			break;
 		case VIRTIO_CONFIG_DEVICE_STATUS:
 			viombh.cfg.device_status = *data;
+			if (viombh.cfg.device_status == 0) {
+				log_debug("%s: device reset", __func__);
+				viombh.cfg.guest_feature = 0;
+				viombh.cfg.queue_address = 0;
+				viombh_update_qa();
+				viombh.cfg.queue_size = 0;
+				viombh_update_qs();
+				viombh.cfg.queue_select = 0;
+				viombh.cfg.queue_notify = 0;
+				viombh.cfg.isr_status = 0;
+				viombh.vq[0].last_avail = 0;
+				viombh.vq[1].last_avail = 0;
+				viombh.vq[2].last_avail = 0;
+				viombh.num_pages = 0;
+				viombh.actual = 0;
+				vcpu_deassert_pic_irq(viombh.vm_id, 0, viombh.irq);
+			}
 			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 4:
 			switch (sz) {
