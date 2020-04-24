@@ -267,12 +267,14 @@ viombh_notifyq(void)
 
 		ret = 1;
 		viombh.num_pages = viombh.num_pages - vibp.vibp_actual;
+		printf("%s: numpages: %lu and vibp_actual: %lu\n", __func__,
+			viombh.num_pages, vibp.vibp_actual);
 		viombh.cfg.isr_status = 1;
-		viombh.cfg.isr_status |= VIRTIO_CONFIG_ISR_CONFIG_CHANGE;
+		//viombh.cfg.isr_status |= VIRTIO_CONFIG_ISR_CONFIG_CHANGE;
 		used->ring[uidx].id = avail->ring[aidx] &
 			VIOMBH_QUEUE_MASK;
 		used->ring[uidx].len = desc[avail->ring[aidx]].len;
-			used->idx++;
+		used->idx++;
 
 		if (write_mem(q_gpa, buf, vr_sz)) {
 			log_warnx("viombh: error writing vio ring");
@@ -292,6 +294,7 @@ viombh_notifyq(void)
 
 	return (ret);
 out:
+	free(buf);
 	free(buf_bl_pages);
 	return (ret);
 }
