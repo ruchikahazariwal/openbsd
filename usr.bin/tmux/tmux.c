@@ -1,4 +1,4 @@
-/* $OpenBSD: tmux.c,v 1.196 2020/04/09 15:35:27 nicm Exp $ */
+/* $OpenBSD: tmux.c,v 1.198 2020/04/20 13:25:36 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -28,6 +28,7 @@
 #include <locale.h>
 #include <paths.h>
 #include <pwd.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -57,7 +58,7 @@ usage(void)
 {
 	fprintf(stderr,
 	    "usage: %s [-2CluvV] [-c shell-command] [-f file] [-L socket-name]\n"
-	    "            [-S socket-path] [command [flags]]\n",
+	    "            [-S socket-path] [-T features] [command [flags]]\n",
 	    getprogname());
 	exit(1);
 }
@@ -168,6 +169,17 @@ setblocking(int fd, int state)
 }
 
 const char *
+sig2name(int signo)
+{
+     static char	s[11];
+
+     if (signo > 0 && signo < NSIG)
+	     return (sys_signame[signo]);
+     xsnprintf(s, sizeof s, "%d", signo);
+     return (s);
+}
+
+const char *
 find_cwd(void)
 {
 	char		 resolved1[PATH_MAX], resolved2[PATH_MAX];
@@ -230,9 +242,11 @@ getversion(void)
 int
 main(int argc, char **argv)
 {
-	char					*path, *label, *cause, **var;
+	char					*path = NULL, *label = NULL;
+	char					*cause, **var;
 	const char				*s, *shell, *cwd;
-	int					 opt, flags, keys;
+	int					 opt, flags = 0, keys;
+	int					 feat = 0;
 	const struct options_table_entry	*oe;
 
 	if (setlocale(LC_CTYPE, "en_US.UTF-8") == NULL &&
@@ -249,14 +263,11 @@ main(int argc, char **argv)
 
 	if (**argv == '-')
 		flags = CLIENT_LOGIN;
-	else
-		flags = 0;
 
-	label = path = NULL;
-	while ((opt = getopt(argc, argv, "2c:Cdf:lL:qS:uUvV")) != -1) {
+	while ((opt = getopt(argc, argv, "2c:Cdf:lL:qS:T:uUvV")) != -1) {
 		switch (opt) {
 		case '2':
-			flags |= CLIENT_256COLOURS;
+			tty_add_features(&feat, "256", ":,");
 			break;
 		case 'c':
 			shell_command = optarg;
@@ -285,6 +296,9 @@ main(int argc, char **argv)
 		case 'S':
 			free(path);
 			path = xstrdup(optarg);
+			break;
+		case 'T':
+			tty_add_features(&feat, optarg, ":,");
 			break;
 		case 'u':
 			flags |= CLIENT_UTF8;
@@ -393,5 +407,5 @@ main(int argc, char **argv)
 	free(label);
 
 	/* Pass control to the client. */
-	exit(client_main(event_init(), argc, argv, flags));
+	exit(client_main(event_init(), argc, argv, flags, feat));
 }

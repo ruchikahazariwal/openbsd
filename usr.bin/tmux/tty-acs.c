@@ -1,4 +1,4 @@
-/* $OpenBSD: tty-acs.c,v 1.7 2019/05/17 05:48:25 nicm Exp $ */
+/* $OpenBSD: tty-acs.c,v 1.9 2020/04/20 13:25:36 nicm Exp $ */
 
 /*
  * Copyright (c) 2010 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -99,7 +99,7 @@ tty_acs_needed(struct tty *tty)
 	    tty_term_number(tty->term, TTYC_U8) == 0)
 		return (1);
 
-	if (tty->flags & TTY_UTF8)
+	if (tty->client->flags & CLIENT_UTF8)
 		return (0);
 	return (1);
 }
