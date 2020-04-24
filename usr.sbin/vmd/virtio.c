@@ -371,10 +371,36 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 			vcpu_deassert_pic_irq(viombh.vm_id, 0, viombh.irq);
 			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI:
-			*data = viombh.num_pages;
+			switch (sz) {
+			case 4:
+				*data = (uint32_t)(viombh.num_pages);
+				break;
+			case 2:
+				*data &= 0xFFFF0000;
+				*data |= (uint32_t)(viombh.num_pages) & 0xFFFF;
+				break;
+			case 1:
+				*data &= 0xFFFFFF00;
+				*data |= (uint32_t)(viombh.num_pages) & 0xFF;
+				break;
+			}
+			/* XXX handle invalid sz */
 			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 4:
-			*data = viombh.actual;
+			switch (sz) {
+			case 4:
+				*data = (uint32_t)(viombh.actual);
+				break;
+			case 2:
+				*data &= 0xFFFF0000;
+				*data |= (uint32_t)(viombh.actual) & 0xFFFF;
+				break;
+			case 1:
+				*data &= 0xFFFFFF00;
+				*data |= (uint32_t)(viombh.actual) & 0xFF;
+				break;
+			}
+			/* XXX handle invalid sz */
 			break;
 		}
 	}
