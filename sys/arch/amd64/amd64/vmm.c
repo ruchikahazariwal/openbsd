@@ -566,7 +566,7 @@ vm_inflate_balloon(struct vm_inflate_balloon_params *vibp)
 			    __func__,
 			    (uint64_t)(vibp->vibp_buf_bl_pages[i] * PAGE_SIZE));
 			 /* XXX
-			 virtual page from VM should be in pmap, 
+			 virtual page from VM should be in pmap,
 			 but still are not synced up. It nees a fix
 			 */
 			continue;
