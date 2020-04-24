@@ -565,6 +565,10 @@ vm_inflate_balloon(struct vm_inflate_balloon_params *vibp)
 			printf("%s: unable to extract HPA for GPA 0x%llx\n",
 			    __func__,
 			    (uint64_t)(vibp->vibp_buf_bl_pages[i] * PAGE_SIZE));
+			 /* XXX
+			 virtual page from VM should be in pmap, 
+			 but still are not synced up. It nees a fix
+			 */
 			continue;
 		}
 		printf("%s: GPA: 0x%llx -> HPA 0x%llx\n", __func__,
