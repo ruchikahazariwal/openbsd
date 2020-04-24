@@ -369,7 +369,8 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				break;
 			}
 			/* XXX handle invalid sz */
-			printf("%s: updating viombh.actual to: %u\n",__func__,viombh.actual);
+			printf("%s: updating viombh.actual to: %u \n", __func__,
+				viombh.actual);
 			break;
 		}
 	} else {
