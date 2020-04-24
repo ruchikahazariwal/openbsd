@@ -351,7 +351,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				viombh.vq[2].last_avail = 0;
 				viombh.num_pages = 0;
 				viombh.actual = 0;
-				vcpu_deassert_pic_irq(viombh.vm_id, 0, viombh.irq);
+				//vcpu_deassert_pic_irq(viombh.vm_id, 0, viombh.irq);
 			}
 			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 4:
