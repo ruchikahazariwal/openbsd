@@ -551,8 +551,8 @@ struct vm_inswap_balloon {
 struct vm_inflate_balloon_params {
 	/* Input parameters to VMM_IOC_BALLOON_INFLATE */
 	uint32_t		vibp_vm_id;
-	uint32_t		buf_bl_pglist[BALLOON_MAX_PAGES];
-	size_t 			bl_pglist_sz;
+	uint32_t		vibp_buf_bl_pages[BALLOON_MAX_PAGES];
+	size_t 			vibp_bl_pages_sz;
 };
 
 #define VM_RWVMPARAMS_PVCLOCK_SYSTEM_GPA 0x1	/* read/write pvclock gpa */
