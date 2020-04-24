@@ -451,7 +451,7 @@ viomb_inflate(struct viomb_softc *sc)
 	virtio_enqueue_p(vq, slot, b->bl_dmamap, 0,
 			 sizeof(u_int32_t) * nvpages, VRING_READ);
 
-	sc->sc_actual = sc->sc_actual + nvpages;
+	//sc->sc_actual = sc->sc_actual + nvpages;
 	printf("virtio_write_device_config_4 updating actual: %d \n", sc->sc_actual);
 	// virtio_write_device_config_4(vsc, VIRTIO_BALLOON_CONFIG_ACTUAL,
 	// 	sc->sc_actual);
