@@ -145,8 +145,6 @@ struct uvmexp {
 
 	int fpswtch;	/* FPU context switches */
 	int kmapent;	/* number of kernel map entries */
-
-	int inswap;     /* set to 1 when the swapper is activated */
 };
 
 struct _ps_strings {

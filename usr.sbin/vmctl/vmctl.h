@@ -38,7 +38,7 @@ enum actions {
 	CMD_UNPAUSE,
 	CMD_SEND,
 	CMD_RECEIVE,
-	CMD_GETSTATS
+	CMD_BALLOON
 };
 
 struct ctl_command;
@@ -107,6 +107,8 @@ void	 unpause_vm(uint32_t, const char *);
 int	 unpause_vm_complete(struct imsg *, int *);
 void	 send_vm(uint32_t, const char *);
 void	 vm_receive(uint32_t, const char *);
+int	 vm_balloon(uint32_t, const char *, int);
+int	 vm_balloon_complete(struct imsg *, int *);
 int	 check_info_id(const char *, uint32_t);
 void	 get_info_vm(uint32_t, const char *, enum actions, unsigned int);
 int	 add_info(struct imsg *, int *);
@@ -116,7 +118,6 @@ void	 print_vm_info(struct vmop_info_result *, size_t);
 void	 terminate_all(struct vmop_info_result *, size_t, unsigned int);
 __dead void
 	 vm_console(struct vmop_info_result *, size_t);
-void vm_getStats(uint32_t start_id, const char *name, enum actions action);
 void get_num_vm(struct imsg *imsg, int *ret);
 
 #endif /* VMCTL_PARSER_H */

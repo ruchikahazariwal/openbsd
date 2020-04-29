@@ -49,6 +49,72 @@ char info_name[VMM_MAX_NAME_LEN];
 enum actions info_action;
 unsigned int info_flags;
 
+int
+vm_balloon(uint32_t vm_id, const char *name, int memsize)
+{
+	struct vmop_balloon_params *vbp;
+	const char *s;
+
+	if ((vbp = calloc(1, sizeof(struct vmop_balloon_params))) == NULL)
+		return (ENOMEM);
+
+	if (name != NULL) {
+		/*
+		 * Allow VMs names with alphanumeric characters, dot, hyphen
+		 * and underscore. But disallow dot, hyphen and underscore at
+		 * the start.
+		 */
+		if (*name == '-' || *name == '.' || *name == '_')
+			errx(1, "invalid VM name");
+
+		for (s = name; *s != '\0'; ++s) {
+			if (!(isalnum(*s) || *s == '.' || *s == '-' ||
+			    *s == '_'))
+				errx(1, "invalid VM name");
+		}
+
+		if (strlcpy(vbp->vbp_name, name,
+		    sizeof(vbp->vbp_name)) >= sizeof(vbp->vbp_name))
+			errx(1, "vm name too long");
+	}
+
+	vbp->vbp_id = vm_id;
+	vbp->vbp_memsize = memsize;
+
+	imsg_compose(ibuf, IMSG_VMDOP_BALLOON_VM_REQUEST, 0, 0, -1,
+	    vbp, sizeof(struct vmop_balloon_params));
+
+	free(vbp);
+
+	return (0);
+}
+
+int
+vm_balloon_complete(struct imsg *imsg, int *ret)
+{
+	struct vmop_result *vmr;
+	int res;
+
+	if (imsg->hdr.type == IMSG_VMDOP_BALLOON_VM_RESPONSE) {
+		vmr = (struct vmop_result *)imsg->data;
+		res = vmr->vmr_result;
+		if (res) {
+			errno = res;
+			warn("balloon vm command failed");
+			*ret = EIO;
+		} else {
+			warnx("balloon adjusted on vm %d successfully",
+			    vmr->vmr_id);
+			*ret = 0;
+		}
+	} else {
+		warnx("unexpected response received from vmd");
+		*ret = EINVAL;
+	}
+
+	return (1);
+}
+
 /*
  * vm_start
  *
@@ -153,6 +219,7 @@ vm_start(uint32_t start_id, const char *name, int memsize, int nnics,
 				errx(1, "interface name too long");
 		}
 	}
+
 	if (name != NULL) {
 		/*
 		 * Allow VMs names with alphanumeric characters, dot, hyphen
@@ -953,85 +1020,3 @@ create_imagefile(int type, const char *imgfile_path, const char *base_path,
 
 	return (ret);
 }
-
-// vmctl get memory status information from VMs
-void
-vm_getStats(uint32_t start_id, const char *name, enum actions action)
-{
-	struct vmop_id vid;
-
-	memset(&vid, 0, sizeof(vid));
-	vid.vid_id = start_id;
-	if (name != NULL) {
-		(void)strlcpy(vid.vid_name, name, sizeof(vid.vid_name));
-		fprintf(stderr, "getting memory statistics of VM %s: ", name);
-	} else {
-		fprintf(stderr, "getting memory statistics of all VMs: ");
-	}
-
-	imsg_compose(ibuf,  IMSG_VMDOP_GET_VM_STATS_REQUEST,
-	    0, 0, -1, &vid, sizeof(vid));
-}
-
-void
-get_num_vm(struct imsg *imsg, int *ret)
-{
-	static size_t ct = 0;
-	static struct vmop_info_result *vir = NULL;
-
-	if (imsg->hdr.type == IMSG_VMDOP_GET_VM_STATS_RESPONSE) {
-		vir = reallocarray(vir, ct + 1,
-		    sizeof(struct vmop_info_result));
-		if (vir == NULL) {
-			*ret = ENOMEM;
-			return;
-		}
-		memcpy(&vir[ct], imsg->data, sizeof(struct vmop_info_result));
-		ct++;
-		*ret = 0;
-		return;
-	} else if (imsg->hdr.type == IMSG_VMDOP_GET_VM_STATS_END_RESPONSE) {
-		switch (info_action) {
-		case CMD_CONSOLE:
-			vm_console(vir, ct);
-			break;
-		case CMD_STOPALL:
-			terminate_all(vir, ct, info_flags);
-			break;
-		default:
-			print_vm_info(vir, ct);
-			break;
-		}
-		free(vir);
-		*ret = 0;
-		return;
-	} else {
-		*ret = EINVAL;
-		return;
-	}
-	// static size_t ct = 0;
-	// static struct vmop_info_result *vir = NULL;
-	// vm_counter = -1;
-
-	// printf("CMPE imsg header type - %d", imsg->hdr.type);
-
-	// if (imsg->hdr.type == IMSG_VMDOP_GET_INFO_VM_DATA) {
-	// 	vir = reallocarray(vir, ct + 1,
-	// 	    sizeof(struct vmop_info_result));
-	// 	if (vir == NULL) {
-	// 		*ret = ENOMEM;
-	// 	}
-	// 	else {
-	// 		memcpy(&vir[ct], imsg->data, sizeof(struct vmop_info_result));
-	// 		ct++;
-	// 		*ret = 0;
-	// 		vm_counter = ct;
-	// 		printf("CMPE imsg after counter - %d", vm_counter);
-	// 	}
-	// }
-	// else {
-	// 	*ret = 0;
-	// 	printf("CMPE imsg counter - %zu", ct);
-	// }
-}
-

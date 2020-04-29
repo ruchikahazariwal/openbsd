@@ -109,9 +109,6 @@ enum imsg_type {
 	IMSG_VMDOP_GET_INFO_VM_REQUEST,
 	IMSG_VMDOP_GET_INFO_VM_DATA,
 	IMSG_VMDOP_GET_INFO_VM_END_DATA,
-	IMSG_VMDOP_GET_VM_STATS_REQUEST,
-	IMSG_VMDOP_GET_VM_STATS_RESPONSE,
-	IMSG_VMDOP_GET_VM_STATS_END_RESPONSE,
 	IMSG_VMDOP_LOAD,
 	IMSG_VMDOP_RELOAD,
 	IMSG_VMDOP_PRIV_IFDESCR,
@@ -126,6 +123,8 @@ enum imsg_type {
 	IMSG_VMDOP_VM_SHUTDOWN,
 	IMSG_VMDOP_VM_REBOOT,
 	IMSG_VMDOP_CONFIG,
+	IMSG_VMDOP_BALLOON_VM_REQUEST,
+	IMSG_VMDOP_BALLOON_VM_RESPONSE,
 	IMSG_VMDOP_DONE
 };
 
@@ -164,6 +163,13 @@ struct vmop_ifreq {
 struct vmop_owner {
 	uid_t			 uid;
 	int64_t			 gid;
+};
+
+struct vmop_balloon_params {
+	uid_t			vbp_uid;
+	uint32_t		vbp_id;
+	char			vbp_name[VMM_MAX_NAME_LEN];
+	uint32_t		vbp_memsize;
 };
 
 struct vmop_create_params {

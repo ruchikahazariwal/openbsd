@@ -94,7 +94,6 @@ void restore_mem(int, struct vm_create_params *);
 int restore_vm_params(int, struct vm_create_params *);
 void pause_vm(struct vm_create_params *);
 void unpause_vm(struct vm_create_params *);
-void *vm_balloon_thread_fn(void *p);
 
 int translate_gva(struct vm_exit*, uint64_t, uint64_t *, int);
 
@@ -118,8 +117,6 @@ pthread_cond_t vcpu_unpause_cond[VMM_MAX_VCPUS_PER_VM];
 pthread_mutex_t vcpu_unpause_mtx[VMM_MAX_VCPUS_PER_VM];
 uint8_t vcpu_hlt[VMM_MAX_VCPUS_PER_VM];
 uint8_t vcpu_done[VMM_MAX_VCPUS_PER_VM];
-
-pthread_t balloon_thread;
 
 /*
  * Represents a standard register set for an OS to be booted
@@ -248,33 +245,6 @@ loadfile_bios(FILE *fp, struct vcpu_reg_state *vrs)
 	log_debug("%s: loaded BIOS image", __func__);
 
 	return (0);
-}
-
-void *
-vm_balloon_thread_fn(void *p)
-{
-	struct vm_inswap_balloon vib;
-	struct vmd_vm *vm = (struct vmd_vm *)p;
-	int ct = 0;
-
-	log_debug("created balloon monitor thread");
-	memset(&vib, 0, sizeof(vib));
-
-	for (;;) {
-		ct++;
-		sleep(1);
-		if (ioctl(env->vmd_fd, VMM_IOC_BALLOON, &vib) == -1) {
-			log_warn("balloon ioctl failed: %s",
-			    strerror(errno));
-		} else if (vib.vib_host_is_swapping || ct > 120 ) {
-			log_debug("host in swap, requesting inflate");
-			viombh_send_inflate_request(vm);
-		} else {
-			log_debug("host not in swap");
-		}
-	}
-
-	return (NULL);
 }
 
 /*
@@ -408,8 +378,6 @@ start_vm(struct vmd_vm *vm, int fd)
 	if (vmm_pipe(vm, fd, vm_dispatch_vmm) == -1)
 		fatal("setup vm pipe");
 
-	pthread_create(&balloon_thread, NULL, vm_balloon_thread_fn, vm);
-
 	/* Execute the vcpu run loop(s) for this VM */
 	ret = run_vm(vm->vm_cdrom, vm->vm_disks, nicfds, &vm->vm_params, &vrs);
 
@@ -434,6 +402,7 @@ vm_dispatch_vmm(int fd, short event, void *arg)
 	struct imsg		 imsg;
 	ssize_t			 n;
 	int			 verbose;
+	struct vmop_balloon_params vbp;
 
 	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1 && errno != EAGAIN)
@@ -474,6 +443,16 @@ vm_dispatch_vmm(int fd, short event, void *arg)
 		case IMSG_VMDOP_VM_REBOOT:
 			if (vmmci_ctl(VMMCI_REBOOT) == -1)
 				_exit(0);
+			break;
+		case IMSG_VMDOP_BALLOON_VM_REQUEST:
+			memcpy(&vbp, imsg.data, sizeof(vbp));
+			vmr.vmr_result = 0;
+			vmr.vmr_id = vm->vm_vmid;
+			balloon_vm(vm, vbp.vbp_memsize / PAGE_SIZE);
+			imsg_compose_event(&vm->vm_iev,
+			    IMSG_VMDOP_BALLOON_VM_RESPONSE,
+			    imsg.hdr.peerid, imsg.hdr.pid, -1, &vmr,
+			    sizeof(vmr));
 			break;
 		case IMSG_VMDOP_PAUSE_VM:
 			vmr.vmr_result = 0;

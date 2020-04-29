@@ -126,7 +126,6 @@ int vm_intr_pending(struct vm_intr_params *);
 int vm_rwregs(struct vm_rwregs_params *, int);
 int vm_mprotect_ept(struct vm_mprotect_ept_params *);
 int vm_rwvmparams(struct vm_rwvmparams_params *, int);
-int vm_get_balloon_info(struct vm_inswap_balloon *);
 int vm_inflate_balloon(struct vm_inflate_balloon_params *);
 int vm_find(uint32_t, struct vm **);
 int vcpu_readregs_vmx(struct vcpu *, uint64_t, struct vcpu_reg_state *);
@@ -508,9 +507,6 @@ vmmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	case VMM_IOC_WRITEVMPARAMS:
 		ret = vm_rwvmparams((struct vm_rwvmparams_params *)data, 1);
 		break;
-	case VMM_IOC_BALLOON:
-		ret = vm_get_balloon_info((struct vm_inswap_balloon *)data);
-		break;
 	case VMM_IOC_BALLOON_INFLATE:
 		ret = vm_inflate_balloon((struct vm_inflate_balloon_params *)data);
 		break;
@@ -520,14 +516,6 @@ vmmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	}
 
 	return (ret);
-}
-
-int
-vm_get_balloon_info(struct vm_inswap_balloon *vib)
-{
-	vib->vib_host_is_swapping = uvmexp.inswap;
-
-	return vib->vib_host_is_swapping;
 }
 
 /*
@@ -619,7 +607,6 @@ pledge_ioctl_vmm(struct proc *p, long com)
 	case VMM_IOC_MPROTECT_EPT:
 	case VMM_IOC_READVMPARAMS:
 	case VMM_IOC_WRITEVMPARAMS:
-	case VMM_IOC_BALLOON:
 	case VMM_IOC_BALLOON_INFLATE:
 		return (0);
 	}
