@@ -197,16 +197,13 @@ viombh_notifyq(void)
 	size_t sz;
 	int ret;
 	uint32_t i;
-	uint32_t *buf_pglist;
-	//struct vm_page *buf_vm_pages;
-	//struct pglist *host_bl_pglist;
+	uint32_t *buf_bl_pages;
 	uint16_t aidx, uidx;
 	char *buf;
 	struct vring_desc *desc;
 	struct vring_avail *avail;
 	struct vring_used *used;
 	struct vm_inflate_balloon_params vibp;
-	//struct vm_page *p;
 
 	ret = 0;
 
@@ -240,15 +237,12 @@ viombh_notifyq(void)
 
 	sz = desc[avail->ring[aidx]].len;
 
-	printf("size of the desc: %zu", sz);
-
 	printf("%s: being called for %d queue\n", __func__, viombh.cfg.queue_notify);
 	if (viombh.cfg.queue_notify == 0) // inflate queue
 	{
-		buf_pglist = calloc(1, sz);
-		//buf_vm_pages = calloc(1, sizeof(struct vm_page) * (sz / 4));
+		buf_bl_pages = calloc(1, sz);
 
-		if (read_mem(desc[avail->ring[aidx]].addr, buf_pglist, sz)) {
+		if (read_mem(desc[avail->ring[aidx]].addr, buf_bl_pages, sz)) {
 			printf("error from %s", __func__);
 			goto out;
 		}
@@ -256,13 +250,13 @@ viombh_notifyq(void)
 		memset(&vibp, 0, sizeof(vibp));
 
 		for (i = 0; i < (sz / 4); i++) {
-			printf("%s: got page number 0x%llx from vm for inflate\n"
-			    "%d/%llu", __func__, (uint64_t)buf_pglist[i],
+			printf("%s: got page number 0x%llx from vm for inflate"
+			    "%d/%llu\n", __func__, (uint64_t)buf_bl_pages[i],
 			    i, (uint64_t)(sz / 4));
-			vibp.buf_bl_pglist[i] = (uint64_t)buf_pglist[i];
+			vibp.vibp_buf_bl_pages[i] = (uint64_t)buf_bl_pages[i];
 		}
 
-		vibp.bl_pglist_sz = sz;
+		vibp.vibp_bl_pages_sz = sz/4;
 		vibp.vibp_vm_id = viombh.vm_id;
 
 		if (ioctl(env->vmd_fd, VMM_IOC_BALLOON_INFLATE, &vibp) == -1) {
@@ -276,14 +270,14 @@ viombh_notifyq(void)
 		used->ring[uidx].id = avail->ring[aidx] &
 			VIOMBH_QUEUE_MASK;
 		used->ring[uidx].len = desc[avail->ring[aidx]].len;
-			used->idx++;
+		used->idx++;
 
 		if (write_mem(q_gpa, buf, vr_sz)) {
 			log_warnx("viombh: error writing vio ring");
 		}
 
 		free(buf);
-		free(buf_pglist);
+		free(buf_bl_pages);
 	}
 	else if (viombh.cfg.queue_notify == 1) // deflate queue
 	{
@@ -294,14 +288,10 @@ viombh_notifyq(void)
 
 	}
 
-	// free the pages via another vmm ioctl (TBD)
-
-	/* ret == 1 -> interrupt needed */
-	/* XXX check VIRTIO_F_NO_INTR */
-
 	return (ret);
 out:
-	free(buf_pglist);
+	free(buf);
+	free(buf_bl_pages);
 	return (ret);
 }
 
@@ -317,7 +307,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 {
 	*intr = 0xFF;
 
-	printf("%s: reg: %u\n", __func__, reg);
+	printf("%s: reg: %u size: %u\n", __func__, reg, sz);
 
 	// dir == 0 means writing
 	if (dir == 0) {
@@ -346,10 +336,41 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 			break;
 		case VIRTIO_CONFIG_DEVICE_STATUS:
 			viombh.cfg.device_status = *data;
+			if (viombh.cfg.device_status == 0) {
+				log_debug("%s: device reset", __func__);
+				viombh.cfg.guest_feature = 0;
+				viombh.cfg.queue_address = 0;
+				viombh_update_qa();
+				viombh.cfg.queue_size = 0;
+				viombh_update_qs();
+				viombh.cfg.queue_select = 0;
+				viombh.cfg.queue_notify = 0;
+				viombh.cfg.isr_status = 0;
+				viombh.vq[0].last_avail = 0;
+				viombh.vq[1].last_avail = 0;
+				viombh.vq[2].last_avail = 0;
+				viombh.num_pages = 0;
+				viombh.actual = 0;
+				//vcpu_deassert_pic_irq(viombh.vm_id, 0, viombh.irq);
+			}
 			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 4:
-			viombh.actual = *data;
-			printf("Driver updates Device actual: %d \n", viombh.actual);
+			switch (sz) {
+			case 4:
+				viombh.actual = (uint32_t)(*data);
+				break;
+			case 2:
+				viombh.actual &= 0xFFFF0000;
+				viombh.actual |= (uint32_t)(*data) & 0xFFFF;
+				break;
+			case 1:
+				viombh.actual &= 0xFFFFFF00;
+				viombh.actual |= (uint32_t)(*data) & 0xFF;
+				break;
+			}
+			/* XXX handle invalid sz */
+			printf("%s: updating viombh.actual to: %u \n", __func__,
+				viombh.actual);
 			break;
 		}
 	} else {
@@ -381,10 +402,36 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 			vcpu_deassert_pic_irq(viombh.vm_id, 0, viombh.irq);
 			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI:
-			*data = viombh.num_pages;
+			switch (sz) {
+			case 4:
+				*data = (uint32_t)(viombh.num_pages);
+				break;
+			case 2:
+				*data &= 0xFFFF0000;
+				*data |= (uint32_t)(viombh.num_pages) & 0xFFFF;
+				break;
+			case 1:
+				*data &= 0xFFFFFF00;
+				*data |= (uint32_t)(viombh.num_pages) & 0xFF;
+				break;
+			}
+			/* XXX handle invalid sz */
 			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 4:
-			*data = viombh.actual;
+			switch (sz) {
+			case 4:
+				*data = (uint32_t)(viombh.actual);
+				break;
+			case 2:
+				*data &= 0xFFFF0000;
+				*data |= (uint32_t)(viombh.actual) & 0xFFFF;
+				break;
+			case 1:
+				*data &= 0xFFFFFF00;
+				*data |= (uint32_t)(viombh.actual) & 0xFF;
+				break;
+			}
+			/* XXX handle invalid sz */
 			break;
 		}
 	}
@@ -2693,7 +2740,7 @@ int doInflateOnce = 0;
 
 /* move below into separate file XXX */
 void
-viombh_do_inflate(struct vmd_vm *vm)
+viombh_send_inflate_request(struct vmd_vm *vm)
 {
 	viombh.num_pages = 10;
 

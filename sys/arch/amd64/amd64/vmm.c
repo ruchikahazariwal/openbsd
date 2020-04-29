@@ -41,7 +41,7 @@
 #include <dev/isa/isareg.h>
 #include <dev/pv/pvreg.h>
 
-#define VMM_DEBUG
+/* #define VMM_DEBUG */
 
 void *l1tf_flush_region;
 
@@ -555,30 +555,33 @@ vm_inflate_balloon(struct vm_inflate_balloon_params *vibp)
 
 	pmap = vm->vm_map->pmap;
 
-	for (i = 0; i < (vibp->bl_pglist_sz / 4); i++) {
+	for (i = 0; i < vibp->vibp_bl_pages_sz; i++) {
 		printf("%s: got GPPN 0x%llx from vm for inflate "
-		    "%d/%llu\n", __func__, (uint64_t)vibp->buf_bl_pglist[i], i,
-		    (uint64_t)(vibp->bl_pglist_sz / 4));
+		    "%d/%llu\n", __func__, (uint64_t)vibp->vibp_buf_bl_pages[i], i,
+		    (uint64_t)(vibp->vibp_bl_pages_sz));
 
-		if (!pmap_extract(pmap, (vibp->buf_bl_pglist[i] * PAGE_SIZE),
+		if (!pmap_extract(pmap, (vibp->vibp_buf_bl_pages[i] * PAGE_SIZE),
 		    (paddr_t *)&hpa)) {
 			printf("%s: unable to extract HPA for GPA 0x%llx\n",
 			    __func__,
-			    (uint64_t)(vibp->buf_bl_pglist[i] * PAGE_SIZE));
+			    (uint64_t)(vibp->vibp_buf_bl_pages[i] * PAGE_SIZE));
+			 /* XXX
+			 virtual page from VM should be in pmap,
+			 but still are not synced up. It nees a fix
+			 */
 			continue;
 		}
-
 		printf("%s: GPA: 0x%llx -> HPA 0x%llx\n", __func__,
-		    (uint64_t)(vibp->buf_bl_pglist[i] * PAGE_SIZE),
+		    (uint64_t)(vibp->vibp_buf_bl_pages[i] * PAGE_SIZE),
 		    hpa);
 
 		p = PHYS_TO_VM_PAGE(hpa);
 
 		printf("%s: removing EPT entry for GPA 0x%llx\n",
 		    __func__,
-		    (uint64_t)(vibp->buf_bl_pglist[i] * PAGE_SIZE));
-		pmap_remove(pmap, (vibp->buf_bl_pglist[i] * PAGE_SIZE),
-		    ((vibp->buf_bl_pglist[i] + 1) * PAGE_SIZE));
+		    (uint64_t)(vibp->vibp_buf_bl_pages[i] * PAGE_SIZE));
+		pmap_remove(pmap, (vibp->vibp_buf_bl_pages[i] * PAGE_SIZE),
+		    ((vibp->vibp_buf_bl_pages[i] + 1) * PAGE_SIZE));
 
 		printf("%s: freeing vm_page 0x%llx\n", __func__,
 		    (uint64_t)p);
