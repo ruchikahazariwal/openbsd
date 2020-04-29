@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmm.c,v 1.271 2020/04/08 07:39:48 pd Exp $	*/
+/*	$OpenBSD: vmm.c,v 1.273 2020/04/19 19:29:52 krw Exp $	*/
 /*
  * Copyright (c) 2014 Mike Larkin <mlarkin@openbsd.org>
  *
@@ -41,7 +41,7 @@
 #include <dev/isa/isareg.h>
 #include <dev/pv/pvreg.h>
 
-#define VMM_DEBUG
+/* #define VMM_DEBUG */
 
 void *l1tf_flush_region;
 
@@ -126,7 +126,6 @@ int vm_intr_pending(struct vm_intr_params *);
 int vm_rwregs(struct vm_rwregs_params *, int);
 int vm_mprotect_ept(struct vm_mprotect_ept_params *);
 int vm_rwvmparams(struct vm_rwvmparams_params *, int);
-int vm_get_balloon_info(struct vm_inswap_balloon *);
 int vm_inflate_balloon(struct vm_inflate_balloon_params *);
 int vm_find(uint32_t, struct vm **);
 int vcpu_readregs_vmx(struct vcpu *, uint64_t, struct vcpu_reg_state *);
@@ -508,9 +507,6 @@ vmmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	case VMM_IOC_WRITEVMPARAMS:
 		ret = vm_rwvmparams((struct vm_rwvmparams_params *)data, 1);
 		break;
-	case VMM_IOC_BALLOON:
-		ret = vm_get_balloon_info((struct vm_inswap_balloon *)data);
-		break;
 	case VMM_IOC_BALLOON_INFLATE:
 		ret = vm_inflate_balloon((struct vm_inflate_balloon_params *)data);
 		break;
@@ -520,14 +516,6 @@ vmmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	}
 
 	return (ret);
-}
-
-int
-vm_get_balloon_info(struct vm_inswap_balloon *vib)
-{
-	vib->vib_host_is_swapping = uvmexp.inswap;
-
-	return vib->vib_host_is_swapping;
 }
 
 /*
@@ -555,30 +543,33 @@ vm_inflate_balloon(struct vm_inflate_balloon_params *vibp)
 
 	pmap = vm->vm_map->pmap;
 
-	for (i = 0; i < (vibp->bl_pglist_sz / 4); i++) {
+	for (i = 0; i < vibp->vibp_bl_pages_sz; i++) {
 		printf("%s: got GPPN 0x%llx from vm for inflate "
-		    "%d/%llu\n", __func__, (uint64_t)vibp->buf_bl_pglist[i], i,
-		    (uint64_t)(vibp->bl_pglist_sz / 4));
+		    "%d/%llu\n", __func__, (uint64_t)vibp->vibp_buf_bl_pages[i], i,
+		    (uint64_t)(vibp->vibp_bl_pages_sz));
 
-		if (!pmap_extract(pmap, (vibp->buf_bl_pglist[i] * PAGE_SIZE),
+		if (!pmap_extract(pmap, (vibp->vibp_buf_bl_pages[i] * PAGE_SIZE),
 		    (paddr_t *)&hpa)) {
 			printf("%s: unable to extract HPA for GPA 0x%llx\n",
 			    __func__,
-			    (uint64_t)(vibp->buf_bl_pglist[i] * PAGE_SIZE));
+			    (uint64_t)(vibp->vibp_buf_bl_pages[i] * PAGE_SIZE));
+			 /* XXX
+			 virtual page from VM should be in pmap,
+			 but still are not synced up. It nees a fix
+			 */
 			continue;
 		}
-
 		printf("%s: GPA: 0x%llx -> HPA 0x%llx\n", __func__,
-		    (uint64_t)(vibp->buf_bl_pglist[i] * PAGE_SIZE),
+		    (uint64_t)(vibp->vibp_buf_bl_pages[i] * PAGE_SIZE),
 		    hpa);
 
 		p = PHYS_TO_VM_PAGE(hpa);
 
 		printf("%s: removing EPT entry for GPA 0x%llx\n",
 		    __func__,
-		    (uint64_t)(vibp->buf_bl_pglist[i] * PAGE_SIZE));
-		pmap_remove(pmap, (vibp->buf_bl_pglist[i] * PAGE_SIZE),
-		    ((vibp->buf_bl_pglist[i] + 1) * PAGE_SIZE));
+		    (uint64_t)(vibp->vibp_buf_bl_pages[i] * PAGE_SIZE));
+		pmap_remove(pmap, (vibp->vibp_buf_bl_pages[i] * PAGE_SIZE),
+		    ((vibp->vibp_buf_bl_pages[i] + 1) * PAGE_SIZE));
 
 		printf("%s: freeing vm_page 0x%llx\n", __func__,
 		    (uint64_t)p);
@@ -616,7 +607,6 @@ pledge_ioctl_vmm(struct proc *p, long com)
 	case VMM_IOC_MPROTECT_EPT:
 	case VMM_IOC_READVMPARAMS:
 	case VMM_IOC_WRITEVMPARAMS:
-	case VMM_IOC_BALLOON:
 	case VMM_IOC_BALLOON_INFLATE:
 		return (0);
 	}
@@ -4526,7 +4516,7 @@ vmm_translate_gva(struct vcpu *vcpu, uint64_t va, uint64_t *pa, int mode)
 		}
 	}
 
-	low_mask = (1 << shift) - 1;
+	low_mask = ((uint64_t)1ULL << shift) - 1;
 	high_mask = (((uint64_t)1ULL << ((pte_size * 8) - 1)) - 1) ^ low_mask;
 	*pa = (pte & high_mask) | (va & low_mask);
 
@@ -5493,6 +5483,7 @@ vmx_get_guest_faulttype(void)
 	if (exit_qual & IA32_VMX_EPT_FAULT_WAS_EXECABLE)
 		was_prot |= PROT_EXEC;
 
+	prot = 0;
 	if (exit_qual & IA32_VMX_EPT_FAULT_READ)
 		prot = PROT_READ;
 	else if (exit_qual & IA32_VMX_EPT_FAULT_WRITE)

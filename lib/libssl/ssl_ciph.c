@@ -1,4 +1,4 @@
-/* $OpenBSD: ssl_ciph.c,v 1.113 2020/04/09 17:54:38 jsing Exp $ */
+/* $OpenBSD: ssl_ciph.c,v 1.117 2020/04/19 14:54:14 jsing Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -395,6 +395,28 @@ static const SSL_CIPHER cipher_aliases[] = {
 		.name = SSL_TXT_TLSV1_3,
 		.algorithm_ssl = SSL_TLSV1_3,
 	},
+
+	/* cipher suite aliases */
+#ifdef LIBRESSL_HAS_TLS1_3
+	{
+		.valid = 1,
+		.name = "TLS_AES_128_GCM_SHA256",
+		.id = TLS1_3_CK_AES_128_GCM_SHA256,
+		.algorithm_ssl = SSL_TLSV1_3,
+	},
+	{
+		.valid = 1,
+		.name = "TLS_AES_256_GCM_SHA384",
+		.id = TLS1_3_CK_AES_256_GCM_SHA384,
+		.algorithm_ssl = SSL_TLSV1_3,
+	},
+	{
+		.valid = 1,
+		.name = "TLS_CHACHA20_POLY1305_SHA256",
+		.id = TLS1_3_CK_CHACHA20_POLY1305_SHA256,
+		.algorithm_ssl = SSL_TLSV1_3,
+	},
+#endif
 
 	/* strength classes */
 	{
@@ -961,7 +983,8 @@ ssl_cipher_process_rulestr(const char *rule_str, CIPHER_ORDER **head_p,
 			while (((ch >= 'A') && (ch <= 'Z')) ||
 			    ((ch >= '0') && (ch <= '9')) ||
 			    ((ch >= 'a') && (ch <= 'z')) ||
-			    (ch == '-') || (ch == '.')) {
+			    (ch == '-') || (ch == '.') ||
+			    (ch == '_')) {
 				ch = *(++l);
 				buflen++;
 			}
@@ -1171,6 +1194,7 @@ ssl_create_cipher_list(const SSL_METHOD *ssl_method,
 	CIPHER_ORDER *co_list = NULL, *head = NULL, *tail = NULL, *curr;
 	const SSL_CIPHER **ca_list = NULL;
 	int tls13_seen = 0;
+	int any_active;
 
 	/*
 	 * Return with error if nothing to do.
@@ -1274,9 +1298,8 @@ ssl_create_cipher_list(const SSL_METHOD *ssl_method,
 		SSLerrorx(ERR_R_MALLOC_FAILURE);
 		return(NULL);	/* Failure */
 	}
-	ssl_cipher_collect_aliases(ca_list, num_of_group_aliases,
-	disabled_mkey, disabled_auth, disabled_enc,
-	disabled_mac, disabled_ssl, head);
+	ssl_cipher_collect_aliases(ca_list, num_of_group_aliases, disabled_mkey,
+	    disabled_auth, disabled_enc, disabled_mac, disabled_ssl, head);
 
 	/*
 	 * If the rule_string begins with DEFAULT, apply the default rule
@@ -1320,13 +1343,19 @@ ssl_create_cipher_list(const SSL_METHOD *ssl_method,
 	 * If the rule string did not contain any references to TLSv1.3,
 	 * include inactive TLSv1.3 cipher suites. This avoids attempts to
 	 * use TLSv1.3 with an older rule string that does not include
-	 * TLSv1.3 cipher suites.
+	 * TLSv1.3 cipher suites. If the rule string resulted in no active
+	 * cipher suites then we return an empty stack.
 	 */
+	any_active = 0;
 	for (curr = head; curr != NULL; curr = curr->next) {
 		if (curr->active ||
 		    (!tls13_seen && curr->cipher->algorithm_ssl == SSL_TLSV1_3))
 			sk_SSL_CIPHER_push(cipherstack, curr->cipher);
+		any_active |= curr->active;
 	}
+	if (!any_active)
+		sk_SSL_CIPHER_zero(cipherstack);
+
 	free(co_list);	/* Not needed any longer */
 
 	tmp_cipher_list = sk_SSL_CIPHER_dup(cipherstack);

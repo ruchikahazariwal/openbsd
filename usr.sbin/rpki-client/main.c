@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.61 2020/04/01 14:15:49 claudio Exp $ */
+/*	$OpenBSD: main.c,v 1.65 2020/04/23 12:55:44 benno Exp $ */
 /*
  * Copyright (c) 2019 Kristaps Dzonsons <kristaps@bsd.lv>
  *
@@ -1248,11 +1248,6 @@ out:
 
 	free(b);
 
-	EVP_cleanup();
-	CRYPTO_cleanup_all_ex_data();
-	ERR_remove_state(0);
-	ERR_free_strings();
-
 	exit(rc);
 }
 
@@ -1409,9 +1404,9 @@ main(int argc, char *argv[])
 		    setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid) == -1)
 			err(1, "unable to revoke privs");
 
-		cachedir = RPKI_PATH_BASE_DIR;
-		outputdir = RPKI_PATH_OUT_DIR;
 	}
+	cachedir = RPKI_PATH_BASE_DIR;
+	outputdir = RPKI_PATH_OUT_DIR;
 
 	if (pledge("stdio rpath wpath cpath fattr proc exec unveil", NULL) == -1)
 		err(1, "pledge");
@@ -1693,6 +1688,6 @@ usage:
 	fprintf(stderr,
 	    "usage: rpki-client [-Bcfjnov] [-b sourceaddr] [-d cachedir]"
 	    " [-e rsync_prog]\n"
-	    "            [-T table] [-t tal] [outputdir]\n");
+	    "                   [-T table] [-t tal] [outputdir]\n");
 	return 1;
 }

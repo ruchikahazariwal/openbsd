@@ -82,6 +82,7 @@ control_dispatch_vmd(int fd, struct privsep_proc *p, struct imsg *imsg)
 	struct privsep		*ps = p->p_ps;
 
 	switch (imsg->hdr.type) {
+	case IMSG_VMDOP_BALLOON_VM_RESPONSE:
 	case IMSG_VMDOP_START_VM_RESPONSE:
 	case IMSG_VMDOP_PAUSE_VM_RESPONSE:
 	case IMSG_VMDOP_SEND_VM_RESPONSE:
@@ -308,6 +309,7 @@ control_dispatch_imsg(int fd, short event, void *arg)
 	struct ctl_conn			*c;
 	struct imsg			 imsg;
 	struct vmop_create_params	 vmc;
+	struct vmop_balloon_params	 vbp;
 	struct vmop_id			 vid;
 	int				 n, v, ret = 0;
 
@@ -341,12 +343,12 @@ control_dispatch_imsg(int fd, short event, void *arg)
 
 		switch (imsg.hdr.type) {
 		case IMSG_VMDOP_GET_INFO_VM_REQUEST:
-		case IMSG_VMDOP_GET_VM_STATS_REQUEST:
 		case IMSG_VMDOP_WAIT_VM_REQUEST:
 		case IMSG_VMDOP_TERMINATE_VM_REQUEST:
 		case IMSG_VMDOP_START_VM_REQUEST:
 		case IMSG_VMDOP_PAUSE_VM:
 		case IMSG_VMDOP_UNPAUSE_VM:
+		case IMSG_VMDOP_BALLOON_VM_REQUEST:
 			break;
 		default:
 			if (c->peercred.uid != 0) {
@@ -388,6 +390,18 @@ control_dispatch_imsg(int fd, short event, void *arg)
 			    imsg.data, IMSG_DATA_SIZE(&imsg)) == -1)
 				goto fail;
 			break;
+		case IMSG_VMDOP_BALLOON_VM_REQUEST:
+			if (IMSG_DATA_SIZE(&imsg) < sizeof(vbp))
+				goto fail;
+			memcpy(&vbp, imsg.data, sizeof(vbp));
+			vbp.vbp_uid = c->peercred.uid;
+
+			if (proc_compose_imsg(ps, PROC_PARENT, -1,
+			    imsg.hdr.type, fd, -1, &vbp, sizeof(vbp)) == -1) {
+				control_close(fd, cs);
+				return;
+			}
+			break;
 		case IMSG_VMDOP_START_VM_REQUEST:
 			if (IMSG_DATA_SIZE(&imsg) < sizeof(vmc))
 				goto fail;
@@ -417,15 +431,6 @@ control_dispatch_imsg(int fd, short event, void *arg)
 			}
 			break;
 		case IMSG_VMDOP_GET_INFO_VM_REQUEST:
-			if (IMSG_DATA_SIZE(&imsg) != 0)
-				goto fail;
-			if (proc_compose_imsg(ps, PROC_PARENT, -1,
-			    imsg.hdr.type, fd, -1, NULL, 0) == -1) {
-				control_close(fd, cs);
-				return;
-			}
-			break;
-		case IMSG_VMDOP_GET_VM_STATS_REQUEST:
 			if (IMSG_DATA_SIZE(&imsg) != 0)
 				goto fail;
 			if (proc_compose_imsg(ps, PROC_PARENT, -1,

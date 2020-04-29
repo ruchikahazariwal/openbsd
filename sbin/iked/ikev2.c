@@ -1,4 +1,4 @@
-/*	$OpenBSD: ikev2.c,v 1.215 2020/04/13 19:10:32 tobhe Exp $	*/
+/*	$OpenBSD: ikev2.c,v 1.218 2020/04/23 20:17:48 tobhe Exp $	*/
 
 /*
  * Copyright (c) 2019 Tobias Heider <tobias.heider@stusta.de>
@@ -815,7 +815,8 @@ ikev2_ike_auth_recv(struct iked *env, struct iked_sa *sa,
 		ibuf_release(authmsg);
 
 		if (ret != 0) {
-			log_debug("%s: ikev2_msg_authverify failed", __func__);
+			log_info("%s: ikev2_msg_authverify failed",
+			    SPI_SA(sa, __func__));
 			ikev2_send_auth_failed(env, sa);
 			return (-1);
 		}
@@ -955,7 +956,7 @@ ikev2_init_recv(struct iked *env, struct iked_message *msg,
 	if (ikev2_handle_notifies(env, msg) != 0)
 		return;
 
-	if (sa && msg->msg_nat_detected && sa->sa_natt == 0 &&
+	if (msg->msg_nat_detected && sa->sa_natt == 0 &&
 	    (sock = ikev2_msg_getsocket(env,
 	    sa->sa_local.addr_af, 1)) != NULL) {
 		/*
@@ -5411,6 +5412,7 @@ ikev2_childsa_negotiate(struct iked *env, struct iked_sa *sa,
 			flowa->flow_dir = IPSP_DIRECTION_OUT;
 			flowa->flow_saproto = ic ? IKEV2_SAPROTO_IPCOMP :
 			    prop->prop_protoid;
+			flowa->flow_rdomain = sa->sa_policy->pol_rdomain;
 			flowa->flow_local = &sa->sa_local;
 			flowa->flow_peer = &sa->sa_peer;
 			flowa->flow_ikesa = sa;
@@ -6480,7 +6482,7 @@ ikev2_info_flow(struct iked *env, int dolog, const char *msg, struct iked_flow *
 	int		buflen;
 
 	buflen = asprintf(&buf,
-	    "%s: %p %s %s %s/%d -> %s/%d [%u] (%s) @%p\n", msg, flow,
+	    "%s: %p %s %s %s/%d -> %s/%d [%u]@%d (%s) @%p\n", msg, flow,
 	    print_map(flow->flow_saproto, ikev2_saproto_map),
 	    flow->flow_dir == IPSP_DIRECTION_IN ? "in" : "out",
 	    print_host((struct sockaddr *)&flow->flow_src.addr, NULL, 0),
@@ -6488,6 +6490,7 @@ ikev2_info_flow(struct iked *env, int dolog, const char *msg, struct iked_flow *
 	    print_host((struct sockaddr *)&flow->flow_dst.addr, NULL, 0),
 	    flow->flow_dst.addr_mask,
 	    flow->flow_ipproto,
+	    flow->flow_rdomain,
 	    flow->flow_loaded ? "L" : "",
 	    flow->flow_ikesa);
 

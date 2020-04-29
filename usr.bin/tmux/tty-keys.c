@@ -1,4 +1,4 @@
-/* $OpenBSD: tty-keys.c,v 1.122 2020/01/28 11:39:51 nicm Exp $ */
+/* $OpenBSD: tty-keys.c,v 1.127 2020/04/20 14:59:31 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -61,6 +61,9 @@ struct tty_default_key_raw {
 	key_code	 	key;
 };
 static const struct tty_default_key_raw tty_default_raw_keys[] = {
+	/* Application escape. */
+	{ "\033O[", '\033' },
+
 	/*
 	 * Numeric keypad. Just use the vt100 escape sequences here and always
 	 * put the terminal into keypad_xmit mode. Translation of numbers
@@ -1007,8 +1010,8 @@ tty_keys_clipboard(__unused struct tty *tty, const char *buf, size_t len,
 }
 
 /*
- * Handle device attributes input. Returns 0 for success, -1 for failure, 1 for
- * partial.
+ * Handle secondary device attributes input. Returns 0 for success, -1 for
+ * failure, 1 for partial.
  */
 static int
 tty_keys_device_attributes(struct tty *tty, const char *buf, size_t len,
@@ -1017,7 +1020,6 @@ tty_keys_device_attributes(struct tty *tty, const char *buf, size_t len,
 	struct client	*c = tty->client;
 	u_int		 i, n = 0;
 	char		 tmp[64], *endptr, p[32] = { 0 }, *cp, *next;
-	int		 flags = 0;
 
 	*size = 0;
 	if (tty->flags & TTY_HAVEDA)
@@ -1032,7 +1034,7 @@ tty_keys_device_attributes(struct tty *tty, const char *buf, size_t len,
 		return (-1);
 	if (len == 2)
 		return (1);
-	if (buf[2] != '?')
+	if (buf[2] != '>')
 		return (-1);
 	if (len == 3)
 		return (1);
@@ -1048,7 +1050,7 @@ tty_keys_device_attributes(struct tty *tty, const char *buf, size_t len,
 	tmp[i] = '\0';
 	*size = 4 + i;
 
-	/* Convert version numbers. */
+	/* Convert all arguments to numbers. */
 	cp = tmp;
 	while ((next = strsep(&cp, ";")) != NULL) {
 		p[n] = strtoul(next, &endptr, 10);
@@ -1057,17 +1059,42 @@ tty_keys_device_attributes(struct tty *tty, const char *buf, size_t len,
 		n++;
 	}
 
-	/* Set terminal flags. */
+	/* Add terminal features. */
 	switch (p[0]) {
-	case 64: /* VT420 */
-		flags |= (TERM_DECFRA|TERM_DECSLRM);
+	case 41: /* VT420 */
+		tty_add_features(&c->term_features,
+		    "margins,"
+		    "rectfill",
+		    ",");
+		break;
+	case 'M': /* mintty */
+		tty_add_features(&c->term_features,
+		    "256,"
+		    "RGB,"
+		    "title",
+		    ",");
+		break;
+	case 'T': /* tmux */
+		tty_add_features(&c->term_features,
+		    "256,"
+		    "RGB,"
+		    "ccolour,"
+		    "cstyle,"
+		    "overline,"
+		    "title,"
+		    "usstyle",
+		    ",");
+		break;
+	case 'U': /* rxvt-unicode */
+		tty_add_features(&c->term_features,
+		    "256,"
+		    "title",
+		    ",");
 		break;
 	}
-	for (i = 1; i < n; i++)
-		log_debug("%s: DA feature: %d", c->name, p[i]);
-	log_debug("%s: received DA %.*s", c->name, (int)*size, buf);
+	log_debug("%s: received secondary DA %.*s", c->name, (int)*size, buf);
 
-	tty_set_flags(tty, flags);
+	tty_update_features(tty);
 	tty->flags |= TTY_HAVEDA;
 
 	return (0);
@@ -1084,7 +1111,6 @@ tty_keys_device_status_report(struct tty *tty, const char *buf, size_t len,
 	struct client	*c = tty->client;
 	u_int		 i;
 	char		 tmp[64];
-	int		 flags = 0;
 
 	*size = 0;
 	if (tty->flags & TTY_HAVEDSR)
@@ -1115,14 +1141,31 @@ tty_keys_device_status_report(struct tty *tty, const char *buf, size_t len,
 	tmp[i] = '\0';
 	*size = 3 + i;
 
-	/* Set terminal flags. */
-	if (strncmp(tmp, "ITERM2 ", 7) == 0)
-		flags |= (TERM_DECSLRM|TERM_256COLOURS|TERM_RGBCOLOURS);
-	if (strncmp(tmp, "TMUX ", 5) == 0)
-		flags |= (TERM_256COLOURS|TERM_RGBCOLOURS);
+	/* Add terminal features. */
+	if (strncmp(tmp, "ITERM2 ", 7) == 0) {
+		tty_add_features(&c->term_features,
+		    "256,"
+		    "RGB,"
+		    "clipboard,"
+		    "cstyle,"
+		    "margins,"
+		    "sync,"
+		    "title",
+		    ",");
+	} else if (strncmp(tmp, "TMUX ", 5) == 0) {
+		tty_add_features(&c->term_features,
+		    "256,"
+		    "RGB,"
+		    "ccolour,"
+		    "cstyle,"
+		    "overline,"
+		    "title,"
+		    "usstyle",
+		    ",");
+	}
 	log_debug("%s: received DSR %.*s", c->name, (int)*size, buf);
 
-	tty_set_flags(tty, flags);
+	tty_update_features(tty);
 	tty->flags |= TTY_HAVEDSR;
 
 	return (0);

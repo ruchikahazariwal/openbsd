@@ -1,4 +1,4 @@
-# $OpenBSD: GENERIC,v 1.150 2020/04/14 21:20:47 kettenis Exp $
+# $OpenBSD: GENERIC,v 1.157 2020/04/23 22:16:10 patrick Exp $
 #
 # GENERIC machine description file
 #
@@ -122,6 +122,8 @@ imxccm*		at fdt? early 1
 imxiomuxc*	at fdt? early 1
 imxanatop*	at fdt? early 1
 imxsrc*		at fdt? early 1
+imxehci*	at fdt?
+usb*		at imxehci?
 imxgpc*		at fdt?
 imxgpio*	at fdt?
 fec*		at fdt?
@@ -139,11 +141,20 @@ wsdisplay*	at ssdfb?
 imxtmu*		at fdt?
 
 # Raspberry Pi 3/4
-bcmaux*		at fdt?
-bcmintc*	at fdt?
+bcmaux*		at fdt? early 1
+bcmclock*	at fdt? early 1
+bcmdmac*	at fdt? early 1
 bcmdog*		at fdt?
+bcmintc*	at fdt? early 1
+bcmirng*	at fdt?
+bcmmbox*	at fdt? early 1
+bcmpcie*	at fdt?
+pci*		at bcmpcie?
 bcmrng*		at fdt?
+bcmsdhost*	at fdt?
+sdmmc*		at bcmsdhost?
 bcmtemp*	at fdt?
+bse*		at fdt?
 bse*		at acpi?
 dwctwo*		at fdt?
 usb*		at dwctwo?

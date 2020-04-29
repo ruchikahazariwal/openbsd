@@ -1,4 +1,4 @@
-/*	$OpenBSD: iked.h,v 1.145 2020/04/13 19:10:32 tobhe Exp $	*/
+/*	$OpenBSD: iked.h,v 1.147 2020/04/23 20:17:48 tobhe Exp $	*/
 
 /*
  * Copyright (c) 2019 Tobias Heider <tobias.heider@stusta.de>
@@ -151,6 +151,7 @@ struct iked_flow {
 	struct iked_addr		 flow_src;
 	struct iked_addr		 flow_dst;
 	unsigned int			 flow_dir;	/* in/out */
+	int				 flow_rdomain;
 	struct iked_addr		 flow_prenat;
 
 	unsigned int			 flow_loaded;	/* pfkey done */
@@ -261,6 +262,7 @@ struct iked_policy {
 	uint8_t				 pol_certreqtype;
 
 	int				 pol_af;
+	int				 pol_rdomain;
 	uint8_t				 pol_saproto;
 	unsigned int			 pol_ipproto;
 
@@ -328,7 +330,6 @@ struct iked_dsa {
 	void		*dsa_ctx;	/* PRF or signature hash ctx */
 	struct ibuf	*dsa_keydata;	/* public, private or shared key */
 	void		*dsa_key;	/* parsed public or private key */
-	void		*dsa_cert;	/* parsed certificate */
 	int		 dsa_hmac;	/* HMAC or public/private key */
 	int		 dsa_sign;	/* Sign or verify operation */
 };
