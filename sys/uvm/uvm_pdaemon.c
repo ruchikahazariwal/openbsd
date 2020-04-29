@@ -273,10 +273,6 @@ uvm_pageout(void *arg)
 #if NDRM > 0
 		drmbackoff(size * 2);
 #endif
-
-#if NVMM > 0
-		vmmbackoff(size * 2);
-#endif
 		uvm_lock_pageq();
 
 		/* Scan if needed to meet our targets. */
