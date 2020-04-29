@@ -36,6 +36,9 @@
 #define VIONET_QUEUE_SIZE	256
 #define VIONET_QUEUE_MASK	(VIONET_QUEUE_SIZE - 1)
 
+#define VIOMBH_QUEUE_SIZE	64
+#define VIOMBH_QUEUE_MASK	(VIOMBH_QUEUE_SIZE - 1)
+
 /* VMM Control Interface shutdown timeout (in seconds) */
 #define VMMCI_TIMEOUT		3
 #define VMMCI_SHUTDOWN_TIMEOUT	30
@@ -45,12 +48,9 @@
  * vioblk - 1 queue
  * vionet - 2 queues
  * vioscsi - 3 queues
+ * viomb - 3 queues
  */
 #define VIRTIO_MAX_QUEUES	3
-
-/* cmpe start */
-#define VIOMBH_QUEUE_SIZE	64
-#define VIOMBH_QUEUE_MASK	(VIOMBH_QUEUE_SIZE - 1)
 
 #define VIRTIO_BALLOON_F_MUST_TELL_HOST 0
 #define VIRTIO_BALLOON_F_STATS_VQ	    1 /* Memory Stats virtqueue */
@@ -62,11 +62,8 @@
 #define VIRTIO_BALLOON_S_MINFLT   3   /* Number of minor faults */
 #define VIRTIO_BALLOON_S_MEMFREE  4   /* Total amount of free memory */
 #define VIRTIO_BALLOON_S_MEMTOT   5   /* Total amount of memory */
-#define VIRTIO_BALLOON_S_AVAIL    6   /* */
-#define VIRTIO_BALLOON_S_NR       7   /* */
-
-
-/* CMPE end */
+#define VIRTIO_BALLOON_S_AVAIL    6   /* not used */
+#define VIRTIO_BALLOON_S_NR       7   /* not used */
 
 /*
  * This struct stores notifications from a virtio driver. There is
@@ -162,9 +159,6 @@ struct virtio_vq_acct {
 	struct vring_used *used;
 };
 
-/* cmpe
- * GLOBAl STATE OF DEVICE
-  */
 struct viombh_dev {
 	struct virtio_io_cfg cfg;
 
@@ -295,7 +289,6 @@ struct ioinfo {
 	int error;
 };
 
-// CMPE new stats queue structure
 struct virtio_balloon_stat {
 	uint16_t tag;
 	uint64_t val;
@@ -369,4 +362,4 @@ void viombh_update_qa(void);
 int viombh_notifyq(void);
 int viombh_restore(int, struct vm_create_params *);
 int viombh_dump(int);
-void viombh_do_inflate(struct vmd_vm *);
+void balloon_vm(struct vmd_vm *, uint32_t size);

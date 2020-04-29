@@ -91,6 +91,7 @@ vmd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 	int				 res = 0, ret = 0, cmd = 0, verbose;
 	unsigned int			 v = 0, flags;
 	struct vmop_create_params	 vmc;
+	struct vmop_balloon_params	 vbp;
 	struct vmop_id			 vid;
 	struct vmop_result		 vmr;
 	struct vm_dump_header		 vmh;
@@ -100,6 +101,40 @@ vmd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 	struct control_sock		*rcs;
 
 	switch (imsg->hdr.type) {
+	case IMSG_VMDOP_BALLOON_VM_REQUEST:
+		IMSG_SIZE_CHECK(imsg, &vbp);
+		memcpy(&vbp, imsg->data, sizeof(vbp));
+
+		if ((id = vbp.vbp_id) == 0) {
+			/* Lookup vm (id) by name */
+			if ((vm = vm_getbyname(vbp.vbp_name)) == NULL) {
+				res = ENOENT;
+				cmd = IMSG_VMDOP_BALLOON_VM_RESPONSE;
+				break;
+			} else if (!(vm->vm_state & VM_STATE_RUNNING)) {
+				res = EINVAL;
+				cmd = IMSG_VMDOP_BALLOON_VM_RESPONSE;
+				break;
+			}
+			id = vm->vm_vmid;
+		} else if ((vm = vm_getbyvmid(id)) == NULL) {
+			res = ENOENT;
+			cmd = IMSG_VMDOP_BALLOON_VM_RESPONSE;
+			break;
+		}
+		if (vm_checkperm(vm, &vm->vm_params.vmc_owner,
+		    vbp.vbp_uid) != 0) {
+			res = EPERM;
+			cmd = IMSG_VMDOP_BALLOON_VM_RESPONSE;
+			break;
+		}
+
+		vbp.vbp_id = id;
+
+		if (proc_compose_imsg(ps, PROC_VMM, -1, imsg->hdr.type,
+		    imsg->hdr.peerid, -1, &vbp, sizeof(vbp)) == -1)
+			return (-1);
+		break;
 	case IMSG_VMDOP_START_VM_REQUEST:
 		IMSG_SIZE_CHECK(imsg, &vmc);
 		memcpy(&vmc, imsg->data, sizeof(vmc));
@@ -165,9 +200,6 @@ vmd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 			return (-1);
 		break;
 	case IMSG_VMDOP_GET_INFO_VM_REQUEST:
-		proc_forward_imsg(ps, imsg, PROC_VMM, -1);
-		break;
-	case IMSG_VMDOP_GET_VM_STATS_REQUEST:
 		proc_forward_imsg(ps, imsg, PROC_VMM, -1);
 		break;
 	case IMSG_VMDOP_LOAD:
@@ -342,6 +374,18 @@ vmd_dispatch_vmm(int fd, struct privsep_proc *p, struct imsg *imsg)
 	struct vmop_info_result	 vir;
 
 	switch (imsg->hdr.type) {
+	case IMSG_VMDOP_BALLOON_VM_RESPONSE:
+		IMSG_SIZE_CHECK(imsg, &vmr);
+		memcpy(&vmr, imsg->data, sizeof(vmr));
+		if ((vm = vm_getbyvmid(vmr.vmr_id)) == NULL)
+			break;
+		proc_compose_imsg(ps, PROC_CONTROL, -1,
+		    imsg->hdr.type, imsg->hdr.peerid, -1,
+		    imsg->data, sizeof(imsg->data));
+		log_info("%s: ballooned vm %d successfully",
+		    vm->vm_params.vmc_params.vcp_name,
+		    vm->vm_vmid);
+		break;
 	case IMSG_VMDOP_PAUSE_VM_RESPONSE:
 		IMSG_SIZE_CHECK(imsg, &vmr);
 		memcpy(&vmr, imsg->data, sizeof(vmr));
@@ -537,62 +581,6 @@ vmd_dispatch_vmm(int fd, struct privsep_proc *p, struct imsg *imsg)
 				    imsg->hdr.peerid, -1, &vir,
 				    sizeof(vir)) == -1) {
 					log_debug("%s: GET_INFO_VM_END failed",
-					    __func__);
-					vm_remove(vm, __func__);
-					return (-1);
-				}
-			}
-		}
-		IMSG_SIZE_CHECK(imsg, &res);
-		proc_forward_imsg(ps, imsg, PROC_CONTROL, -1);
-		break;
-	case IMSG_VMDOP_GET_VM_STATS_RESPONSE:
-		IMSG_SIZE_CHECK(imsg, &vir);
-		memcpy(&vir, imsg->data, sizeof(vir));
-		if ((vm = vm_getbyvmid(vir.vir_info.vir_id)) != NULL) {
-			memset(vir.vir_ttyname, 0, sizeof(vir.vir_ttyname));
-			if (vm->vm_ttyname != NULL)
-				strlcpy(vir.vir_ttyname, vm->vm_ttyname,
-				    sizeof(vir.vir_ttyname));
-			log_debug("%s: running vm: %d, vm_state: 0x%x",
-			    __func__, vm->vm_vmid, vm->vm_state);
-			vir.vir_state = vm->vm_state;
-			/* get the user id who started the vm */
-			vir.vir_uid = vm->vm_uid;
-			vir.vir_gid = vm->vm_params.vmc_owner.gid;
-		}
-		if (proc_compose_imsg(ps, PROC_CONTROL, -1, imsg->hdr.type,
-		    imsg->hdr.peerid, -1, &vir, sizeof(vir)) == -1) {
-			log_debug("%s: GET_VM_STATS_RESPONSE failed for vm %d, removing",
-			    __func__, vm->vm_vmid);
-			vm_remove(vm, __func__);
-			return (-1);
-		}
-		break;
-	case IMSG_VMDOP_GET_VM_STATS_END_RESPONSE:
-		TAILQ_FOREACH(vm, env->vmd_vms, vm_entry) {
-			if (!(vm->vm_state & VM_STATE_RUNNING)) {
-				memset(&vir, 0, sizeof(vir));
-				vir.vir_info.vir_id = vm->vm_vmid;
-				strlcpy(vir.vir_info.vir_name,
-				    vm->vm_params.vmc_params.vcp_name,
-				    VMM_MAX_NAME_LEN);
-				vir.vir_info.vir_memory_size =
-				    vm->vm_params.vmc_params.
-				    vcp_memranges[0].vmr_size;
-				vir.vir_info.vir_ncpus =
-				    vm->vm_params.vmc_params.vcp_ncpus;
-				/* get the configured user id for this vm */
-				vir.vir_uid = vm->vm_params.vmc_owner.uid;
-				vir.vir_gid = vm->vm_params.vmc_owner.gid;
-				log_debug("%s: vm: %d, vm_state: 0x%x",
-				    __func__, vm->vm_vmid, vm->vm_state);
-				vir.vir_state = vm->vm_state;
-				if (proc_compose_imsg(ps, PROC_CONTROL, -1,
-				    IMSG_VMDOP_GET_INFO_VM_DATA,
-				    imsg->hdr.peerid, -1, &vir,
-				    sizeof(vir)) == -1) {
-					log_debug("%s: GET_VM_STATS_END_RESPONSE failed",
 					    __func__);
 					vm_remove(vm, __func__);
 					return (-1);

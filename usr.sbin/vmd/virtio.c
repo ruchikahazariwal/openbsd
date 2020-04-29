@@ -1,6 +1,5 @@
 /*	$OpenBSD: virtio.c,v 1.82 2019/12/11 06:45:16 pd Exp $	*/
 
-
 /*
  * Copyright (c) 2015 Mike Larkin <mlarkin@openbsd.org>
  *
@@ -57,8 +56,6 @@ struct vioblk_dev *vioblk;
 struct vionet_dev *vionet;
 struct vioscsi_dev *vioscsi;
 struct vmmci_dev vmmci;
-
-//CMPE added the memory ballooning device
 struct viombh_dev viombh;
 
 int nr_vionet;
@@ -129,7 +126,13 @@ virtio_reg_name(uint8_t reg)
 	case VIRTIO_CONFIG_DEVICE_STATUS: return "device status";
 	case VIRTIO_CONFIG_ISR_STATUS: return "isr status";
 	case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI: return "device config 0";
+	case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 1: return "device config 0[1]";
+	case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 2: return "device config 0[2]";
+	case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 3: return "device config 0[3]";
 	case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 4: return "device config 1";
+	case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 5: return "device config 1[1]";
+	case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 6: return "device config 1[2]";
+	case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 7: return "device config 1[3]";
 	case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 8: return "device config 2";
 	case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 12: return "device config 3";
 	case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 16: return "device config 4";
@@ -152,8 +155,6 @@ vring_size(uint32_t vq_size)
 	return allocsize1 + allocsize2;
 }
 
-
-/* cmpe Update queue select */
 void
 viombh_update_qs(void)
 {
@@ -167,17 +168,7 @@ viombh_update_qs(void)
 	viombh.cfg.queue_address = viombh.vq[viombh.cfg.queue_select].qa;
 	viombh.cfg.queue_size = viombh.vq[viombh.cfg.queue_select].qs;
 }
-/* CMPE to dequeue the stats queue in viomb */
-// static void viombh_vq_dequeue()
-// {
-// 	printf("\n CMPE I am here testing in dequeue");
-// 	viombh_dev *sb;
-// 	int idx = sb->vq[0]->vq_queued;
-// 	printf("%s: CMPE got idx\n", __func__, idx);
 
-// }
-
-/* cmpe Update queue address */
 void
 viombh_update_qa(void)
 {
@@ -188,7 +179,6 @@ viombh_update_qa(void)
 	viombh.vq[viombh.cfg.queue_select].qa = viombh.cfg.queue_address;
 }
 
-/* cmpe */
 int
 viombh_notifyq(void)
 {
@@ -197,16 +187,13 @@ viombh_notifyq(void)
 	size_t sz;
 	int ret;
 	uint32_t i;
-	uint32_t *buf_pglist;
-	//struct vm_page *buf_vm_pages;
-	//struct pglist *host_bl_pglist;
+	uint32_t *buf_bl_pages;
 	uint16_t aidx, uidx;
 	char *buf;
 	struct vring_desc *desc;
 	struct vring_avail *avail;
 	struct vring_used *used;
 	struct vm_inflate_balloon_params vibp;
-	//struct vm_page *p;
 
 	ret = 0;
 
@@ -240,15 +227,14 @@ viombh_notifyq(void)
 
 	sz = desc[avail->ring[aidx]].len;
 
-	printf("size of the desc: %zu", sz);
-
 	printf("%s: being called for %d queue\n", __func__, viombh.cfg.queue_notify);
-	if (viombh.cfg.queue_notify == 0) // inflate queue
-	{
-		buf_pglist = calloc(1, sz);
-		//buf_vm_pages = calloc(1, sizeof(struct vm_page) * (sz / 4));
 
-		if (read_mem(desc[avail->ring[aidx]].addr, buf_pglist, sz)) {
+	/* Inflate queue */
+	if (viombh.cfg.queue_notify == 0)
+	{
+		buf_bl_pages = calloc(1, sz);
+
+		if (read_mem(desc[avail->ring[aidx]].addr, buf_bl_pages, sz)) {
 			printf("error from %s", __func__);
 			goto out;
 		}
@@ -256,15 +242,17 @@ viombh_notifyq(void)
 		memset(&vibp, 0, sizeof(vibp));
 
 		for (i = 0; i < (sz / 4); i++) {
-			printf("%s: got page number 0x%llx from vm for inflate\n"
-			    "%d/%llu", __func__, (uint64_t)buf_pglist[i],
+			log_debug("%s: got page number 0x%llx from vm for "
+			    "inflate %d/%llu\n", __func__,
+			    (uint64_t)buf_bl_pages[i],
 			    i, (uint64_t)(sz / 4));
-			vibp.buf_bl_pglist[i] = (uint64_t)buf_pglist[i];
+			vibp.vibp_buf_bl_pages[i] = (uint64_t)buf_bl_pages[i];
 		}
 
-		vibp.bl_pglist_sz = sz;
+		vibp.vibp_bl_pages_sz = sz/4;
 		vibp.vibp_vm_id = viombh.vm_id;
 
+		/* Instruct vmm(4) to inflate the balloon and reclaim the pages */
 		if (ioctl(env->vmd_fd, VMM_IOC_BALLOON_INFLATE, &vibp) == -1) {
 			log_warn("balloon inflate ioctl failed: %s",
 				strerror(errno));
@@ -273,58 +261,62 @@ viombh_notifyq(void)
 
 		ret = 1;
 		viombh.cfg.isr_status = 1;
-		used->ring[uidx].id = avail->ring[aidx] &
-			VIOMBH_QUEUE_MASK;
+		used->ring[uidx].id = avail->ring[aidx] & VIOMBH_QUEUE_MASK;
 		used->ring[uidx].len = desc[avail->ring[aidx]].len;
-			used->idx++;
+		used->idx++;
 
 		if (write_mem(q_gpa, buf, vr_sz)) {
 			log_warnx("viombh: error writing vio ring");
 		}
 
 		free(buf);
-		free(buf_pglist);
+		free(buf_bl_pages);
 	}
 	else if (viombh.cfg.queue_notify == 1) // deflate queue
 	{
+		/* Nothing to do in the deflate case, just advance the ring */
+		ret = 1;
+		viombh.cfg.isr_status = 1;
+		used->ring[uidx].id = avail->ring[aidx] & VIOMBH_QUEUE_MASK;
+		used->ring[uidx].len = desc[avail->ring[aidx]].len;
+		used->idx++;
 
+		if (write_mem(q_gpa, buf, vr_sz)) {
+			log_warnx("viombh: error writing vio ring");
+		}
+
+		free(buf);
 	}
 	else if (viombh.cfg.queue_notify == 2) // stats queue
 	{
 
 	}
 
-	// free the pages via another vmm ioctl (TBD)
-
-	/* ret == 1 -> interrupt needed */
-	/* XXX check VIRTIO_F_NO_INTR */
-
 	return (ret);
 out:
-	free(buf_pglist);
+	free(buf);
+	free(buf_bl_pages);
 	return (ret);
 }
 
-
-/* CMPE
- *
- * Called by pci_add_bar function
- *
- */
 int
 virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
     void *unused, uint8_t sz)
 {
 	*intr = 0xFF;
 
-	printf("%s: reg: %u\n", __func__, reg);
+	printf("%s: reg: %u size: %u\n", __func__, reg, sz);
 
-	// dir == 0 means writing
+	/* Write */
 	if (dir == 0) {
 		switch (reg) {
 		case VIRTIO_CONFIG_DEVICE_FEATURES:
 		case VIRTIO_CONFIG_QUEUE_SIZE:
 		case VIRTIO_CONFIG_ISR_STATUS:
+		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI:
+		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 1:
+		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 2:
+		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 3:
 			log_warnx("%s: illegal write %x to %s",
 			    __progname, *data, virtio_reg_name(reg));
 			break;
@@ -346,11 +338,75 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 			break;
 		case VIRTIO_CONFIG_DEVICE_STATUS:
 			viombh.cfg.device_status = *data;
+			if (viombh.cfg.device_status == 0) {
+				log_debug("%s: device reset", __func__);
+				viombh.cfg.guest_feature = 0;
+				viombh.cfg.queue_address = 0;
+				viombh_update_qa();
+				viombh.cfg.queue_size = 0;
+				viombh_update_qs();
+				viombh.cfg.queue_select = 0;
+				viombh.cfg.queue_notify = 0;
+				viombh.cfg.isr_status = 0;
+				viombh.vq[0].last_avail = 0;
+				viombh.vq[1].last_avail = 0;
+				viombh.vq[2].last_avail = 0;
+				viombh.num_pages = 0;
+				viombh.actual = 0;
+				vcpu_deassert_pic_irq(viombh.vm_id, 0, viombh.irq);
+			}
 			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 4:
-			viombh.actual = *data;
-			printf("Driver updates Device actual: %d \n", viombh.actual);
-			break;
+			switch (sz) {
+			case 4:
+				viombh.actual = (uint32_t)(*data);
+				break;
+			case 2:
+				viombh.actual &= 0xFFFF0000;
+				viombh.actual |= (uint32_t)(*data) & 0xFFFF;
+				break;
+			case 1:
+				viombh.actual &= 0xFFFFFF00;
+				viombh.actual |= (uint32_t)(*data) & 0xFF;
+				break;
+			default:
+				/* XXX handle invalid sz */
+				break;
+			}
+		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 5:
+			switch (sz) {
+			case 1:
+				viombh.actual &= 0xFFFF00FF;
+				viombh.actual |= ((uint32_t)(*data) & 0xFF) << 8;
+				break;
+			default:
+				/* XXX handle invalid sz */
+				break;
+			}
+		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 6:
+			switch (sz) {
+			case 1:
+				viombh.actual &= 0xFF00FFFF;
+				viombh.actual |= ((uint32_t)(*data) & 0xFF) << 16;
+				break;
+			case 2:
+				viombh.actual &= 0x0000FFFF;
+				viombh.actual |= ((uint32_t)(*data) & 0xFFFF) << 16;
+				break;
+			default:
+				/* XXX handle invalid sz */
+				break;
+			}
+		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 7:
+			switch (sz) {
+			case 1:
+				viombh.actual &= 0x00FFFFFF;
+				viombh.actual |= ((uint32_t)(*data) & 0xFF) << 24;
+				break;
+			default:
+				/* XXX handle invalid sz */
+				break;
+			}
 		}
 	} else {
 		switch (reg) {
@@ -381,11 +437,115 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 			vcpu_deassert_pic_irq(viombh.vm_id, 0, viombh.irq);
 			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI:
-			*data = viombh.num_pages;
-			break;
+			switch (sz) {
+			case 4:
+				*data = (uint32_t)(viombh.num_pages);
+				break;
+			case 2:
+				*data &= 0xFFFF0000;
+				*data |= (uint32_t)(viombh.num_pages) & 0xFFFF;
+				break;
+			case 1:
+				*data &= 0xFFFFFF00;
+				*data |= (uint32_t)(viombh.num_pages) & 0xFF;
+				break;
+			default:
+				/* XXX handle invalid sz */
+				break;
+			}
+		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 1:
+			switch (sz) {
+			case 1:
+				*data &= 0xFFFFFF00;
+				*data |= ((uint32_t)(viombh.num_pages) &
+				     0xFF00) >> 8;
+				break;
+			default:
+				/* XXX handle invalid sz */
+				break;
+			}
+		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 2:
+			switch (sz) {
+			case 1:
+				*data &= 0xFFFFFF00;
+				*data |= ((uint32_t)(viombh.num_pages) &
+				     0xFF0000) >> 16;
+				break;
+			case 2:
+				*data &= 0xFFFF0000;
+				*data |= ((uint32_t)(viombh.num_pages) &
+				     0xFFFF0000) >> 16;
+				break;
+			default:
+				/* XXX handle invalid sz */
+				break;
+			}
+		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 3:
+			switch (sz) {
+			case 1:
+				*data &= 0xFFFFFF00;
+				*data |= ((uint32_t)(viombh.num_pages) &
+				     0xFF000000) >> 24;
+				break;
+			default:
+				/* XXX handle invalid sz */
+				break;
+			}
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 4:
-			*data = viombh.actual;
-			break;
+			switch (sz) {
+			case 4:
+				*data = (uint32_t)(viombh.actual);
+				break;
+			case 2:
+				*data &= 0xFFFF0000;
+				*data |= (uint32_t)(viombh.actual) & 0xFFFF;
+				break;
+			case 1:
+				*data &= 0xFFFFFF00;
+				*data |= (uint32_t)(viombh.actual) & 0xFF;
+				break;
+			default:
+				/* XXX handle invalid sz */
+				break;
+			}
+		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 5:
+			switch (sz) {
+			case 1:
+				*data &= 0xFFFFFF00;
+				*data |= ((uint32_t)(viombh.actual) &
+				     0xFF00) >> 8;
+				break;
+			default:
+				/* XXX handle invalid sz */
+				break;
+			}
+		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 6:
+			switch (sz) {
+			case 1:
+				*data &= 0xFFFFFF00;
+				*data |= ((uint32_t)(viombh.actual) &
+				     0xFF0000) >> 16;
+				break;
+			case 2:
+				*data &= 0xFFFF0000;
+				*data |= ((uint32_t)(viombh.actual) &
+				     0xFFFF0000) >> 16;
+				break;
+			default:
+				/* XXX handle invalid sz */
+				break;
+			}
+		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 7:
+			switch (sz) {
+			case 1:
+				*data &= 0xFFFFFF00;
+				*data |= ((uint32_t)(viombh.actual) &
+				     0xFF000000) >> 24;
+				break;
+			default:
+				/* XXX handle invalid sz */
+				break;
+			}
 		}
 	}
 
@@ -2283,39 +2443,28 @@ virtio_init(struct vmd_vm *vm, int child_cdrom,
 
 	evtimer_set(&vmmci.timeout, vmmci_timeout, NULL);
 
-	/* CMPE
-	 *
-	 * defined in vmd/pci.c
-	 *
-	 */
 	if (pci_add_device(
-            &id, PCI_VENDOR_QUMRANET,       // defined in pci/pcidevs.h
-            PCI_PRODUCT_QUMRANET_VIO_MEM,   // defined in pci/pcidevs.h
-            PCI_CLASS_SYSTEM,               // defined in pci/pci_subr.c
-            PCI_SUBCLASS_SYSTEM_MISC,       // defined in pci/pci_subr.c
-            PCI_VENDOR_OPENBSD,             // defined in pci/pcidevs.h
-            PCI_PRODUCT_VIRTIO_BALLOON,     // defined in pv/virtioreg.h
+            &id, PCI_VENDOR_QUMRANET,
+            PCI_PRODUCT_QUMRANET_VIO_MEM,
+            PCI_CLASS_SYSTEM,
+            PCI_SUBCLASS_SYSTEM_MISC,
+            PCI_VENDOR_OPENBSD,
+            PCI_PRODUCT_VIRTIO_BALLOON,
             1,
             NULL)) {
-			log_warnx("%s: can't add PCI virtio memory balloon device",
-				__progname);
-			return;
-	}
-
-	/* CMPE
-     * Purpose is to enable communication between driver and device via "virtio_mbh_io"
-     * defined in vmd/pci.c
-     *
-     */
-	if (pci_add_bar(id,
-        PCI_MAPREG_TYPE_IO,     //defined in pci/pcireg.h
-        virtio_mbh_io, NULL)) {
-		log_warnx("%s: can't add bar for virtio memory balloon device",
-			__progname);
+		log_warnx("%s: can't add PCI virtio memory balloon device",
+		__progname);
 		return;
 	}
-	// viombh defined in vmd/virtio.h
-	// vcp "vm_create_params" defined in include/vmmvar.h
+
+	if (pci_add_bar(id, PCI_MAPREG_TYPE_IO,
+	    virtio_mbh_io, NULL)) {
+		log_warnx("%s: can't add bar for virtio memory balloon device",
+		    __progname);
+		return;
+	}
+
+
 	memset(&viombh, 0, sizeof(viombh));
 	viombh.vq[0].qs = VIOMBH_QUEUE_SIZE;
 	viombh.vq[0].vq_availoffset = sizeof(struct vring_desc) * VIOMBH_QUEUE_SIZE;
@@ -2371,8 +2520,6 @@ vmmci_restore(int fd, uint32_t vm_id)
 	evtimer_set(&vmmci.timeout, vmmci_timeout, NULL);
 	return (0);
 }
-
-// CMPE viombh restore
 
 int
 viombh_restore(int fd, struct vm_create_params *vcp)
@@ -2569,10 +2716,8 @@ virtio_restore(int fd, struct vmd_vm *vm, int child_cdrom,
 	if ((ret = vmmci_restore(fd, vcp->vcp_id)) == -1)
 		return ret;
 
-	/*CMPE added restore fucntion for viombh */
 	if ((ret = viombh_restore(fd, vcp)) == -1)
 		return ret;
-	/*CMPE ends */
 
 	return (0);
 }
@@ -2689,18 +2834,17 @@ virtio_start(struct vm_create_params *vcp)
 	}
 }
 
-int doInflateOnce = 0;
-
-/* move below into separate file XXX */
 void
-viombh_do_inflate(struct vmd_vm *vm)
+balloon_vm(struct vmd_vm *vm, uint32_t size)
 {
-	viombh.num_pages = 10;
+	viombh.num_pages = size;
 
-	if (viombh.num_pages > viombh.actual && !doInflateOnce) {
-		printf("%s: intr\n", __func__);
+	log_debug("%s: received request to balloon %d pages", __func__,
+	    size);
+#if 0
+	if (viombh.num_pages > viombh.actual) {
 		viombh.cfg.isr_status |= VIRTIO_CONFIG_ISR_CONFIG_CHANGE;
 		vcpu_assert_pic_irq(viombh.vm_id, 0, viombh.irq);
-		doInflateOnce = 1;
 	}
+#endif
 }

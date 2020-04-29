@@ -1,4 +1,4 @@
-/* $OpenBSD: window-copy.c,v 1.273 2020/04/14 19:07:10 nicm Exp $ */
+/* $OpenBSD: window-copy.c,v 1.279 2020/04/20 06:08:37 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -298,30 +298,43 @@ window_copy_scroll_timer(__unused int fd, __unused short events, void *arg)
 }
 
 static struct screen *
-window_copy_clone_screen(struct screen *src, struct screen *hint)
+window_copy_clone_screen(struct screen *src, struct screen *hint, u_int *cx,
+    u_int *cy, int trim)
 {
-	struct screen			*dst;
-	struct screen_write_ctx		 ctx;
-	u_int				 dy, sy;
+	struct screen		*dst;
+	u_int			 sy;
+	const struct grid_line	*gl;
 
 	dst = xcalloc(1, sizeof *dst);
 
 	sy = screen_hsize(src) + screen_size_y(src);
-	if (screen_size_y(hint) > sy)
-		dy = screen_size_y(hint);
-	else
-		dy = sy;
-	screen_init(dst, screen_size_x(src), dy, src->grid->hlimit);
-
+	if (trim) {
+		while (sy > screen_hsize(src)) {
+			gl = grid_peek_line(src->grid, sy - 1);
+			if (gl->cellused != 0)
+				break;
+			sy--;
+		}
+	}
+	log_debug("%s: target screen is %ux%u, source %ux%u", __func__,
+	    screen_size_x(src), sy, screen_size_x(hint),
+	    screen_hsize(src) + screen_size_y(src));
+	screen_init(dst, screen_size_x(src), sy, screen_hlimit(src));
 	grid_duplicate_lines(dst->grid, 0, src->grid, 0, sy);
-	if (screen_size_y(hint) < sy) {
-		dst->grid->sy = screen_size_y(hint);
-		dst->grid->hsize = sy - screen_size_y(hint);
+
+	dst->grid->sy = sy - screen_hsize(src);
+	dst->grid->hsize = screen_hsize(src);
+	dst->grid->hscrolled = src->grid->hscrolled;
+	if (src->cy > dst->grid->sy - 1) {
+		dst->cx = 0;
+		dst->cy = dst->grid->sy - 1;
+	} else {
+		dst->cx = src->cx;
+		dst->cy = src->cy;
 	}
 
-	screen_write_start(&ctx, NULL, dst);
-	screen_write_cursormove(&ctx, 0, dst->grid->sy + sy - dy - 1, 0);
-	screen_write_stop(&ctx);
+	screen_resize_cursor(dst, screen_size_x(hint), screen_size_y(hint), 1,
+	    0, cx, cy);
 
 	return (dst);
 }
@@ -370,22 +383,23 @@ window_copy_init(struct window_mode_entry *wme,
 {
 	struct window_pane		*wp = wme->swp;
 	struct window_copy_mode_data	*data;
+	struct screen			*base = &wp->base;
 	struct screen_write_ctx		 ctx;
-	u_int				 i;
+	u_int				 i, cx, cy;
 
 	data = window_copy_common_init(wme);
-	data->backing = window_copy_clone_screen(&wp->base, &data->screen);
+	data->backing = window_copy_clone_screen(base, &data->screen, &cx, &cy,
+	    wme->swp != wme->wp);
 
-	data->cx = wp->base.cx;
-	if (data->cx > screen_size_x(&data->screen) - 1)
-		data->cx = screen_size_x(&data->screen) - 1;
-
-	data->cy = screen_hsize(&wp->base) + wp->base.cy;
-	if (data->cy < screen_hsize(data->backing)) {
-		data->oy = screen_hsize(data->backing) - data->cy;
+	if (cy < screen_hsize(data->backing)) {
+		data->cx = cx;
 		data->cy = 0;
-	} else
-		data->cy -= screen_hsize(data->backing);
+		data->oy = screen_hsize(data->backing) - cy;
+	} else {
+		data->cx = data->backing->cx;
+		data->cy = data->backing->cy;
+		data->oy = 0;
+	}
 
 	data->scroll_exit = args_has(args, 'e');
 	data->hide_position = args_has(args, 'H');
@@ -690,15 +704,35 @@ window_copy_formats(struct window_mode_entry *wme, struct format_tree *ft)
 }
 
 static void
+window_copy_size_changed(struct window_mode_entry *wme)
+{
+	struct window_copy_mode_data	*data = wme->data;
+	struct screen			*s = &data->screen;
+	struct screen_write_ctx		 ctx;
+	int				 search = (data->searchmark != NULL);
+
+	window_copy_clear_selection(wme);
+	window_copy_clear_marks(wme);
+
+	screen_write_start(&ctx, NULL, s);
+	window_copy_write_lines(wme, &ctx, 0, screen_size_y(s));
+	screen_write_stop(&ctx);
+
+	if (search && !data->timeout)
+		window_copy_search_marks(wme, NULL, data->searchregex);
+	data->searchx = data->cx;
+	data->searchy = data->cy;
+	data->searcho = data->oy;
+}
+
+static void
 window_copy_resize(struct window_mode_entry *wme, u_int sx, u_int sy)
 {
 	struct window_copy_mode_data	*data = wme->data;
 	struct screen			*s = &data->screen;
-	struct screen_write_ctx	 	 ctx;
-	int				 search;
 
-	screen_resize(s, sx, sy, 1);
-	screen_resize(data->backing, sx, sy, 1);
+	screen_resize(s, sx, sy, 0);
+	screen_resize_cursor(data->backing, sx, sy, 1, 0, NULL, NULL);
 
 	if (data->cy > sy - 1)
 		data->cy = sy - 1;
@@ -707,20 +741,7 @@ window_copy_resize(struct window_mode_entry *wme, u_int sx, u_int sy)
 	if (data->oy > screen_hsize(data->backing))
 		data->oy = screen_hsize(data->backing);
 
-	search = (data->searchmark != NULL);
-	window_copy_clear_selection(wme);
-	window_copy_clear_marks(wme);
-
-	screen_write_start(&ctx, NULL, s);
-	window_copy_write_lines(wme, &ctx, 0, screen_size_y(s) - 1);
-	screen_write_stop(&ctx);
-
-	if (search && !data->timeout)
-		window_copy_search_marks(wme, NULL, data->searchregex);
-	data->searchx = data->cx;
-	data->searchy = data->cy;
-	data->searcho = data->oy;
-
+	window_copy_size_changed(wme);
 	window_copy_redraw_screen(wme);
 }
 
@@ -1718,11 +1739,10 @@ window_copy_cmd_copy_pipe_no_clear(struct window_copy_cmd_state *cs)
 	if (cs->args->argc == 3)
 		prefix = format_single(NULL, cs->args->argv[2], c, s, wl, wp);
 
-	if (s != NULL && *cs->args->argv[1] != '\0') {
+	if (s != NULL && cs->args->argc > 1 && *cs->args->argv[1] != '\0')
 		command = format_single(NULL, cs->args->argv[1], c, s, wl, wp);
-		window_copy_copy_pipe(wme, s, prefix, command);
-		free(command);
-	}
+	window_copy_copy_pipe(wme, s, prefix, command);
+	free(command);
 
 	free(prefix);
 	return (WINDOW_COPY_CMD_NOTHING);
@@ -2024,8 +2044,10 @@ window_copy_cmd_refresh_from_pane(struct window_copy_cmd_state *cs)
 
 	screen_free(data->backing);
 	free(data->backing);
-	data->backing = window_copy_clone_screen(&wp->base, &data->screen);
+	data->backing = window_copy_clone_screen(&wp->base, &data->screen, NULL,
+	    NULL, wme->swp != wme->wp);
 
+	window_copy_size_changed(wme);
 	return (WINDOW_COPY_CMD_REDRAW);
 }
 
@@ -2054,11 +2076,11 @@ static const struct {
 	  window_copy_cmd_copy_end_of_line },
 	{ "copy-line", 0, 1, 0,
 	  window_copy_cmd_copy_line },
-	{ "copy-pipe-no-clear", 1, 2, 0,
+	{ "copy-pipe-no-clear", 0, 2, 0,
 	  window_copy_cmd_copy_pipe_no_clear },
-	{ "copy-pipe", 1, 2, 0,
+	{ "copy-pipe", 0, 2, 0,
 	  window_copy_cmd_copy_pipe },
-	{ "copy-pipe-and-cancel", 1, 2, 0,
+	{ "copy-pipe-and-cancel", 0, 2, 0,
 	  window_copy_cmd_copy_pipe_and_cancel },
 	{ "copy-selection-no-clear", 0, 1, 0,
 	  window_copy_cmd_copy_selection_no_clear },
@@ -3459,8 +3481,13 @@ window_copy_copy_pipe(struct window_mode_entry *wme, struct session *s,
 	if (buf == NULL)
 		return;
 
-	job = job_run(cmd, s, NULL, NULL, NULL, NULL, NULL, JOB_NOWAIT, -1, -1);
-	bufferevent_write(job_get_event(job), buf, len);
+	if (cmd == NULL || *cmd == '\0')
+		cmd = options_get_string(global_options, "copy-command");
+	if (cmd != NULL && *cmd != '\0') {
+		job = job_run(cmd, s, NULL, NULL, NULL, NULL, NULL, JOB_NOWAIT,
+		    -1, -1);
+		bufferevent_write(job_get_event(job), buf, len);
+	}
 	window_copy_copy_buffer(wme, prefix, buf, len);
 }
 

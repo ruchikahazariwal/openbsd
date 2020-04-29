@@ -68,7 +68,7 @@ int		 ctl_pause(struct parse_result *, int, char *[]);
 int		 ctl_unpause(struct parse_result *, int, char *[]);
 int		 ctl_send(struct parse_result *, int, char *[]);
 int		 ctl_receive(struct parse_result *, int, char *[]);
-int		 ctl_getStats(struct parse_result *, int, char *[]);
+int		 ctl_balloon(struct parse_result *, int, char *[]);
 
 struct ctl_command ctl_commands[] = {
 	{ "console",	CMD_CONSOLE,	ctl_console,	"id" },
@@ -89,7 +89,7 @@ struct ctl_command ctl_commands[] = {
 	{ "stop",	CMD_STOP,	ctl_stop,	"[-fw] [id | -a]" },
 	{ "unpause",	CMD_UNPAUSE,	ctl_unpause,	"id" },
 	{ "wait",	CMD_WAITFOR,	ctl_waitfor,	"id" },
-	{ "stats",	CMD_GETSTATS,	ctl_getStats,	"[id | -a]" },
+	{ "balloon",	CMD_BALLOON,	ctl_balloon,	"[-m size] id" },
 	{ NULL }
 };
 
@@ -238,7 +238,6 @@ vmmaction(struct parse_result *res)
 	case CMD_STATUS:
 	case CMD_CONSOLE:
 	case CMD_STOPALL:
-		printf("CMPE - %s -%d", res->name, res->flags);
 		get_info_vm(res->id, res->name, res->action, res->flags);
 		break;
 	case CMD_LOAD:
@@ -273,8 +272,12 @@ vmmaction(struct parse_result *res)
 	case CMD_RECEIVE:
 		vm_receive(res->id, res->name);
 		break;
-	case CMD_GETSTATS:
-		vm_getStats(res->id, res->name, res->action);
+	case CMD_BALLOON:
+		ret = vm_balloon(res->id, res->name, res->size);
+		if (ret) {
+			errno = ret;
+			err(1, "balloon operation failed");
+		}
 		break;
 	case CMD_CREATE:
 	case NONE:
@@ -343,9 +346,8 @@ vmmaction(struct parse_result *res)
 			case CMD_UNPAUSE:
 				done = unpause_vm_complete(&imsg, &ret);
 				break;
-			case CMD_GETSTATS:
-				get_num_vm(&imsg, &ret);
-				done = 1;
+			case CMD_BALLOON:
+				done = vm_balloon_complete(&imsg, &ret);
 				break;
 			default:
 				done = 1;
@@ -1064,13 +1066,31 @@ ctl_openconsole(const char *name)
 }
 
 int
-ctl_getStats(struct parse_result *res, int argc, char *argv[])
+ctl_balloon(struct parse_result *res, int argc, char *argv[])
 {
-	if (argc == 2) {
-		if (parse_vmid(res, argv[1], 0) == -1)
-			errx(1, "invalid id: %s", argv[1]);
-	} else if (argc != 2)
+	int ch;
+
+	while ((ch = getopt(argc, argv, "m:")) != -1) {
+		switch (ch) {
+		case 'm':
+			if (res->size)
+				errx(1, "memory specified multiple times");
+			if (parse_size(res, optarg) != 0)
+				errx(1, "invalid memory size: %s", optarg);
+			break;
+		default:
+			ctl_usage(res->ctl);
+			/* NOTREACHED */
+		}
+	}
+	argc -= optind;
+	argv += optind;
+
+	if (argc != 1)
 		ctl_usage(res->ctl);
+
+	if (parse_vmid(res, argv[0], 0) == -1)
+		errx(1, "invalid id: %s", argv[1]);
 
 	return (vmmaction(res));
 }

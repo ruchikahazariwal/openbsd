@@ -1,4 +1,4 @@
-/* $OpenBSD: tls13_server.c,v 1.28 2020/03/10 17:23:25 jsing Exp $ */
+/* $OpenBSD: tls13_server.c,v 1.31 2020/04/22 17:05:07 jsing Exp $ */
 /*
  * Copyright (c) 2019, 2020 Joel Sing <jsing@openbsd.org>
  * Copyright (c) 2020 Bob Beck <beck@openbsd.org>
@@ -47,11 +47,6 @@ tls13_server_init(struct tls13_ctx *ctx)
 		return 0;
 
 	if ((s->session = SSL_SESSION_new()) == NULL)
-		return 0;
-
-	if ((ctx->hs->key_share = tls13_key_share_new(NID_X25519)) == NULL)
-		return 0;
-	if (!tls13_key_share_generate(ctx->hs->key_share))
 		return 0;
 
 	arc4random_buf(s->s3->server_random, SSL3_RANDOM_SIZE);
@@ -284,6 +279,14 @@ tls13_client_hello_recv(struct tls13_ctx *ctx, CBS *cbs)
 	if (s->method->internal->version < TLS1_3_VERSION)
 		return 1;
 
+	/*
+	 * If a matching key share was provided, we do not need to
+	 * send a HelloRetryRequest.
+	 */
+	if (ctx->hs->key_share != NULL)
+		ctx->handshake_stage.hs_type |= WITHOUT_HRR;
+
+	/* XXX - check this is the correct point */
 	tls13_record_layer_allow_ccs(ctx->rl, 1);
 
 	return 1;
@@ -524,6 +527,12 @@ err:
 int
 tls13_server_hello_send(struct tls13_ctx *ctx, CBB *cbb)
 {
+	if (ctx->hs->key_share == NULL)
+		return 0;
+
+	if (!tls13_key_share_generate(ctx->hs->key_share))
+		return 0;
+
 	if (!tls13_server_hello_build(ctx, cbb))
 		return 0;
 
@@ -542,11 +551,6 @@ tls13_server_hello_sent(struct tls13_ctx *ctx)
 	SSL *s = ctx->ssl;
 	int ret = 0;
 
-	/* XXX - handle other key share types. */
-	if (ctx->hs->key_share == NULL) {
-		/* XXX - alert. */
-		goto err;
-	}
 	if (!tls13_key_share_derive(ctx->hs->key_share,
 	    &shared_key, &shared_key_len))
 		goto err;
@@ -604,7 +608,7 @@ tls13_server_hello_sent(struct tls13_ctx *ctx)
 }
 
 int
-tls13_server_hello_retry_send(struct tls13_ctx *ctx, CBB *cbb)
+tls13_server_hello_retry_request_send(struct tls13_ctx *ctx, CBB *cbb)
 {
 	return 0;
 }

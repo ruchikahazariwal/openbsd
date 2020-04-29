@@ -1,9 +1,9 @@
 /*	$OpenBSD: uvm_pdaemon.c,v 1.86 2020/04/04 22:08:02 kettenis Exp $	*/
 /*	$NetBSD: uvm_pdaemon.c,v 1.23 2000/08/20 10:24:14 bjh21 Exp $	*/
 
-/* 
+/*
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
- * Copyright (c) 1991, 1993, The Regents of the University of California.  
+ * Copyright (c) 1991, 1993, The Regents of the University of California.
  *
  * All rights reserved.
  *
@@ -40,17 +40,17 @@
  *
  * Copyright (c) 1987, 1990 Carnegie-Mellon University.
  * All rights reserved.
- * 
+ *
  * Permission to use, copy, modify and distribute this software and
  * its documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS" 
- * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND 
+ *
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND
  * FOR ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
  *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
@@ -293,7 +293,7 @@ uvm_pageout(void *arg)
 		}
 
 		if (pma != NULL) {
-			/* 
+			/*
 			 * XXX If UVM_PMA_FREED isn't set, no pages
 			 * were freed.  Should we set UVM_PMA_FAIL in
 			 * that case?
@@ -664,7 +664,7 @@ uvmpd_scan_inactive(struct pglist *pglst)
 		 *
 		 * note locking semantics of uvm_pager_put with PGO_PDFREECLUST:
 		 *  IN: locked: page queues
-		 * OUT: locked: 
+		 * OUT: locked:
 		 *     !locked: pageqs
 		 */
 
@@ -838,7 +838,6 @@ uvmpd_scan(void)
 	 * we need to unlock the page queues for this.
 	 */
 	if (free < uvmexp.freetarg) {
-		uvmexp.inswap = 1;
 		uvmexp.pdswout++;
 		uvm_unlock_pageq();
 		uvm_swapout_threads();
