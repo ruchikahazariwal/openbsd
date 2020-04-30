@@ -373,6 +373,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 5:
 			switch (sz) {
 			case 1:
@@ -383,6 +384,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 6:
 			switch (sz) {
 			case 1:
@@ -397,6 +399,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 7:
 			switch (sz) {
 			case 1:
@@ -407,6 +410,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		}
 	} else {
 		switch (reg) {
@@ -454,6 +458,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 1:
 			switch (sz) {
 			case 1:
@@ -465,6 +470,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 2:
 			switch (sz) {
 			case 1:
@@ -481,6 +487,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 3:
 			switch (sz) {
 			case 1:
@@ -492,6 +499,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 4:
 			switch (sz) {
 			case 4:
@@ -510,6 +518,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 5:
 			switch (sz) {
 			case 1:
@@ -521,6 +530,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 6:
 			switch (sz) {
 			case 1:
@@ -537,6 +547,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 7:
 			switch (sz) {
 			case 1:
@@ -548,6 +559,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		}
 	}
 
