@@ -568,7 +568,15 @@ vmm_dispatch_vm(int fd, short event, void *arg)
 				}
 			}
 			break;
-
+		case IMSG_VMDOP_BALLOON_VM_RESPONSE:
+			for (i = 0; i < sizeof(procs); i++) {
+				if (procs[i].p_id == PROC_PARENT) {
+					proc_forward_imsg(procs[i].p_ps,
+					    &imsg, PROC_PARENT, -1);
+					break;
+				}
+			}
+			break;
 		default:
 			fatalx("%s: got invalid imsg %d from %s",
 			    __func__, imsg.hdr.type,
