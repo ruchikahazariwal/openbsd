@@ -448,8 +448,6 @@ vm_dispatch_vmm(int fd, short event, void *arg)
 			memcpy(&vbp, imsg.data, sizeof(vbp));
 			vmr.vmr_result = 0;
 			vmr.vmr_id = vm->vm_vmid;
-			printf("%s: got vbp.vbp_memsize: %u & paze size: %u \n",
-				__func__, vbp.vbp_memsize, (uint32_t) PAGE_SIZE);
 			balloon_vm(vm, vbp.vbp_memsize / PAGE_SIZE);
 			imsg_compose_event(&vm->vm_iev,
 			    IMSG_VMDOP_BALLOON_VM_RESPONSE,

@@ -443,7 +443,6 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI:
 			switch (sz) {
 			case 4:
-				printf("%s: num_pages: %u \n",__func__, viombh.num_pages);
 				*data = (uint32_t)(viombh.num_pages);
 				break;
 			case 2:
@@ -503,7 +502,6 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 4:
 			switch (sz) {
 			case 4:
-				printf("%s: actual: %u \n",__func__, viombh.actual);
 				*data = (uint32_t)(viombh.actual);
 				break;
 			case 2:
@@ -2851,7 +2849,7 @@ virtio_start(struct vm_create_params *vcp)
 void
 balloon_vm(struct vmd_vm *vm, uint32_t size)
 {
-	viombh.num_pages = size;
+	viombh.num_pages = viombh.num_pages + size;
 
 	log_debug("%s: received request to balloon %d pages", __func__,
 	    size);

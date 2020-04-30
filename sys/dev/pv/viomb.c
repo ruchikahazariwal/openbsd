@@ -583,7 +583,7 @@ viomb_read_config(struct viomb_softc *sc)
 	sc->sc_npages = letoh32(reg);
 	reg = virtio_read_device_config_4(vsc, VIRTIO_BALLOON_CONFIG_ACTUAL);
 	sc->sc_actual = letoh32(reg);
-	printf(sc, "sc->sc_npages %u, sc->sc_actual %u\n",
+	VIOMBDEBUG(sc, "sc->sc_npages %u, sc->sc_actual %u\n",
 		   sc->sc_npages, sc->sc_actual);
 }
 
