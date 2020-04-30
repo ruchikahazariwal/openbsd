@@ -1,4 +1,4 @@
-/* $OpenBSD: window-tree.c,v 1.42 2019/10/15 08:30:36 nicm Exp $ */
+/* $OpenBSD: window-tree.c,v 1.47 2020/04/22 21:01:28 nicm Exp $ */
 
 /*
  * Copyright (c) 2017 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -33,13 +33,15 @@ static void		 window_tree_key(struct window_mode_entry *,
 			     struct client *, struct session *,
 			     struct winlink *, key_code, struct mouse_event *);
 
-#define WINDOW_TREE_DEFAULT_COMMAND "switch-client -t '%%'"
+#define WINDOW_TREE_DEFAULT_COMMAND "switch-client -Zt '%%'"
 
 #define WINDOW_TREE_DEFAULT_FORMAT \
 	"#{?pane_format," \
-		"#{pane_current_command} \"#{pane_title}\"" \
+		"#{?pane_marked,#[reverse],}" \
+		"#{pane_current_command}#{?pane_active,*,}#{?pane_marked,M,} \"#{pane_title}\"" \
 	"," \
 		"#{?window_format," \
+			"#{?window_marked_flag,#[reverse],}" \
 			"#{window_name}#{window_flags} " \
 			"(#{window_panes} panes)" \
 			"#{?#{==:#{window_panes},1}, \"#{pane_title}\",}" \
@@ -54,8 +56,9 @@ static void		 window_tree_key(struct window_mode_entry *,
 	"}"
 
 static const struct menu_item window_tree_menu_items[] = {
-	{ "Select", 'E', NULL },
-	{ "Expand", 'R', NULL },
+	{ "Select", '\r', NULL },
+	{ "Expand", KEYC_RIGHT, NULL },
+	{ "Mark", 'm', NULL },
 	{ "", KEYC_NONE, NULL },
 	{ "Tag", 't', NULL },
 	{ "Tag All", '\024', NULL },
@@ -317,7 +320,7 @@ window_tree_filter_pane(struct session *s, struct winlink *wl,
 
 static int
 window_tree_build_window(struct session *s, struct winlink *wl,
-    void* modedata, struct mode_tree_sort_criteria *sort_crit,
+    void *modedata, struct mode_tree_sort_criteria *sort_crit,
     struct mode_tree_item *parent, const char *filter)
 {
 	struct window_tree_modedata	*data = modedata;
@@ -383,7 +386,7 @@ empty:
 }
 
 static void
-window_tree_build_session(struct session *s, void* modedata,
+window_tree_build_session(struct session *s, void *modedata,
     struct mode_tree_sort_criteria *sort_crit, const char *filter)
 {
 	struct window_tree_modedata	*data = modedata;
@@ -833,7 +836,7 @@ window_tree_search(__unused void *modedata, void *itemdata, const char *ss)
 			return (0);
 		retval = (strstr(cmd, ss) != NULL);
 		free(cmd);
-		return retval;
+		return (retval);
 	}
 	return (0);
 }
@@ -973,7 +976,7 @@ window_tree_get_target(struct window_tree_itemdata *item,
 }
 
 static void
-window_tree_command_each(void* modedata, void* itemdata, struct client *c,
+window_tree_command_each(void *modedata, void *itemdata, struct client *c,
     __unused key_code key)
 {
 	struct window_tree_modedata	*data = modedata;
@@ -1030,7 +1033,7 @@ window_tree_command_free(void *modedata)
 }
 
 static void
-window_tree_kill_each(__unused void* modedata, void* itemdata,
+window_tree_kill_each(__unused void *modedata, void *itemdata,
     __unused struct client *c, __unused key_code key)
 {
 	struct window_tree_itemdata	*item = itemdata;
@@ -1170,7 +1173,7 @@ window_tree_key(struct window_mode_entry *wme, struct client *c,
 	struct window_tree_modedata	*data = wme->data;
 	struct window_tree_itemdata	*item, *new_item;
 	char				*name, *prompt = NULL;
-	struct cmd_find_state		 fs;
+	struct cmd_find_state		 fs, *fsp = &data->fs;
 	int				 finished;
 	u_int				 tagged, x, y, idx;
 	struct session			*ns;
@@ -1191,6 +1194,21 @@ window_tree_key(struct window_mode_entry *wme, struct client *c,
 		break;
 	case '>':
 		data->offset++;
+		break;
+	case 'H':
+		mode_tree_expand(data->data, (uint64_t)fsp->s);
+		mode_tree_expand(data->data, (uint64_t)fsp->wl);
+		if (!mode_tree_set_current(data->data, (uint64_t)wme->wp))
+			mode_tree_set_current(data->data, (uint64_t)fsp->wl);
+		break;
+	case 'm':
+		window_tree_pull_item(item, &ns, &nwl, &nwp);
+		server_set_marked(ns, nwl, nwp);
+		mode_tree_build(data->data);
+		break;
+	case 'M':
+		server_clear_marked();
+		mode_tree_build(data->data);
 		break;
 	case 'x':
 		window_tree_pull_item(item, &ns, &nwl, &nwp);

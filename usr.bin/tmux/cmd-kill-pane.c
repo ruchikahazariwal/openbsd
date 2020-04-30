@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-kill-pane.c,v 1.26 2018/04/10 10:48:44 nicm Exp $ */
+/* $OpenBSD: cmd-kill-pane.c,v 1.29 2020/04/13 10:59:58 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -37,17 +37,19 @@ const struct cmd_entry cmd_kill_pane_entry = {
 
 	.target = { 't', CMD_FIND_PANE, 0 },
 
-	.flags = 0,
+	.flags = CMD_AFTERHOOK,
 	.exec = cmd_kill_pane_exec
 };
 
 static enum cmd_retval
 cmd_kill_pane_exec(struct cmd *self, struct cmdq_item *item)
 {
-	struct winlink		*wl = item->target.wl;
-	struct window_pane	*loopwp, *tmpwp, *wp = item->target.wp;
+	struct args		*args = cmd_get_args(self);
+	struct cmd_find_state	*target = cmdq_get_target(item);
+	struct winlink		*wl = target->wl;
+	struct window_pane	*loopwp, *tmpwp, *wp = target->wp;
 
-	if (args_has(self->args, 'a')) {
+	if (args_has(args, 'a')) {
 		server_unzoom_window(wl->window);
 		TAILQ_FOREACH_SAFE(loopwp, &wl->window->panes, entry, tmpwp) {
 			if (loopwp == wp)

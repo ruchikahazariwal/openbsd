@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.32 2017/03/27 18:24:08 deraadt Exp $	*/
+/*	$OpenBSD: apm.c,v 1.36 2020/04/07 13:27:50 visa Exp $	*/
 
 /*-
  * Copyright (c) 2001 Alexander Guy.  All rights reserved.
@@ -93,8 +93,12 @@ int apm_getdefaultinfo(struct apm_power_info *);
 
 int apm_suspend(int state);
 
-struct filterops apmread_filtops =
-	{ 1, NULL, filt_apmrdetach, filt_apmread};
+const struct filterops apmread_filtops = {
+	.f_flags	= FILTEROP_ISFD,
+	.f_attach	= NULL,
+	.f_detach	= filt_apmrdetach,
+	.f_event	= filt_apmread,
+};
 
 int (*get_apminfo)(struct apm_power_info *) = apm_getdefaultinfo;
 
@@ -288,7 +292,7 @@ filt_apmrdetach(struct knote *kn)
 {
 	struct apm_softc *sc = (struct apm_softc *)kn->kn_hook;
 
-	SLIST_REMOVE(&sc->sc_note, kn, knote, kn_selnext);
+	klist_remove(&sc->sc_note, kn);
 }
 
 int
@@ -320,7 +324,7 @@ apmkqfilter(dev_t dev, struct knote *kn)
 	}
 
 	kn->kn_hook = (caddr_t)sc;
-	SLIST_INSERT_HEAD(&sc->sc_note, kn, kn_selnext);
+	klist_insert(&sc->sc_note, kn);
 
 	return (0);
 }
@@ -429,6 +433,8 @@ apm_suspend(int state)
 #if NWSDISPLAY > 0
 	wsdisplay_resume();
 #endif
+
+	apm_record_event(APM_NORMAL_RESUME, "System", "resumed from sleep");
 
 	return rv;
 }

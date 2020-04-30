@@ -1,4 +1,4 @@
-/*	$OpenBSD: ami.c,v 1.234 2018/08/14 05:22:21 jmatthew Exp $	*/
+/*	$OpenBSD: ami.c,v 1.241 2020/02/15 18:02:00 krw Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -59,6 +59,7 @@
 #include <sys/malloc.h>
 #include <sys/rwlock.h>
 #include <sys/pool.h>
+#include <sys/sensors.h>
 
 #include <machine/bus.h>
 
@@ -94,16 +95,15 @@ struct cfdriver ami_cd = {
 
 void	ami_scsi_cmd(struct scsi_xfer *);
 int	ami_scsi_ioctl(struct scsi_link *, u_long, caddr_t, int);
-void	amiminphys(struct buf *bp, struct scsi_link *sl);
 
 struct scsi_adapter ami_switch = {
-	ami_scsi_cmd, amiminphys, 0, 0, ami_scsi_ioctl
+	ami_scsi_cmd, NULL, NULL, NULL, ami_scsi_ioctl
 };
 
 void	ami_scsi_raw_cmd(struct scsi_xfer *);
 
 struct scsi_adapter ami_raw_switch = {
-	ami_scsi_raw_cmd, amiminphys, 0, 0,
+	ami_scsi_raw_cmd, NULL, NULL, NULL, NULL
 };
 
 void *		ami_get_ccb(void *);
@@ -1190,14 +1190,6 @@ ami_done_init(struct ami_softc *sc, struct ami_ccb *ccb)
 }
 
 void
-amiminphys(struct buf *bp, struct scsi_link *sl)
-{
-	if (bp->b_bcount > AMI_MAXFER)
-		bp->b_bcount = AMI_MAXFER;
-	minphys(bp);
-}
-
-void
 ami_copy_internal_data(struct scsi_xfer *xs, void *v, size_t size)
 {
 	size_t copy_cnt;
@@ -1652,7 +1644,7 @@ ami_drv_pt(struct ami_softc *sc, u_int8_t ch, u_int8_t tg, u_int8_t *cmd,
 	ami_start(sc, ccb);
 
 	while (ccb->ccb_state != AMI_CCB_READY)
-		tsleep(ccb, PRIBIO, "ami_drv_pt", 0);
+		tsleep_nsec(ccb, PRIBIO, "ami_drv_pt", INFSLP);
 
 	bus_dmamap_sync(sc->sc_dmat, ccb->ccb_dmamap, 0,
 	    ccb->ccb_dmamap->dm_mapsize, BUS_DMASYNC_POSTREAD);
@@ -1804,15 +1796,16 @@ ami_mgmt(struct ami_softc *sc, u_int8_t opcode, u_int8_t par1, u_int8_t par2,
 		ami_start(sc, ccb);
 		mtx_enter(&sc->sc_cmd_mtx);
 		while (ccb->ccb_state != AMI_CCB_READY)
-			msleep(ccb, &sc->sc_cmd_mtx, PRIBIO,"ami_mgmt", 0);
+			msleep_nsec(ccb, &sc->sc_cmd_mtx, PRIBIO, "ami_mgmt",
+			    INFSLP);
 		mtx_leave(&sc->sc_cmd_mtx);
 	} else {
 		/* change state must be run with id 0xfe and MUST be polled */
 		mtx_enter(&sc->sc_cmd_mtx);
 		sc->sc_drainio = 1;
 		while (!TAILQ_EMPTY(&sc->sc_ccb_runq)) {
-			if (msleep(sc, &sc->sc_cmd_mtx, PRIBIO,
-			    "amimgmt", hz * 60) == EWOULDBLOCK) {
+			if (msleep_nsec(sc, &sc->sc_cmd_mtx, PRIBIO,
+			    "amimgmt", SEC_TO_NSEC(60)) == EWOULDBLOCK) {
 				printf("%s: drain io timeout\n", DEVNAME(sc));
 				ccb->ccb_flags |= AMI_CCB_F_ERR;
 				goto restartio;

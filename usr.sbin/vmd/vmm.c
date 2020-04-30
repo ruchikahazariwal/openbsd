@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmm.c,v 1.93 2019/06/28 13:32:51 deraadt Exp $	*/
+/*	$OpenBSD: vmm.c,v 1.95 2019/12/11 06:45:17 pd Exp $	*/
 
 /*
  * Copyright (c) 2015 Mike Larkin <mlarkin@openbsd.org>
@@ -60,6 +60,7 @@ void vmm_run(struct privsep *, struct privsep_proc *, void *);
 void vmm_dispatch_vm(int, short, void *);
 int terminate_vm(struct vm_terminate_params *);
 int get_info_vm(struct privsep *, struct imsg *, int);
+int get_stats_vm(struct privsep *, struct imsg *, int);
 int opentap(char *);
 
 extern struct vmd *env;
@@ -109,6 +110,7 @@ vmm_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 	struct vmop_id		 vid;
 	struct vmop_result	 vmr;
 	struct vmop_create_params vmc;
+	struct vmop_balloon_params vbp;
 	uint32_t		 id = 0, peerid = imsg->hdr.peerid;
 	pid_t			 pid = 0;
 	unsigned int		 mode, flags;
@@ -198,7 +200,7 @@ vmm_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 				/*
 				 * Request reboot but mark the VM as shutting
 				 * down. This way we can terminate the VM after
-				 * the triple fault instead of reboot and 
+				 * the triple fault instead of reboot and
 				 * avoid being stuck in the ACPI-less powerdown
 				 * ("press any key to reboot") of the VM.
 				 */
@@ -268,6 +270,20 @@ vmm_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 			    -1, &verbose, sizeof(verbose));
 		}
 		break;
+	case IMSG_VMDOP_BALLOON_VM_REQUEST:
+		IMSG_SIZE_CHECK(imsg, &vbp);
+		memcpy(&vbp, imsg->data, sizeof(vbp));
+		id = vbp.vbp_id;
+		vm = vm_getbyvmid(id);
+		if ((vm = vm_getbyvmid(id)) == NULL) {
+			res = ENOENT;
+			cmd = IMSG_VMDOP_BALLOON_VM_RESPONSE;
+			break;
+		}
+		imsg_compose_event(&vm->vm_iev,
+		    imsg->hdr.type, imsg->hdr.peerid, imsg->hdr.pid,
+		    imsg->fd, &vbp, sizeof(vbp));
+		break;
 	case IMSG_VMDOP_PAUSE_VM:
 		IMSG_SIZE_CHECK(imsg, &vid);
 		memcpy(&vid, imsg->data, sizeof(vid));
@@ -316,6 +332,7 @@ vmm_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 		    imsg->hdr.peerid, vmc.vmc_owner.uid);
 		vm->vm_tty = imsg->fd;
 		vm->vm_state |= VM_STATE_RECEIVED;
+		vm->vm_state |= VM_STATE_PAUSED;
 		break;
 	case IMSG_VMDOP_RECEIVE_VM_END:
 		if ((vm = vm_getbyvmid(imsg->hdr.peerid)) == NULL) {
@@ -352,6 +369,7 @@ vmm_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 	case IMSG_VMDOP_PAUSE_VM_RESPONSE:
 	case IMSG_VMDOP_UNPAUSE_VM_RESPONSE:
 	case IMSG_VMDOP_TERMINATE_VM_RESPONSE:
+	case IMSG_VMDOP_BALLOON_VM_RESPONSE:
 		memset(&vmr, 0, sizeof(vmr));
 		vmr.vmr_result = res;
 		vmr.vmr_id = id;
@@ -590,7 +608,7 @@ terminate_vm(struct vm_terminate_params *vtp)
  * Opens the next available tap device, up to MAX_TAP.
  *
  * Parameters
- *  ifname: an optional buffer of at least IF_NAMESIZE bytes.
+ *  ifname: a buffer of at least IF_NAMESIZE bytes.
  *
  * Returns a file descriptor to the tap node opened, or -1 if no tap
  * devices were available.
@@ -601,16 +619,15 @@ opentap(char *ifname)
 	int i, fd;
 	char path[PATH_MAX];
 
-	strlcpy(ifname, "tap", IF_NAMESIZE);
 	for (i = 0; i < MAX_TAP; i++) {
 		snprintf(path, PATH_MAX, "/dev/tap%d", i);
 		fd = open(path, O_RDWR | O_NONBLOCK);
 		if (fd != -1) {
-			if (ifname != NULL)
-				snprintf(ifname, IF_NAMESIZE, "tap%d", i);
+			snprintf(ifname, IF_NAMESIZE, "tap%d", i);
 			return (fd);
 		}
 	}
+	strlcpy(ifname, "tap", IF_NAMESIZE);
 
 	return (-1);
 }

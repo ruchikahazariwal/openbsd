@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.100 2019/06/13 19:46:00 nicm Exp $
+# $OpenBSD: Makefile,v 1.104 2020/04/20 13:25:36 nicm Exp $
 
 PROG=	tmux
 SRCS=	alerts.c \
@@ -73,6 +73,7 @@ SRCS=	alerts.c \
 	control-notify.c \
 	control.c \
 	environ.c \
+	file.c \
 	format.c \
 	format-draw.c \
 	grid-view.c \
@@ -93,6 +94,7 @@ SRCS=	alerts.c \
 	options-table.c \
 	options.c \
 	paste.c \
+	popup.c \
 	proc.c \
 	procname.c \
 	regsub.c \
@@ -109,6 +111,7 @@ SRCS=	alerts.c \
 	style.c \
 	tmux.c \
 	tty-acs.c \
+	tty-features.c \
 	tty-keys.c \
 	tty-term.c \
 	tty.c \
@@ -129,7 +132,7 @@ CDIAGFLAGS+= -Wundef -Wbad-function-cast -Winline -Wcast-align
 
 CFLAGS += -I${.CURDIR}
 
-LDADD=  -lutil -lcurses -levent
-DPADD=  ${LIBUTIL} ${LIBCURSES} ${LIBEVENT}
+LDADD=  -lutil -lcurses -levent -lm
+DPADD=  ${LIBUTIL} ${LIBCURSES} ${LIBEVENT} ${LIBM}
 
 .include <bsd.prog.mk>

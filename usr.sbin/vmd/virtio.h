@@ -1,4 +1,4 @@
-/*	$OpenBSD: virtio.h,v 1.34 2018/12/06 09:20:06 claudio Exp $	*/
+/*	$OpenBSD: virtio.h,v 1.35 2019/12/11 06:45:16 pd Exp $	*/
 
 /*
  * Copyright (c) 2015 Mike Larkin <mlarkin@openbsd.org>
@@ -36,6 +36,9 @@
 #define VIONET_QUEUE_SIZE	256
 #define VIONET_QUEUE_MASK	(VIONET_QUEUE_SIZE - 1)
 
+#define VIOMBH_QUEUE_SIZE	64
+#define VIOMBH_QUEUE_MASK	(VIOMBH_QUEUE_SIZE - 1)
+
 /* VMM Control Interface shutdown timeout (in seconds) */
 #define VMMCI_TIMEOUT		3
 #define VMMCI_SHUTDOWN_TIMEOUT	30
@@ -45,8 +48,22 @@
  * vioblk - 1 queue
  * vionet - 2 queues
  * vioscsi - 3 queues
+ * viomb - 3 queues
  */
 #define VIRTIO_MAX_QUEUES	3
+
+#define VIRTIO_BALLOON_F_MUST_TELL_HOST 0
+#define VIRTIO_BALLOON_F_STATS_VQ	    1 /* Memory Stats virtqueue */
+#define VIRTIO_BALLOON_F_DEFLATE_ON_OOM	2
+
+#define VIRTIO_BALLOON_S_SWAP_IN  0   /* Amount of memory swapped in */
+#define VIRTIO_BALLOON_S_SWAP_OUT 1   /* Amount of memory swapped out */
+#define VIRTIO_BALLOON_S_MAJFLT   2   /* Number of major faults */
+#define VIRTIO_BALLOON_S_MINFLT   3   /* Number of minor faults */
+#define VIRTIO_BALLOON_S_MEMFREE  4   /* Total amount of free memory */
+#define VIRTIO_BALLOON_S_MEMTOT   5   /* Total amount of memory */
+#define VIRTIO_BALLOON_S_AVAIL    6   /* not used */
+#define VIRTIO_BALLOON_S_NR       7   /* not used */
 
 /*
  * This struct stores notifications from a virtio driver. There is
@@ -140,6 +157,19 @@ struct virtio_vq_acct {
 
 	/* pointer to the used vring */
 	struct vring_used *used;
+};
+
+struct viombh_dev {
+	struct virtio_io_cfg cfg;
+
+	struct virtio_vq_info vq[VIRTIO_MAX_QUEUES];
+
+	uint8_t pci_id;
+	int irq;
+	uint32_t vm_id;
+
+	uint32_t num_pages;
+	uint32_t actual;
 };
 
 struct viornd_dev {
@@ -259,6 +289,11 @@ struct ioinfo {
 	int error;
 };
 
+struct virtio_balloon_stat {
+	uint16_t tag;
+	uint64_t val;
+} __attribute__((packed));
+
 /* virtio.c */
 void virtio_init(struct vmd_vm *, int, int[][VM_MAX_BASE_PER_DISK], int *);
 void virtio_shutdown(struct vmd_vm *);
@@ -318,3 +353,13 @@ int vioscsi_io(int, uint16_t, uint32_t *, uint8_t *, void *, uint8_t);
 void vioscsi_update_qs(struct vioscsi_dev *);
 void vioscsi_update_qa(struct vioscsi_dev *);
 int vioscsi_notifyq(struct vioscsi_dev *);
+void virtio_stop(struct vm_create_params *);
+void virtio_start(struct vm_create_params *);
+
+int virtio_mbh_io(int, uint16_t, uint32_t *, uint8_t *, void *, uint8_t);
+void viombh_update_qs(void);
+void viombh_update_qa(void);
+int viombh_notifyq(void);
+int viombh_restore(int, struct vm_create_params *);
+int viombh_dump(int);
+void balloon_vm(struct vmd_vm *, uint32_t size);

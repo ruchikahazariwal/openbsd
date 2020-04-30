@@ -1,6 +1,6 @@
 define(MACHINE,sparc64)dnl
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.87 2016/09/11 19:59:54 deraadt Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.91 2020/01/23 02:47:29 dlg Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001-2006 Todd T. Fries <todd@OpenBSD.org>
@@ -103,6 +103,7 @@ _DEV(ttyU, 95)
 _DEV(uall)
 _DEV(ugen, 92)
 _DEV(uhid, 91)
+_DEV(fido, 137)
 _DEV(ulpt, 93)
 _DEV(usb, 90)
 _TITLE(spec)
@@ -112,12 +113,14 @@ _DEV(bpf, 105)
 _DEV(diskmap, 130)
 _DEV(drm, 87)
 _DEV(fdesc, 24)
+_DEV(dt, 30)
 _DEV(fuse, 134)
 _DEV(hotplug, 124)
 _DEV(oppr)
 _DEV(pci, 52)
 _DEV(pf, 73)
 _DEV(pppx, 131)
+_DEV(pppac, 138)
 _DEV(rmidi, 68)
 _DEV(rnd, 119)
 _DEV(tun, 111)
@@ -142,6 +145,7 @@ ramdisk)
 _std(2, 3, 76, 16)
 	M openprom	c 70 0 600
 	M mdesc		c 70 1 640 kmem
+	M pri		c 70 2 640 kmem
 	;;
 dnl
 dnl *** sparc64 specific targets

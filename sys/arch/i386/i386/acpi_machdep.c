@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.71 2019/08/27 22:39:53 deraadt Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.73 2020/04/12 09:21:19 kettenis Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -106,7 +106,8 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_iot = ba->ba_iot;
 	sc->sc_memt = ba->ba_memt;
-	sc->sc_dmat = &pci_bus_dma_tag;
+	sc->sc_cc_dmat = &pci_bus_dma_tag;
+	sc->sc_ci_dmat = &pci_bus_dma_tag;
 
 	acpi_attach_common(sc, ba->ba_acpipbase);
 }
@@ -446,6 +447,7 @@ acpi_resume_cpu(struct acpi_softc *sc, int state)
 
 	cpu_init(&cpu_info_primary);
 	cpu_ucode_apply(&cpu_info_primary);
+	cpu_tsx_disable(&cpu_info_primary);
 	
 	/* Re-initialise memory range handling on BSP */
 	if (mem_range_softc.mr_op != NULL)

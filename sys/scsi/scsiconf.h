@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.176 2019/09/27 23:07:42 krw Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.185 2020/02/06 21:06:15 krw Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -112,7 +112,7 @@ _2btol(u_int8_t *bytes)
 	u_int32_t rv;
 
 	rv = (bytes[0] << 8) | bytes[1];
-	return (rv);
+	return rv;
 }
 
 static __inline u_int32_t
@@ -121,7 +121,7 @@ _3btol(u_int8_t *bytes)
 	u_int32_t rv;
 
 	rv = (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];
-	return (rv);
+	return rv;
 }
 
 static __inline u_int32_t
@@ -131,7 +131,7 @@ _4btol(u_int8_t *bytes)
 
 	rv = (bytes[0] << 24) | (bytes[1] << 16) |
 	    (bytes[2] << 8) | bytes[3];
-	return (rv);
+	return rv;
 }
 
 static __inline u_int64_t
@@ -144,7 +144,7 @@ _5btol(u_int8_t *bytes)
 	     ((u_int64_t)bytes[2] << 16) |
 	     ((u_int64_t)bytes[3] << 8) |
 	     (u_int64_t)bytes[4];
-	return (rv);
+	return rv;
 }
 
 static __inline u_int64_t
@@ -160,7 +160,7 @@ _8btol(u_int8_t *bytes)
 	    (((u_int64_t)bytes[5]) << 16) |
 	    (((u_int64_t)bytes[6]) << 8) |
 	    ((u_int64_t)bytes[7]);
-	return (rv);
+	return rv;
 }
 
 #ifdef _KERNEL
@@ -199,30 +199,16 @@ struct devid *	devid_copy(struct devid *);
 void		devid_free(struct devid *);
 
 /*
- * The following documentation tries to describe the relationship between the
- * various structures defined in this file:
- *
- * each adapter type has a scsi_adapter struct. This describes the adapter and
- *    identifies routines that can be called to use the adapter.
- * each existing device position (scsibus + target + lun)
- *    can be described by a scsi_link struct.
- *    Only scsi positions that actually have devices, have a scsi_link
- *    structure assigned. so in effect each device has scsi_link struct.
- *    The scsi_link structure contains information identifying both the
- *    device driver and the adapter driver for that position on that scsi bus,
- *    and can be said to 'link' the two.
- * each individual scsi bus has an array that points to all the scsi_link
- *    structs associated with that scsi bus. Slots with no device have
- *    a NULL pointer.
- * each individual device also knows the address of its own scsi_link
- *    structure.
- *
- *				-------------
- *
- * The key to all this is the scsi_link structure which associates all the
- * other structures with each other in the correct configuration.  The
- * scsi_link is the connecting information that allows each part of the
- * scsi system to find the associated other parts.
+ * Each existing device (scsibus + target + lun)
+ *    - is described by a scsi_link struct.
+ * Each scsi_link struct
+ *    - identifies the device's softc and scsi_adapter.
+ * Each scsi_adapter struct
+ *    - contains pointers to the device's scsi functions.
+ * Each scsibus_softc has an SLIST
+ *    - holding pointers to the scsi_link structs of devices on that scsi bus.
+ * Each individual device
+ *    - knows the address of its scsi_link structure.
  */
 
 struct scsi_xfer;
@@ -241,7 +227,7 @@ extern int scsi_autoconf;
  */
 struct scsi_adapter {
 	void		(*scsi_cmd)(struct scsi_xfer *);
-	void		(*scsi_minphys)(struct buf *, struct scsi_link *);
+	void		(*dev_minphys)(struct buf *, struct scsi_link *);
 	int		(*dev_probe)(struct scsi_link *);
 	void		(*dev_free)(struct scsi_link *);
 	int		(*ioctl)(struct scsi_link *, u_long, caddr_t, int);
@@ -333,7 +319,7 @@ struct scsi_link {
 #define SDEV_ONLYBIG		0x4000  /* always use READ_BIG and WRITE_BIG */
 	int	(*interpret_sense)(struct scsi_xfer *);
 	void	*device_softc;		/* needed for call to foo_start */
-	struct	scsi_adapter *adapter;	/* adapter entry points etc. */
+	struct	scsi_adapter *adapter;	/* adapter entry points */
 	void	*adapter_softc;		/* needed for call to foo_scsi_cmd */
 	struct	scsibus_softc *bus;	/* link to the scsibus we're on */
 	struct	scsi_inquiry_data inqdata; /* copy of INQUIRY data from probe */
@@ -475,20 +461,20 @@ const void *scsi_inqmatch(struct scsi_inquiry_data *, const void *, int,
 void	scsi_init(void);
 int	scsi_test_unit_ready(struct scsi_link *, int, int);
 int	scsi_inquire(struct scsi_link *, struct scsi_inquiry_data *, int);
+int	scsi_read_cap_10(struct scsi_link *, struct scsi_read_cap_data *, int);
+int	scsi_read_cap_16(struct scsi_link *, struct scsi_read_cap_data_16 *,
+	    int);
 int	scsi_inquire_vpd(struct scsi_link *, void *, u_int, u_int8_t, int);
 void	scsi_init_inquiry(struct scsi_xfer *, u_int8_t, u_int8_t,
 	    void *, size_t);
 int	scsi_prevent(struct scsi_link *, int, int);
 int	scsi_start(struct scsi_link *, int, int);
-int	scsi_mode_sense(struct scsi_link *, int, int, struct scsi_mode_header *,
-	    size_t, int, int);
-int	scsi_mode_sense_big(struct scsi_link *, int, int,
-	    struct scsi_mode_header_big *, size_t, int, int);
-void *	scsi_mode_sense_page(struct scsi_mode_header *, int);
-void *	scsi_mode_sense_big_page(struct scsi_mode_header_big *, int);
+void	scsi_parse_blkdesc(struct scsi_link *, union scsi_mode_sense_buf *, int,
+	    u_int32_t *, u_int64_t *, u_int32_t *);
 int	scsi_do_mode_sense(struct scsi_link *, int,
-	    union scsi_mode_sense_buf *, void **, u_int32_t *, u_int64_t *,
-	    u_int32_t *, int, int, int *);
+	    union scsi_mode_sense_buf *, void **, int, int, int *);
+void	scsi_parse_blkdesc(struct scsi_link *, union scsi_mode_sense_buf *, int,
+	    u_int32_t *, u_int64_t *, u_int32_t *);
 int	scsi_mode_select(struct scsi_link *, int, struct scsi_mode_header *,
 	    int, int);
 int	scsi_mode_select_big(struct scsi_link *, int,
@@ -498,7 +484,6 @@ int	scsi_do_ioctl(struct scsi_link *, u_long, caddr_t, int);
 void	sc_print_addr(struct scsi_link *);
 int	scsi_report_luns(struct scsi_link *, int,
 	    struct scsi_report_luns_data *, u_int32_t, int, int);
-void	scsi_minphys(struct buf *, struct scsi_link *);
 int	scsi_interpret_sense(struct scsi_xfer *);
 
 void	scsi_print_sense(struct scsi_xfer *);

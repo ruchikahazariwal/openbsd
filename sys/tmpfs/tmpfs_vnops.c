@@ -1,4 +1,4 @@
-/*	$OpenBSD: tmpfs_vnops.c,v 1.36 2019/08/05 08:35:59 anton Exp $	*/
+/*	$OpenBSD: tmpfs_vnops.c,v 1.40 2020/04/07 13:27:52 visa Exp $	*/
 /*	$NetBSD: tmpfs_vnops.c,v 1.100 2012/11/05 17:27:39 dholland Exp $	*/
 
 /*
@@ -57,7 +57,7 @@ int tmpfs_kqfilter(void *v);
 /*
  * vnode operations vector used for files stored in a tmpfs file system.
  */
-struct vops tmpfs_vops = {
+const struct vops tmpfs_vops = {
 	.vop_lookup	= tmpfs_lookup,
 	.vop_create	= tmpfs_create,
 	.vop_mknod	= tmpfs_mknod,
@@ -2587,12 +2587,26 @@ int filt_tmpfsread(struct knote *kn, long hint);
 int filt_tmpfswrite(struct knote *kn, long hint);
 int filt_tmpfsvnode(struct knote *kn, long hint);
 
-struct filterops tmpfsread_filtops = 
-	{ 1, NULL, filt_tmpfsdetach, filt_tmpfsread };
-struct filterops tmpfswrite_filtops = 
-	{ 1, NULL, filt_tmpfsdetach, filt_tmpfswrite };
-struct filterops tmpfsvnode_filtops = 
-	{ 1, NULL, filt_tmpfsdetach, filt_tmpfsvnode };
+const struct filterops tmpfsread_filtops = {
+	.f_flags	= FILTEROP_ISFD,
+	.f_attach	= NULL,
+	.f_detach	= filt_tmpfsdetach,
+	.f_event	= filt_tmpfsread,
+};
+
+const struct filterops tmpfswrite_filtops = {
+	.f_flags	= FILTEROP_ISFD,
+	.f_attach	= NULL,
+	.f_detach	= filt_tmpfsdetach,
+	.f_event	= filt_tmpfswrite,
+};
+
+const struct filterops tmpfsvnode_filtops = {
+	.f_flags	= FILTEROP_ISFD,
+	.f_attach	= NULL,
+	.f_detach	= filt_tmpfsdetach,
+	.f_event	= filt_tmpfsvnode,
+};
 
 int
 tmpfs_kqfilter(void *v)
@@ -2617,7 +2631,7 @@ tmpfs_kqfilter(void *v)
 
 	kn->kn_hook = (caddr_t)vp;
 
-	SLIST_INSERT_HEAD(&vp->v_selectinfo.si_note, kn, kn_selnext);
+	klist_insert(&vp->v_selectinfo.si_note, kn);
 
 	return (0);
 }
@@ -2627,7 +2641,7 @@ filt_tmpfsdetach(struct knote *kn)
 {
 	struct vnode *vp = (struct vnode *)kn->kn_hook;
 
-	SLIST_REMOVE(&vp->v_selectinfo.si_note, kn, knote, kn_selnext);
+	klist_remove(&vp->v_selectinfo.si_note, kn);
 }
 
 int

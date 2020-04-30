@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_socket.c,v 1.234 2019/07/22 15:34:07 robert Exp $	*/
+/*	$OpenBSD: uipc_socket.c,v 1.244 2020/04/12 16:15:18 anton Exp $	*/
 /*	$NetBSD: uipc_socket.c,v 1.21 1996/02/04 02:17:52 christos Exp $	*/
 
 /*
@@ -72,12 +72,26 @@ void	filt_sowdetach(struct knote *kn);
 int	filt_sowrite(struct knote *kn, long hint);
 int	filt_solisten(struct knote *kn, long hint);
 
-struct filterops solisten_filtops =
-	{ 1, NULL, filt_sordetach, filt_solisten };
-struct filterops soread_filtops =
-	{ 1, NULL, filt_sordetach, filt_soread };
-struct filterops sowrite_filtops =
-	{ 1, NULL, filt_sowdetach, filt_sowrite };
+const struct filterops solisten_filtops = {
+	.f_flags	= FILTEROP_ISFD,
+	.f_attach	= NULL,
+	.f_detach	= filt_sordetach,
+	.f_event	= filt_solisten,
+};
+
+const struct filterops soread_filtops = {
+	.f_flags	= FILTEROP_ISFD,
+	.f_attach	= NULL,
+	.f_detach	= filt_sordetach,
+	.f_event	= filt_soread,
+};
+
+const struct filterops sowrite_filtops = {
+	.f_flags	= FILTEROP_ISFD,
+	.f_attach	= NULL,
+	.f_detach	= filt_sowdetach,
+	.f_event	= filt_sowrite,
+};
 
 
 #ifndef SOMINCONN
@@ -141,6 +155,8 @@ socreate(int dom, struct socket **aso, int type, int proto)
 	so->so_egid = p->p_ucred->cr_gid;
 	so->so_cpid = p->p_p->ps_pid;
 	so->so_proto = prp;
+	so->so_snd.sb_timeo_nsecs = INFSLP;
+	so->so_rcv.sb_timeo_nsecs = INFSLP;
 
 	s = solock(so);
 	error = (*prp->pr_attach)(so, proto);
@@ -251,6 +267,15 @@ sofree(struct socket *so, int s)
 	}
 }
 
+static inline uint64_t
+solinger_nsec(struct socket *so)
+{
+	if (so->so_linger == 0)
+		return INFSLP;
+
+	return SEC_TO_NSEC(so->so_linger);
+}
+
 /*
  * Close a socket on last file table reference removal.
  * Initiate disconnect if connected.
@@ -288,9 +313,9 @@ soclose(struct socket *so, int flags)
 			    (flags & MSG_DONTWAIT))
 				goto drop;
 			while (so->so_state & SS_ISCONNECTED) {
-				error = sosleep(so, &so->so_timeo,
+				error = sosleep_nsec(so, &so->so_timeo,
 				    PSOCK | PCATCH, "netcls",
-				    so->so_linger * hz);
+				    solinger_nsec(so));
 				if (error)
 					break;
 			}
@@ -1099,6 +1124,7 @@ sorflush(struct socket *so)
 	aso.so_rcv = *sb;
 	memset(&sb->sb_startzero, 0,
 	     (caddr_t)&sb->sb_endzero - (caddr_t)&sb->sb_startzero);
+	sb->sb_timeo_nsecs = INFSLP;
 	if (pr->pr_flags & PR_RIGHTS && pr->pr_domain->dom_dispose)
 		(*pr->pr_domain->dom_dispose)(aso.so_rcv.sb_mb);
 	sbrelease(&aso, &aso.so_rcv);
@@ -1233,7 +1259,15 @@ sosplice(struct socket *so, int fd, off_t max, struct timeval *tv)
 	sbunlock(sosp, &sosp->so_snd);
 	sbunlock(so, &so->so_rcv);
  frele:
+	/*
+	 * FRELE() must not be called with the socket lock held. It is safe to
+	 * release the lock here as long as no other operation happen on the
+	 * socket when sosplice() returns. The dance could be avoided by
+	 * grabbing the socket lock inside this function.
+	 */
+	sounlock(so, SL_LOCKED);
 	FRELE(fp, curproc);
+	solock(so);
 	return (error);
 }
 
@@ -1404,9 +1438,15 @@ somove(struct socket *so, int wait)
 	/*
 	 * By splicing sockets connected to localhost, userland might create a
 	 * loop.  Dissolve splicing with error if loop is detected by counter.
+	 *
+	 * If we deal with looped broadcast/multicast packet we bail out with
+	 * no error to suppress splice termination.
 	 */
-	if ((m->m_flags & M_PKTHDR) && m->m_pkthdr.ph_loopcnt++ >= M_MAXLOOP) {
-		error = ELOOP;
+	if ((m->m_flags & M_PKTHDR) &&
+	    ((m->m_pkthdr.ph_loopcnt++ >= M_MAXLOOP) ||
+	    ((m->m_flags & M_LOOP) && (m->m_flags & (M_BCAST|M_MCAST))))) {
+		if (m->m_pkthdr.ph_loopcnt >= M_MAXLOOP)
+			error = ELOOP;
 		goto release;
 	}
 
@@ -1747,22 +1787,25 @@ sosetopt(struct socket *so, int level, int optname, struct mbuf *m)
 		case SO_RCVTIMEO:
 		    {
 			struct timeval tv;
-			int val;
+			uint64_t nsecs;
 
 			if (m == NULL || m->m_len < sizeof (tv))
 				return (EINVAL);
 			memcpy(&tv, mtod(m, struct timeval *), sizeof tv);
-			val = tvtohz(&tv);
-			if (val > USHRT_MAX)
+			if (!timerisvalid(&tv))
+				return (EINVAL);
+			nsecs = TIMEVAL_TO_NSEC(&tv);
+			if (nsecs == UINT64_MAX)
 				return (EDOM);
-
+			if (nsecs == 0)
+				nsecs = INFSLP;
 			switch (optname) {
 
 			case SO_SNDTIMEO:
-				so->so_snd.sb_timeo = val;
+				so->so_snd.sb_timeo_nsecs = nsecs;
 				break;
 			case SO_RCVTIMEO:
-				so->so_rcv.sb_timeo = val;
+				so->so_rcv.sb_timeo_nsecs = nsecs;
 				break;
 			}
 			break;
@@ -1896,13 +1939,14 @@ sogetopt(struct socket *so, int level, int optname, struct mbuf *m)
 		case SO_RCVTIMEO:
 		    {
 			struct timeval tv;
-			int val = (optname == SO_SNDTIMEO ?
-			    so->so_snd.sb_timeo : so->so_rcv.sb_timeo);
+			uint64_t nsecs = (optname == SO_SNDTIMEO ?
+			    so->so_snd.sb_timeo_nsecs :
+			    so->so_rcv.sb_timeo_nsecs);
 
 			m->m_len = sizeof(struct timeval);
 			memset(&tv, 0, sizeof(tv));
-			tv.tv_sec = val / hz;
-			tv.tv_usec = (val % hz) * tick;
+			if (nsecs != INFSLP)
+				NSEC_TO_TIMEVAL(nsecs, &tv);
 			memcpy(mtod(m, struct timeval *), &tv, sizeof tv);
 			break;
 		    }
@@ -1958,10 +2002,8 @@ sogetopt(struct socket *so, int level, int optname, struct mbuf *m)
 void
 sohasoutofband(struct socket *so)
 {
-	KERNEL_LOCK();
 	pgsigio(&so->so_sigio, SIGURG, 0);
 	selwakeup(&so->so_rcv.sb_sel);
-	KERNEL_UNLOCK();
 }
 
 int
@@ -1988,7 +2030,7 @@ soo_kqfilter(struct file *fp, struct knote *kn)
 		return (EINVAL);
 	}
 
-	SLIST_INSERT_HEAD(&sb->sb_sel.si_note, kn, kn_selnext);
+	klist_insert(&sb->sb_sel.si_note, kn);
 	sb->sb_flagsintr |= SB_KNOTE;
 
 	return (0);
@@ -2001,8 +2043,8 @@ filt_sordetach(struct knote *kn)
 
 	KERNEL_ASSERT_LOCKED();
 
-	SLIST_REMOVE(&so->so_rcv.sb_sel.si_note, kn, knote, kn_selnext);
-	if (SLIST_EMPTY(&so->so_rcv.sb_sel.si_note))
+	klist_remove(&so->so_rcv.sb_sel.si_note, kn);
+	if (klist_empty(&so->so_rcv.sb_sel.si_note))
 		so->so_rcv.sb_flagsintr &= ~SB_KNOTE;
 }
 
@@ -2010,8 +2052,10 @@ int
 filt_soread(struct knote *kn, long hint)
 {
 	struct socket *so = kn->kn_fp->f_data;
-	int rv;
+	int s, rv;
 
+	if ((hint & NOTE_SUBMIT) == 0)
+		s = solock(so);
 	kn->kn_data = so->so_rcv.sb_cc;
 #ifdef SOCKET_SPLICE
 	if (isspliced(so)) {
@@ -2029,6 +2073,8 @@ filt_soread(struct knote *kn, long hint)
 	} else {
 		rv = (kn->kn_data >= so->so_rcv.sb_lowat);
 	}
+	if ((hint & NOTE_SUBMIT) == 0)
+		sounlock(so, s);
 
 	return rv;
 }
@@ -2040,8 +2086,8 @@ filt_sowdetach(struct knote *kn)
 
 	KERNEL_ASSERT_LOCKED();
 
-	SLIST_REMOVE(&so->so_snd.sb_sel.si_note, kn, knote, kn_selnext);
-	if (SLIST_EMPTY(&so->so_snd.sb_sel.si_note))
+	klist_remove(&so->so_snd.sb_sel.si_note, kn);
+	if (klist_empty(&so->so_snd.sb_sel.si_note))
 		so->so_snd.sb_flagsintr &= ~SB_KNOTE;
 }
 
@@ -2049,8 +2095,10 @@ int
 filt_sowrite(struct knote *kn, long hint)
 {
 	struct socket *so = kn->kn_fp->f_data;
-	int rv;
+	int s, rv;
 
+	if ((hint & NOTE_SUBMIT) == 0)
+		s = solock(so);
 	kn->kn_data = sbspace(so, &so->so_snd);
 	if (so->so_state & SS_CANTSENDMORE) {
 		kn->kn_flags |= EV_EOF;
@@ -2066,6 +2114,8 @@ filt_sowrite(struct knote *kn, long hint)
 	} else {
 		rv = (kn->kn_data >= so->so_snd.sb_lowat);
 	}
+	if ((hint & NOTE_SUBMIT) == 0)
+		sounlock(so, s);
 
 	return (rv);
 }
@@ -2074,8 +2124,13 @@ int
 filt_solisten(struct knote *kn, long hint)
 {
 	struct socket *so = kn->kn_fp->f_data;
+	int s;
 
+	if ((hint & NOTE_SUBMIT) == 0)
+		s = solock(so);
 	kn->kn_data = so->so_qlen;
+	if ((hint & NOTE_SUBMIT) == 0)
+		sounlock(so, s);
 
 	return (kn->kn_data != 0);
 }
@@ -2102,7 +2157,7 @@ sobuf_print(struct sockbuf *sb,
 	(*pr)("\tsb_sel: ...\n");
 	(*pr)("\tsb_flagsintr: %d\n", sb->sb_flagsintr);
 	(*pr)("\tsb_flags: %i\n", sb->sb_flags);
-	(*pr)("\tsb_timeo: %i\n", sb->sb_timeo);
+	(*pr)("\tsb_timeo_nsecs: %llu\n", sb->sb_timeo_nsecs);
 }
 
 void

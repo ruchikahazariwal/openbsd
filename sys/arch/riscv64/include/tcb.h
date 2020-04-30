@@ -25,7 +25,9 @@
 static inline void
 __riscv64_set_tcb(void *tcb)
 {
-	__asm volatile("mv tp, %0" : : "r" (tcb));
+	// XXX While running in the kernel, we do not have a register
+	// which holds the current tcb -- do nothing?
+	// __asm volatile("mv tp, %0" : : "r" (tcb));
 }
 
 #define TCB_GET(p)		\

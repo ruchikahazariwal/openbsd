@@ -1,4 +1,4 @@
-/* $OpenBSD: dsdt.c,v 1.248 2019/10/10 04:09:04 mlarkin Exp $ */
+/* $OpenBSD: dsdt.c,v 1.250 2020/04/06 23:16:50 cheloha Exp $ */
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
  *
@@ -465,15 +465,14 @@ void
 acpi_sleep(int ms, char *reason)
 {
 	static int acpinowait;
-	int to = ms * hz / 1000;
+
+	/* XXX ACPI integers are supposed to be unsigned. */
+	ms = MAX(1, ms);
 
 	if (cold)
 		delay(ms * 1000);
-	else {
-		if (to <= 0)
-			to = 1;
-		tsleep(&acpinowait, PWAIT, reason, to);
-	}
+	else
+		tsleep_nsec(&acpinowait, PWAIT, reason, MSEC_TO_NSEC(ms));
 }
 
 void
@@ -1503,6 +1502,12 @@ char *aml_valid_osi[] = {
 	"Windows 2012",
 	"Windows 2013",
 	"Windows 2015",
+	"Windows 2016",
+	"Windows 2017",
+	"Windows 2017.2",
+	"Windows 2018",
+	"Windows 2018.2",
+	"Windows 2019",
 	NULL
 };
 

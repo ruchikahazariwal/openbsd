@@ -1,9 +1,11 @@
-#	$OpenBSD: Makefile,v 1.104 2019/09/03 08:37:45 djm Exp $
+#	$OpenBSD: Makefile,v 1.108 2020/04/20 04:44:47 djm Exp $
 
 .ifndef SKIP_UNIT
 SUBDIR=		unittests
 .endif
 SUBDIR+=	misc
+
+REGRESS_SETUP_ONCE=misc	# For sk-dummy.so
 
 REGRESS_FAIL_EARLY?=	yes
 REGRESS_TARGETS=	t1 t2 t3 t4 t5 t6 t7 t8 t9 t10 t11 t12
@@ -55,6 +57,7 @@ LTESTS= 	connect \
 		cfgparse \
 		cfgmatch \
 		cfgmatchlisten \
+		percent \
 		addrmatch \
 		localcommand \
 		forcecommand \
@@ -76,9 +79,11 @@ LTESTS= 	connect \
 		principals-command \
 		cert-file \
 		cfginclude \
+		servcfginclude \
 		allow-deny-users \
 		authinfo \
-		sshsig
+		sshsig \
+		keygen-comment
 
 INTEROP_TESTS=	putty-transfer putty-ciphers putty-kex conch-ciphers
 #INTEROP_TESTS+=ssh-com ssh-com-client ssh-com-keygen ssh-com-sftp
@@ -106,7 +111,7 @@ CLEANFILES+=	*.core actual agent-key.* authorized_keys_${USERNAME} \
 		sftp-server.sh sftp.log ssh-log-wrapper.sh ssh.log \
 		ssh-rsa_oldfmt \
 		ssh_config ssh_config.* ssh_proxy ssh_proxy_bak \
-		ssh_proxy_envpass sshd.log sshd_config sshd_config.orig \
+		ssh_proxy_envpass sshd.log sshd_config sshd_config.* \
 		sshd_proxy sshd_proxy.* sshd_proxy_bak sshd_proxy_orig \
 		t10.out t10.out.pub t12.out t12.out.pub t2.out t3.out \
 		t6.out1 t6.out2 t7.out t7.out.pub t8.out t8.out.pub \

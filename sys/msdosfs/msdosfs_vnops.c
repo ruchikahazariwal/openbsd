@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_vnops.c,v 1.126 2019/08/05 08:35:59 anton Exp $	*/
+/*	$OpenBSD: msdosfs_vnops.c,v 1.132 2020/04/07 13:27:52 visa Exp $	*/
 /*	$NetBSD: msdosfs_vnops.c,v 1.63 1997/10/17 11:24:19 ws Exp $	*/
 
 /*-
@@ -185,15 +185,6 @@ msdosfs_mknod(void *v)
 int
 msdosfs_open(void *v)
 {
-#if 0
-	struct vop_open_args /* {
-		struct vnode *a_vp;
-		int a_mode;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap;
-#endif
-
 	return (0);
 }
 
@@ -220,14 +211,11 @@ msdosfs_access(void *v)
 	struct msdosfsmount *pmp = dep->de_pmp;
 	mode_t dosmode;
 
-	dosmode = (S_IRUSR|S_IRGRP|S_IROTH);
+	dosmode = (S_IRUSR | S_IRGRP | S_IROTH);
 	if ((dep->de_Attributes & ATTR_READONLY) == 0)
-		dosmode |= (S_IWUSR|S_IWGRP|S_IWOTH);
-	if (dep->de_Attributes & ATTR_DIRECTORY) {
-		dosmode |= (dosmode & S_IRUSR) ? S_IXUSR : 0;
-		dosmode |= (dosmode & S_IRGRP) ? S_IXGRP : 0;
-		dosmode |= (dosmode & S_IROTH) ? S_IXOTH : 0;
-	}
+		dosmode |= (S_IWUSR | S_IWGRP | S_IWOTH);
+	if (dep->de_Attributes & ATTR_DIRECTORY)
+		dosmode |= (S_IXUSR | S_IXGRP | S_IXOTH);
 	dosmode &= pmp->pm_mask;
 
 	return (vaccess(ap->a_vp->v_type, dosmode, pmp->pm_uid, pmp->pm_gid,
@@ -778,17 +766,6 @@ out:
 int
 msdosfs_ioctl(void *v)
 {
-#if 0
-	struct vop_ioctl_args /* {
-		struct vnode *a_vp;
-		uint32_t a_command;
-		caddr_t a_data;
-		int a_fflag;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap;
-#endif
-
 	return (ENOTTY);
 }
 
@@ -1921,7 +1898,7 @@ fileidhash(uint64_t fileid)
 }
 
 /* Global vfs data structures for msdosfs */
-struct vops msdosfs_vops = {
+const struct vops msdosfs_vops = {
 	.vop_lookup	= msdosfs_lookup,
 	.vop_create	= msdosfs_create,
 	.vop_mknod	= msdosfs_mknod,
@@ -1959,12 +1936,26 @@ struct vops msdosfs_vops = {
 	.vop_revoke	= vop_generic_revoke,
 };
 
-struct filterops msdosfsread_filtops =
-	{ 1, NULL, filt_msdosfsdetach, filt_msdosfsread };
-struct filterops msdosfswrite_filtops =
-	{ 1, NULL, filt_msdosfsdetach, filt_msdosfswrite };
-struct filterops msdosfsvnode_filtops =
-	{ 1, NULL, filt_msdosfsdetach, filt_msdosfsvnode };
+const struct filterops msdosfsread_filtops = {
+	.f_flags	= FILTEROP_ISFD,
+	.f_attach	= NULL,
+	.f_detach	= filt_msdosfsdetach,
+	.f_event	= filt_msdosfsread,
+};
+
+const struct filterops msdosfswrite_filtops = {
+	.f_flags	= FILTEROP_ISFD,
+	.f_attach	= NULL,
+	.f_detach	= filt_msdosfsdetach,
+	.f_event	= filt_msdosfswrite,
+};
+
+const struct filterops msdosfsvnode_filtops = {
+	.f_flags	= FILTEROP_ISFD,
+	.f_attach	= NULL,
+	.f_detach	= filt_msdosfsdetach,
+	.f_event	= filt_msdosfsvnode,
+};
 
 int
 msdosfs_kqfilter(void *v)
@@ -1989,7 +1980,7 @@ msdosfs_kqfilter(void *v)
 
 	kn->kn_hook = (caddr_t)vp;
 
-	SLIST_INSERT_HEAD(&vp->v_selectinfo.si_note, kn, kn_selnext);
+	klist_insert(&vp->v_selectinfo.si_note, kn);
 
 	return (0);
 }
@@ -1999,7 +1990,7 @@ filt_msdosfsdetach(struct knote *kn)
 {
 	struct vnode *vp = (struct vnode *)kn->kn_hook;
 
-	SLIST_REMOVE(&vp->v_selectinfo.si_note, kn, knote, kn_selnext);
+	klist_remove(&vp->v_selectinfo.si_note, kn);
 }
 
 int

@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.698 2019/08/26 18:53:58 tobhe Exp $	*/
+/*	$OpenBSD: parse.y,v 1.701 2020/01/28 15:40:35 bket Exp $	*/
 
 /*
  * Copyright (c) 2001 Markus Friedl.  All rights reserved.
@@ -2968,7 +2968,7 @@ uid_item	: uid				{
 			$$->tail = $$;
 		}
 		| unaryop uid			{
-			if ($2 == UID_MAX && $1 != PF_OP_EQ && $1 != PF_OP_NE) {
+			if ($2 == -1 && $1 != PF_OP_EQ && $1 != PF_OP_NE) {
 				yyerror("user unknown requires operator = or "
 				    "!=");
 				YYERROR;
@@ -2983,7 +2983,7 @@ uid_item	: uid				{
 			$$->tail = $$;
 		}
 		| uid PORTBINARY uid		{
-			if ($1 == UID_MAX || $3 == UID_MAX) {
+			if ($1 == -1 || $3 == -1) {
 				yyerror("user unknown requires operator = or "
 				    "!=");
 				YYERROR;
@@ -3001,7 +3001,7 @@ uid_item	: uid				{
 
 uid		: STRING			{
 			if (!strcmp($1, "unknown"))
-				$$ = UID_MAX;
+				$$ = -1;
 			else {
 				uid_t uid;
 
@@ -3046,7 +3046,7 @@ gid_item	: gid				{
 			$$->tail = $$;
 		}
 		| unaryop gid			{
-			if ($2 == GID_MAX && $1 != PF_OP_EQ && $1 != PF_OP_NE) {
+			if ($2 == -1 && $1 != PF_OP_EQ && $1 != PF_OP_NE) {
 				yyerror("group unknown requires operator = or "
 				    "!=");
 				YYERROR;
@@ -3061,7 +3061,7 @@ gid_item	: gid				{
 			$$->tail = $$;
 		}
 		| gid PORTBINARY gid		{
-			if ($1 == GID_MAX || $3 == GID_MAX) {
+			if ($1 == -1 || $3 == -1) {
 				yyerror("group unknown requires operator = or "
 				    "!=");
 				YYERROR;
@@ -3079,7 +3079,7 @@ gid_item	: gid				{
 
 gid		: STRING			{
 			if (!strcmp($1, "unknown"))
-				$$ = GID_MAX;
+				$$ = -1;
 			else {
 				gid_t gid;
 
@@ -4124,7 +4124,7 @@ process_tabledef(char *name, struct table_opts *opts, int popts)
 	    pfctl_define_table(name, opts->flags, opts->init_addr,
 	    pf->anchor->path, &ab, pf->anchor->ruleset.tticket)) {
 		yyerror("cannot define table %s: %s", name,
-		    pfr_strerror(errno));
+		    pf_strerror(errno));
 		goto _error;
 	}
 	pf->tdirty = 1;
@@ -5637,16 +5637,11 @@ mv_rules(struct pf_ruleset *src, struct pf_ruleset *dst)
 {
 	struct pf_rule *r;
 
-	while ((r = TAILQ_FIRST(src->rules.active.ptr)) != NULL) {
-		TAILQ_REMOVE(src->rules.active.ptr, r, entries);
-		TAILQ_INSERT_TAIL(dst->rules.active.ptr, r, entries);
+	TAILQ_FOREACH(r, src->rules.active.ptr, entries)
 		dst->anchor->match++;
-	}
+	TAILQ_CONCAT(dst->rules.active.ptr, src->rules.active.ptr, entries);
 	src->anchor->match = 0;
-	while ((r = TAILQ_FIRST(src->rules.inactive.ptr)) != NULL) {
-		TAILQ_REMOVE(src->rules.inactive.ptr, r, entries);
-		TAILQ_INSERT_TAIL(dst->rules.inactive.ptr, r, entries);
-	}
+	TAILQ_CONCAT(dst->rules.inactive.ptr, src->rules.inactive.ptr, entries);
 }
 
 void

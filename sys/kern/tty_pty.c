@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty_pty.c,v 1.94 2019/07/19 00:17:16 cheloha Exp $	*/
+/*	$OpenBSD: tty_pty.c,v 1.98 2020/04/07 13:27:51 visa Exp $	*/
 /*	$NetBSD: tty_pty.c,v 1.33.4.1 1996/06/02 09:08:11 mrg Exp $	*/
 
 /*
@@ -477,8 +477,8 @@ ptcread(dev_t dev, struct uio *uio, int flag)
 			return (0);	/* EOF */
 		if (flag & IO_NDELAY)
 			return (EWOULDBLOCK);
-		error = tsleep(&tp->t_outq.c_cf, TTIPRI | PCATCH,
-		    ttyin, 0);
+		error = tsleep_nsec(&tp->t_outq.c_cf, TTIPRI | PCATCH, ttyin,
+		    INFSLP);
 		if (error)
 			return (error);
 	}
@@ -587,8 +587,7 @@ block:
 			error = EWOULDBLOCK;
 		goto done;
 	}
-	error = tsleep(&tp->t_rawq.c_cf, TTOPRI | PCATCH,
-	    ttyout, 0);
+	error = tsleep_nsec(&tp->t_rawq.c_cf, TTOPRI | PCATCH, ttyout, INFSLP);
 	if (error == 0)
 		goto again;
 
@@ -656,7 +655,7 @@ filt_ptcrdetach(struct knote *kn)
 	int s;
 
 	s = spltty();
-	SLIST_REMOVE(&pti->pt_selr.si_note, kn, knote, kn_selnext);
+	klist_remove(&pti->pt_selr.si_note, kn);
 	splx(s);
 }
 
@@ -692,7 +691,7 @@ filt_ptcwdetach(struct knote *kn)
 	int s;
 
 	s = spltty();
-	SLIST_REMOVE(&pti->pt_selw.si_note, kn, knote, kn_selnext);
+	klist_remove(&pti->pt_selw.si_note, kn);
 	splx(s);
 }
 
@@ -717,10 +716,19 @@ filt_ptcwrite(struct knote *kn, long hint)
 	return (kn->kn_data > 0);
 }
 
-struct filterops ptcread_filtops =
-	{ 1, NULL, filt_ptcrdetach, filt_ptcread };
-struct filterops ptcwrite_filtops =
-	{ 1, NULL, filt_ptcwdetach, filt_ptcwrite };
+const struct filterops ptcread_filtops = {
+	.f_flags	= FILTEROP_ISFD,
+	.f_attach	= NULL,
+	.f_detach	= filt_ptcrdetach,
+	.f_event	= filt_ptcread,
+};
+
+const struct filterops ptcwrite_filtops = {
+	.f_flags	= FILTEROP_ISFD,
+	.f_attach	= NULL,
+	.f_detach	= filt_ptcwdetach,
+	.f_event	= filt_ptcwrite,
+};
 
 int
 ptckqfilter(dev_t dev, struct knote *kn)
@@ -745,7 +753,7 @@ ptckqfilter(dev_t dev, struct knote *kn)
 	kn->kn_hook = (caddr_t)pti;
 
 	s = spltty();
-	SLIST_INSERT_HEAD(klist, kn, kn_selnext);
+	klist_insert(klist, kn);
 	splx(s);
 
 	return (0);

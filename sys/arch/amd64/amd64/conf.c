@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.63 2018/08/31 04:20:37 visa Exp $	*/
+/*	$OpenBSD: conf.c,v 1.68 2020/01/24 05:14:51 jsg Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Charles M. Hannum.  All rights reserved.
@@ -41,7 +41,6 @@
 
 #include "wd.h"
 bdev_decl(wd);
-#include "fdc.h"
 #include "fd.h"
 bdev_decl(fd);
 #include "sd.h"
@@ -151,6 +150,7 @@ cdev_decl(cy);
 #include "ksyms.h"
 #include "usb.h"
 #include "uhid.h"
+#include "fido.h"
 #include "ugen.h"
 #include "ulpt.h"
 #include "ucom.h"
@@ -175,6 +175,7 @@ cdev_decl(viocon);
 cdev_decl(pci);
 #endif
 
+#include "dt.h"
 #include "pf.h"
 #include "hotplug.h"
 #include "gpio.h"
@@ -222,7 +223,7 @@ struct cdevsw	cdevsw[] =
 	cdev_spkr_init(NSPKR,spkr),	/* 27: PC speaker */
 	cdev_notdef(),			/* 28 was LKM */
 	cdev_notdef(),			/* 29 */
-	cdev_notdef(),			/* 30 */
+	cdev_dt_init(NDT,dt),		/* 30: dynamic tracer */
 	cdev_notdef(),			/* 31 */
 	cdev_notdef(),			/* 32 */
 	cdev_notdef(),			/* 33 */
@@ -279,7 +280,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 77: was USB scanners */
 	cdev_notdef(),			/* 78 */
 	cdev_bio_init(NBIO,bio),	/* 79: ioctl tunnel */
-	cdev_notdef(),			/* 80: gpr? XXX */
+	cdev_notdef(),			/* 80 */
 	cdev_ptm_init(NPTY,ptm),	/* 81: pseudo-tty ptm device */
 	cdev_hotplug_init(NHOTPLUG,hotplug), /* 82: devices hot plugging */
 	cdev_acpi_init(NACPI,acpi),	/* 83: ACPI */
@@ -297,6 +298,8 @@ struct cdevsw	cdevsw[] =
 	cdev_pvbus_init(NPVBUS,pvbus),	/* 95: pvbus(4) control interface */
 	cdev_ipmi_init(NIPMI,ipmi),	/* 96: ipmi */
 	cdev_switch_init(NSWITCH,switch), /* 97: switch(4) control interface */
+	cdev_fido_init(NFIDO,fido),	/* 98: FIDO/U2F security keys */
+	cdev_pppx_init(NPPPX,pppac),	/* 99: PPP Access Concentrator */
 };
 int	nchrdev = nitems(cdevsw);
 

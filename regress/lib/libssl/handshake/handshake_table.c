@@ -1,4 +1,4 @@
-/*	$OpenBSD: handshake_table.c,v 1.11 2019/04/05 20:25:25 tb Exp $	*/
+/*	$OpenBSD: handshake_table.c,v 1.13 2020/04/22 17:05:53 jsing Exp $	*/
 /*
  * Copyright (c) 2019 Theo Buehler <tb@openbsd.org>
  *
@@ -86,16 +86,16 @@ struct child {
 
 static struct child stateinfo[][TLS13_NUM_MESSAGE_TYPES] = {
 	[CLIENT_HELLO] = {
+		{SERVER_HELLO_RETRY_REQUEST, DEFAULT, 0, 0},
+		{SERVER_HELLO, WITHOUT_HRR, 0, 0},
+	},
+	[SERVER_HELLO_RETRY_REQUEST] = {
+		{CLIENT_HELLO_RETRY, DEFAULT, 0, 0},
+	},
+	[CLIENT_HELLO_RETRY] = {
 		{SERVER_HELLO, DEFAULT, 0, 0},
 	},
 	[SERVER_HELLO] = {
-		{SERVER_ENCRYPTED_EXTENSIONS, DEFAULT, 0, 0},
-		{CLIENT_HELLO_RETRY, WITH_HRR, 0, 0},
-	},
-	[CLIENT_HELLO_RETRY] = {
-		{SERVER_HELLO_RETRY, DEFAULT, 0, 0},
-	},
-	[SERVER_HELLO_RETRY] = {
 		{SERVER_ENCRYPTED_EXTENSIONS, DEFAULT, 0, 0},
 	},
 	[SERVER_ENCRYPTED_EXTENSIONS] = {
@@ -172,8 +172,8 @@ flag2str(uint8_t flag)
 	case WITHOUT_CR:
 		ret = "WITHOUT_CR";
 		break;
-	case WITH_HRR:
-		ret = "WITH_HRR";
+	case WITHOUT_HRR:
+		ret = "WITHOUT_HRR";
 		break;
 	case WITH_PSK:
 		ret = "WITH_PSK";
@@ -218,17 +218,11 @@ mt2str(enum tls13_message_type mt)
 	case CLIENT_FINISHED:
 		ret = "CLIENT_FINISHED";
 		break;
-	case CLIENT_KEY_UPDATE:
-		ret = "CLIENT_KEY_UPDATE";
-		break;
 	case SERVER_HELLO:
 		ret = "SERVER_HELLO";
 		break;
-	case SERVER_HELLO_RETRY:
-		ret = "SERVER_HELLO_RETRY";
-		break;
-	case SERVER_NEW_SESSION_TICKET:
-		ret = "SERVER_NEW_SESSION_TICKET";
+	case SERVER_HELLO_RETRY_REQUEST:
+		ret = "SERVER_HELLO_RETRY_REQUEST";
 		break;
 	case SERVER_ENCRYPTED_EXTENSIONS:
 		ret = "SERVER_ENCRYPTED_EXTENSIONS";
@@ -467,6 +461,8 @@ main(int argc, char *argv[])
 	    hs_table[UINT8_MAX][TLS13_NUM_MESSAGE_TYPES] = {
 		[INITIAL] = {
 			CLIENT_HELLO,
+			SERVER_HELLO_RETRY_REQUEST,
+			CLIENT_HELLO_RETRY,
 			SERVER_HELLO,
 		},
 	};

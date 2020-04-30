@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.h,v 1.34 2019/04/10 09:55:02 dlg Exp $	*/
+/*	$OpenBSD: if_ix.h,v 1.40 2020/04/06 08:31:04 mpi Exp $	*/
 
 /******************************************************************************
 
@@ -120,6 +120,7 @@
  * Interrupt Moderation parameters
  */
 #define IXGBE_INTS_PER_SEC		8000
+#define IXGBE_LINK_ITR			1000
 
 struct ixgbe_tx_buf {
 	uint32_t		eop_index;
@@ -154,6 +155,8 @@ struct ix_queue {
 	uint32_t		msix;           /* This queue's MSIX vector */
 	uint32_t		eims;           /* This queue's EIMS bit */
 	uint32_t		eitr_setting;
+	char			name[8];
+	pci_intr_handle_t	ih;
 	void			*tag;
 	struct tx_ring		*txr;
 	struct rx_ring		*rxr;
@@ -244,7 +247,7 @@ struct ix_softc {
 	uint32_t		shadow_vfta[IXGBE_VFTA_SIZE];
 
 	/* Info about the interface */
-	uint64_t		optics;
+	uint64_t		phy_layer;
 	uint32_t		fc; /* local flow ctrl setting */
 	uint16_t		max_frame_size;
 	uint16_t		num_segs;

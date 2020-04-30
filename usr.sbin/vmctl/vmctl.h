@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmctl.h,v 1.32 2019/05/11 23:07:46 jasper Exp $	*/
+/*	$OpenBSD: vmctl.h,v 1.33 2019/12/17 09:43:00 kn Exp $	*/
 
 /*
  * Copyright (c) 2015 Reyk Floeter <reyk@openbsd.org>
@@ -38,6 +38,7 @@ enum actions {
 	CMD_UNPAUSE,
 	CMD_SEND,
 	CMD_RECEIVE,
+	CMD_BALLOON
 };
 
 struct ctl_command;
@@ -72,12 +73,13 @@ struct ctl_command {
 };
 
 struct imsgbuf	*ibuf;
+static int 		vm_counter = 0;
 
 /* main.c */
 int	 vmmaction(struct parse_result *);
 int	 parse_ifs(struct parse_result *, char *, int);
 int	 parse_network(struct parse_result *, char *);
-int	 parse_size(struct parse_result *, char *, long long);
+int	 parse_size(struct parse_result *, char *);
 int	 parse_disktype(const char *, const char **);
 int	 parse_disk(struct parse_result *, char *, int);
 int	 parse_vmid(struct parse_result *, char *, int);
@@ -105,6 +107,8 @@ void	 unpause_vm(uint32_t, const char *);
 int	 unpause_vm_complete(struct imsg *, int *);
 void	 send_vm(uint32_t, const char *);
 void	 vm_receive(uint32_t, const char *);
+int	 vm_balloon(uint32_t, const char *, int);
+int	 vm_balloon_complete(struct imsg *, int *);
 int	 check_info_id(const char *, uint32_t);
 void	 get_info_vm(uint32_t, const char *, enum actions, unsigned int);
 int	 add_info(struct imsg *, int *);
@@ -114,5 +118,6 @@ void	 print_vm_info(struct vmop_info_result *, size_t);
 void	 terminate_all(struct vmop_info_result *, size_t, unsigned int);
 __dead void
 	 vm_console(struct vmop_info_result *, size_t);
+void get_num_vm(struct imsg *imsg, int *ret);
 
 #endif /* VMCTL_PARSER_H */

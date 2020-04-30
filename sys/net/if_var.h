@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_var.h,v 1.100 2019/06/26 09:36:06 claudio Exp $	*/
+/*	$OpenBSD: if_var.h,v 1.104 2020/04/12 07:02:43 dlg Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -124,13 +124,13 @@ struct ifnet {				/* and the entries */
 	TAILQ_HEAD(, ifaddr) if_addrlist; /* [N] list of addresses per if */
 	TAILQ_HEAD(, ifmaddr) if_maddrlist; /* [N] list of multicast records */
 	TAILQ_HEAD(, ifg_list) if_groups; /* [N] list of groups per if */
-	struct hook_desc_head *if_addrhooks; /* [I] address change callbacks */
-	struct hook_desc_head *if_linkstatehooks; /* [I] link change callbacks*/
-	struct hook_desc_head *if_detachhooks; /* [I] detach callbacks */
+	struct task_list if_addrhooks;	/* [I] address change callbacks */
+	struct task_list if_linkstatehooks; /* [I] link change callbacks*/
+	struct task_list if_detachhooks; /* [I] detach callbacks */
 				/* [I] check or clean routes (+ or -)'d */
 	void	(*if_rtrequest)(struct ifnet *, int, struct rtentry *);
 	char	if_xname[IFNAMSIZ];	/* [I] external name (name + unit) */
-	int	if_pcount;		/* [k] # of promiscuous listeners */
+	int	if_pcount;		/* [N] # of promiscuous listeners */
 	unsigned int if_bridgeidx;	/* [k] used by bridge ports */
 	caddr_t	if_bpf;			/* packet filter structure */
 	caddr_t if_switchport;		/* used by switch ports */
@@ -373,6 +373,14 @@ void	if_ih_insert(struct ifnet *, int (*)(struct ifnet *, struct mbuf *,
 	    void *), void *);
 void	if_ih_remove(struct ifnet *, int (*)(struct ifnet *, struct mbuf *,
 	    void *), void *);
+
+void	if_addrhook_add(struct ifnet *, struct task *);
+void	if_addrhook_del(struct ifnet *, struct task *);
+void	if_addrhooks_run(struct ifnet *);
+void	if_linkstatehook_add(struct ifnet *, struct task *);
+void	if_linkstatehook_del(struct ifnet *, struct task *);
+void	if_detachhook_add(struct ifnet *, struct task *);
+void	if_detachhook_del(struct ifnet *, struct task *);
 
 void	if_rxr_livelocked(struct if_rxring *);
 void	if_rxr_init(struct if_rxring *, u_int, u_int);

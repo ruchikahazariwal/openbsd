@@ -64,6 +64,15 @@
 /* Whether the C compiler accepts the "weak" attribute */
 #define HAVE_ATTR_WEAK 1
 
+/* If we have be64toh */
+#define HAVE_BE64TOH 1
+
+/* Define to 1 if you have the <bsd/stdlib.h> header file. */
+/* #undef HAVE_BSD_STDLIB_H */
+
+/* Define to 1 if you have the <bsd/string.h> header file. */
+/* #undef HAVE_BSD_STRING_H */
+
 /* Define to 1 if you have the `chown' function. */
 #define HAVE_CHOWN 1
 
@@ -285,6 +294,9 @@
 /* If you have HMAC_Update */
 #define HAVE_HMAC_UPDATE 1
 
+/* If we have htobe64 */
+#define HAVE_HTOBE64 1
+
 /* Define to 1 if you have the `inet_aton' function. */
 #define HAVE_INET_ATON 1
 
@@ -311,6 +323,9 @@
 
 /* Define to 1 if you have the `kill' function. */
 #define HAVE_KILL 1
+
+/* Use portable libbsd functions */
+/* #undef HAVE_LIBBSD */
 
 /* Define to 1 if you have the <libkern/OSByteOrder.h> header file. */
 /* #undef HAVE_LIBKERN_OSBYTEORDER_H */
@@ -621,6 +636,9 @@
 /* Define to 1 if you have the `_beginthreadex' function. */
 /* #undef HAVE__BEGINTHREADEX */
 
+/* If HMAC_Init_ex() returns void */
+/* #undef HMAC_INIT_EX_RETURNS_VOID */
+
 /* if lex has yylex_destroy */
 #define LEX_HAS_YYLEX_DESTROY 1
 
@@ -674,7 +692,7 @@
 #define PACKAGE_NAME "unbound"
 
 /* Define to the full name and version of this package. */
-#define PACKAGE_STRING "unbound 1.9.3"
+#define PACKAGE_STRING "unbound 1.10.0"
 
 /* Define to the one symbol short name of this package. */
 #define PACKAGE_TARNAME "unbound"
@@ -683,7 +701,7 @@
 #define PACKAGE_URL ""
 
 /* Define to the version of this package. */
-#define PACKAGE_VERSION "1.9.3"
+#define PACKAGE_VERSION "1.10.0"
 
 /* default pidfile location */
 #define PIDFILE ""
@@ -705,13 +723,16 @@
 #define ROOT_CERT_FILE "/var/unbound/etc/icannbundle.pem"
 
 /* version number for resource files */
-#define RSRC_PACKAGE_VERSION 1,9,3,0
+#define RSRC_PACKAGE_VERSION 1,10,0,0
 
 /* Directory to chdir to */
 #define RUN_DIR "/var/unbound/etc"
 
 /* Shared data */
 #define SHARE_DIR "/var/unbound/etc"
+
+/* The size of `size_t', as computed by sizeof. */
+#define SIZEOF_SIZE_T 8
 
 /* The size of `time_t', as computed by sizeof. */
 #define SIZEOF_TIME_T 8
@@ -730,6 +751,9 @@
 
 /* Use win32 resources and API */
 /* #undef UB_ON_WINDOWS */
+
+/* the SYSLOG_FACILITY to use, default LOG_DAEMON */
+#define UB_SYSLOG_FACILITY LOG_DAEMON
 
 /* default username */
 #define UB_USERNAME "_unbound"
@@ -759,7 +783,7 @@
 /* #undef USE_DNSTAP */
 
 /* Define this to enable DSA support. */
-#define USE_DSA 1
+/* #undef USE_DSA */
 
 /* Define this to enable ECDSA support. */
 #define USE_ECDSA 1
@@ -1219,6 +1243,15 @@ struct tm;
 char *strptime(const char *s, const char *format, struct tm *tm);
 #endif
 
+#if !HAVE_DECL_REALLOCARRAY
+void *reallocarray(void *ptr, size_t nmemb, size_t size);
+#endif
+
+#ifdef HAVE_LIBBSD
+#include <bsd/string.h>
+#include <bsd/stdlib.h>
+#endif
+
 #ifdef HAVE_LIBRESSL
 #  if !HAVE_DECL_STRLCPY
 size_t strlcpy(char *dst, const char *src, size_t siz);
@@ -1231,9 +1264,6 @@ uint32_t arc4random(void);
 #  endif
 #  if !HAVE_DECL_ARC4RANDOM_UNIFORM && defined(HAVE_ARC4RANDOM_UNIFORM)
 uint32_t arc4random_uniform(uint32_t upper_bound);
-#  endif
-#  if !HAVE_DECL_REALLOCARRAY
-void *reallocarray(void *ptr, size_t nmemb, size_t size);
 #  endif
 #endif /* HAVE_LIBRESSL */
 #ifndef HAVE_ARC4RANDOM

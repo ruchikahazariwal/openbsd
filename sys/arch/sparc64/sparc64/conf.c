@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.80 2016/09/04 11:59:50 naddy Exp $	*/
+/*	$OpenBSD: conf.c,v 1.83 2020/01/23 02:40:22 dlg Exp $	*/
 /*	$NetBSD: conf.c,v 1.17 2001/03/26 12:33:26 lukem Exp $ */
 
 /*
@@ -103,10 +103,12 @@ cdev_decl(pci);
 
 #include "usb.h"
 #include "uhid.h"
+#include "fido.h"
 #include "ugen.h"
 #include "ulpt.h"
 #include "ucom.h"
 
+#include "dt.h"
 #include "pf.h"
 
 #include "ksyms.h"
@@ -180,7 +182,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 27 */
 	cdev_notdef(),			/* 28: Systech VPC-2200 versatec/centronics */
 	cdev_notdef(),			/* 29 */
-	cdev_notdef(),			/* 30: Xylogics tape */
+	cdev_dt_init(NDT,dt),		/* 30: dynamic tracer */
 	cdev_notdef(),			/* 31: /dev/cgtwo */
 	cdev_notdef(),			/* 32: should be /dev/gpone */
 	cdev_notdef(),			/* 33 */
@@ -292,6 +294,8 @@ struct cdevsw	cdevsw[] =
 	cdev_fuse_init(NFUSE,fuse),	/* 134: fuse */
 	cdev_tun_init(NTUN,tap),	/* 135: Ethernet network tunnel */
 	cdev_switch_init(NSWITCH,switch), /* 136: switch(4) control interface */
+	cdev_fido_init(NFIDO,fido),	/* 137: FIDO/U2F security key */
+	cdev_pppx_init(NPPPX,pppac),	/* 138: PPP Access Concentrator */
 };
 int	nchrdev = nitems(cdevsw);
 

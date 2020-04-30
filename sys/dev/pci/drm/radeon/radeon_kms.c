@@ -222,7 +222,7 @@ radeondrm_wsioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 
 	switch (cmd) {
 	case WSDISPLAYIO_GTYPE:
-		*(int *)data = WSDISPLAY_TYPE_RADEONDRM;
+		*(u_int *)data = WSDISPLAY_TYPE_RADEONDRM;
 		return 0;
 	case WSDISPLAYIO_GINFO:
 		wdf = (struct wsdisplay_fbinfo *)data;
@@ -326,9 +326,9 @@ radeondrm_setcolor(void *v, u_int index, u_int8_t r, u_int8_t g, u_int8_t b)
 	struct radeon_device *rdev = sf->sf_ro.ri_hw;
 	u_int16_t red, green, blue;
 	struct radeon_crtc *radeon_crtc;
-	int i, crtc;
+	int crtc;
 
-	for (crtc = 0; i < rdev->num_crtc; crtc++) {
+	for (crtc = 0; crtc < rdev->num_crtc; crtc++) {
 		radeon_crtc = rdev->mode_info.crtcs[crtc];
 
 		red = (r << 8) | r;

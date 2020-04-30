@@ -1,4 +1,4 @@
-/* $OpenBSD: input-keys.c,v 1.64 2019/07/09 14:03:12 nicm Exp $ */
+/* $OpenBSD: input-keys.c,v 1.71 2020/04/07 13:38:30 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -43,9 +43,6 @@ struct input_key_ent {
 };
 
 static const struct input_key_ent input_keys[] = {
-	/* Backspace key. */
-	{ KEYC_BSPACE,		"\177",		0 },
-
 	/* Paste keys. */
 	{ KEYC_PASTE_START,	"\033[200~",	0 },
 	{ KEYC_PASTE_END,	"\033[201~",	0 },
@@ -152,32 +149,50 @@ input_split2(u_int c, u_char *dst)
 	return (1);
 }
 
+/* Translate a key code into an output key sequence for a pane. */
+int
+input_key_pane(struct window_pane *wp, key_code key, struct mouse_event *m)
+{
+	log_debug("writing key 0x%llx (%s) to %%%u", key,
+	    key_string_lookup_key(key), wp->id);
+
+	if (KEYC_IS_MOUSE(key)) {
+		if (m != NULL && m->wp != -1 && (u_int)m->wp == wp->id)
+			input_key_mouse(wp, m);
+		return (0);
+	}
+	return (input_key(wp, wp->screen, wp->event, key));
+}
+
 /* Translate a key code into an output key sequence. */
-void
-input_key(struct window_pane *wp, key_code key, struct mouse_event *m)
+int
+input_key(struct window_pane *wp, struct screen *s, struct bufferevent *bev,
+    key_code key)
 {
 	const struct input_key_ent	*ike;
 	u_int				 i;
 	size_t				 dlen;
 	char				*out;
-	key_code			 justkey;
+	key_code			 justkey, newkey;
 	struct utf8_data		 ud;
 
-	log_debug("writing key 0x%llx (%s) to %%%u", key,
-	    key_string_lookup_key(key), wp->id);
-
-	/* If this is a mouse key, pass off to mouse function. */
-	if (KEYC_IS_MOUSE(key)) {
-		if (m != NULL && m->wp != -1 && (u_int)m->wp == wp->id)
-			input_key_mouse(wp, m);
-		return;
-	}
+	/* Mouse keys need a pane. */
+	if (KEYC_IS_MOUSE(key))
+		return (0);
 
 	/* Literal keys go as themselves (can't be more than eight bits). */
 	if (key & KEYC_LITERAL) {
 		ud.data[0] = (u_char)key;
-		bufferevent_write(wp->event, &ud.data[0], 1);
-		return;
+		bufferevent_write(bev, &ud.data[0], 1);
+		return (0);
+	}
+
+	/* Is this backspace? */
+	if ((key & KEYC_MASK_KEY) == KEYC_BSPACE) {
+		newkey = options_get_number(global_options, "backspace");
+		if (newkey >= 0x7f)
+			newkey = '\177';
+		key = newkey|(key & KEYC_MASK_MOD);
 	}
 
 	/*
@@ -187,29 +202,29 @@ input_key(struct window_pane *wp, key_code key, struct mouse_event *m)
 	justkey = (key & ~(KEYC_XTERM|KEYC_ESCAPE));
 	if (justkey <= 0x7f) {
 		if (key & KEYC_ESCAPE)
-			bufferevent_write(wp->event, "\033", 1);
+			bufferevent_write(bev, "\033", 1);
 		ud.data[0] = justkey;
-		bufferevent_write(wp->event, &ud.data[0], 1);
-		return;
+		bufferevent_write(bev, &ud.data[0], 1);
+		return (0);
 	}
 	if (justkey > 0x7f && justkey < KEYC_BASE) {
 		if (utf8_split(justkey, &ud) != UTF8_DONE)
-			return;
+			return (-1);
 		if (key & KEYC_ESCAPE)
-			bufferevent_write(wp->event, "\033", 1);
-		bufferevent_write(wp->event, ud.data, ud.size);
-		return;
+			bufferevent_write(bev, "\033", 1);
+		bufferevent_write(bev, ud.data, ud.size);
+		return (0);
 	}
 
 	/*
 	 * Then try to look this up as an xterm key, if the flag to output them
 	 * is set.
 	 */
-	if (options_get_number(wp->window->options, "xterm-keys")) {
+	if (wp == NULL || options_get_number(wp->window->options, "xterm-keys")) {
 		if ((out = xterm_keys_lookup(key)) != NULL) {
-			bufferevent_write(wp->event, out, strlen(out));
+			bufferevent_write(bev, out, strlen(out));
 			free(out);
-			return;
+			return (0);
 		}
 	}
 	key &= ~KEYC_XTERM;
@@ -218,11 +233,9 @@ input_key(struct window_pane *wp, key_code key, struct mouse_event *m)
 	for (i = 0; i < nitems(input_keys); i++) {
 		ike = &input_keys[i];
 
-		if ((ike->flags & INPUTKEY_KEYPAD) &&
-		    !(wp->screen->mode & MODE_KKEYPAD))
+		if ((ike->flags & INPUTKEY_KEYPAD) && (~s->mode & MODE_KKEYPAD))
 			continue;
-		if ((ike->flags & INPUTKEY_CURSOR) &&
-		    !(wp->screen->mode & MODE_KCURSOR))
+		if ((ike->flags & INPUTKEY_CURSOR) && (~s->mode & MODE_KCURSOR))
 			continue;
 
 		if ((key & KEYC_ESCAPE) && (ike->key | KEYC_ESCAPE) == key)
@@ -232,38 +245,34 @@ input_key(struct window_pane *wp, key_code key, struct mouse_event *m)
 	}
 	if (i == nitems(input_keys)) {
 		log_debug("key 0x%llx missing", key);
-		return;
+		return (-1);
 	}
 	dlen = strlen(ike->data);
 	log_debug("found key 0x%llx: \"%s\"", key, ike->data);
 
 	/* Prefix a \033 for escape. */
 	if (key & KEYC_ESCAPE)
-		bufferevent_write(wp->event, "\033", 1);
-	bufferevent_write(wp->event, ike->data, dlen);
+		bufferevent_write(bev, "\033", 1);
+	bufferevent_write(bev, ike->data, dlen);
+	return (0);
 }
 
-/* Translate mouse and output. */
-static void
-input_key_mouse(struct window_pane *wp, struct mouse_event *m)
+/* Get mouse event string. */
+int
+input_key_get_mouse(struct screen *s, struct mouse_event *m, u_int x, u_int y,
+    const char **rbuf, size_t *rlen)
 {
-	struct screen	*s = wp->screen;
-	int		 mode = s->mode;
-	char		 buf[40];
+	static char	 buf[40];
 	size_t		 len;
-	u_int		 x, y;
 
-	if ((mode & ALL_MOUSE_MODES) == 0)
-		return;
-	if (cmd_mouse_at(wp, m, &x, &y, 0) != 0)
-		return;
-	if (!window_pane_visible(wp))
-		return;
+	*rbuf = NULL;
+	*rlen = 0;
 
 	/* If this pane is not in button or all mode, discard motion events. */
-	if (MOUSE_DRAG(m->b) &&
-	    (mode & (MODE_MOUSE_BUTTON|MODE_MOUSE_ALL)) == 0)
-	    return;
+	if (MOUSE_DRAG(m->b) && (s->mode & MOTION_MOUSE_MODES) == 0)
+		return (0);
+	if ((s->mode & ALL_MOUSE_MODES) == 0)
+		return (0);
 
 	/*
 	 * If this event is a release event and not in all mode, discard it.
@@ -274,14 +283,14 @@ input_key_mouse(struct window_pane *wp, struct mouse_event *m)
 	if (m->sgr_type != ' ') {
 		if (MOUSE_DRAG(m->sgr_b) &&
 		    MOUSE_BUTTONS(m->sgr_b) == 3 &&
-		    (~mode & MODE_MOUSE_ALL))
-			return;
+		    (~s->mode & MODE_MOUSE_ALL))
+			return (0);
 	} else {
 		if (MOUSE_DRAG(m->b) &&
 		    MOUSE_BUTTONS(m->b) == 3 &&
 		    MOUSE_BUTTONS(m->lb) == 3 &&
-		    (~mode & MODE_MOUSE_ALL))
-			return;
+		    (~s->mode & MODE_MOUSE_ALL))
+			return (0);
 	}
 
 	/*
@@ -298,19 +307,43 @@ input_key_mouse(struct window_pane *wp, struct mouse_event *m)
 		    m->sgr_b, x + 1, y + 1, m->sgr_type);
 	} else if (s->mode & MODE_MOUSE_UTF8) {
 		if (m->b > 0x7ff - 32 || x > 0x7ff - 33 || y > 0x7ff - 33)
-			return;
+			return (0);
 		len = xsnprintf(buf, sizeof buf, "\033[M");
 		len += input_split2(m->b + 32, &buf[len]);
 		len += input_split2(x + 33, &buf[len]);
 		len += input_split2(y + 33, &buf[len]);
 	} else {
 		if (m->b > 223)
-			return;
+			return (0);
 		len = xsnprintf(buf, sizeof buf, "\033[M");
 		buf[len++] = m->b + 32;
 		buf[len++] = x + 33;
 		buf[len++] = y + 33;
 	}
+
+	*rbuf = buf;
+	*rlen = len;
+	return (1);
+}
+
+/* Translate mouse and output. */
+static void
+input_key_mouse(struct window_pane *wp, struct mouse_event *m)
+{
+	struct screen	*s = wp->screen;
+	u_int		 x, y;
+	const char	*buf;
+	size_t		 len;
+
+	/* Ignore events if no mouse mode or the pane is not visible. */
+	if (m->ignore || (s->mode & ALL_MOUSE_MODES) == 0)
+		return;
+	if (cmd_mouse_at(wp, m, &x, &y, 0) != 0)
+		return;
+	if (!window_pane_visible(wp))
+		return;
+	if (!input_key_get_mouse(s, m, x, y, &buf, &len))
+		return;
 	log_debug("writing mouse %.*s to %%%u", (int)len, buf, wp->id);
 	bufferevent_write(wp->event, buf, len);
 }

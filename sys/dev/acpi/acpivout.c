@@ -1,6 +1,6 @@
-/*	$OpenBSD: acpivout.c,v 1.13 2019/10/13 10:56:31 kettenis Exp $	*/
+/*	$OpenBSD: acpivout.c,v 1.22 2020/04/19 15:05:14 kettenis Exp $	*/
 /*
- * Copyright (c) 2009 Paul Irofti <pirofti@openbsd.org>
+ * Copyright (c) 2009 Paul Irofti <paul@irofti.net>
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -47,6 +47,8 @@ int	acpivout_notify(struct aml_node *, int, void *);
 #define NOTIFY_BRIGHTNESS_ZERO		0x88
 #define NOTIFY_DISPLAY_OFF		0x89
 
+#define BRIGHTNESS_STEP			5
+
 struct acpivout_softc {
 	struct device		sc_dev;
 
@@ -58,15 +60,14 @@ struct acpivout_softc {
 
 	int	*sc_bcl;
 	size_t	sc_bcl_len;
+
+	int	sc_brightness;
 };
 
-void	acpivout_brightness_cycle(struct acpivout_softc *);
-void	acpivout_brightness_up(struct acpivout_softc *);
-void	acpivout_brightness_down(struct acpivout_softc *);
-void	acpivout_brightness_zero(struct acpivout_softc *);
 int	acpivout_get_brightness(struct acpivout_softc *);
+int	acpivout_select_brightness(struct acpivout_softc *, int);
 int	acpivout_find_brightness(struct acpivout_softc *, int);
-void	acpivout_set_brightness(struct acpivout_softc *, int);
+void	acpivout_set_brightness(void *, int);
 void	acpivout_get_bcl(struct acpivout_softc *);
 
 /* wconsole hook functions */
@@ -92,9 +93,6 @@ acpivout_match(struct device *parent, void *match, void *aux)
 	    aaa->aaa_table != NULL)
 		return (0);
 
-	if (ws_get_param || ws_set_param)
-		return (0);
-
 	return (1);
 }
 
@@ -112,10 +110,16 @@ acpivout_attach(struct device *parent, struct device *self, void *aux)
 	aml_register_notify(sc->sc_devnode, aaa->aaa_dev,
 	    acpivout_notify, sc, ACPIDEV_NOPOLL);
 
+	if (!aml_searchname(sc->sc_devnode, "_BQC") ||
+	    ws_get_param || ws_set_param)
+		return;
+
 	ws_get_param = acpivout_get_param;
 	ws_set_param = acpivout_set_param;
 
 	acpivout_get_bcl(sc);
+
+	sc->sc_brightness = acpivout_get_brightness(sc);
 }
 
 int
@@ -125,16 +129,16 @@ acpivout_notify(struct aml_node *node, int notify, void *arg)
 
 	switch (notify) {
 	case NOTIFY_BRIGHTNESS_CYCLE:
-		acpivout_brightness_cycle(sc);
+		wsdisplay_brightness_cycle(NULL);
 		break;
 	case NOTIFY_BRIGHTNESS_UP:
-		acpivout_brightness_up(sc);
+		wsdisplay_brightness_step(NULL, 1);
 		break;
 	case NOTIFY_BRIGHTNESS_DOWN:
-		acpivout_brightness_down(sc);
+		wsdisplay_brightness_step(NULL, -1);
 		break;
 	case NOTIFY_BRIGHTNESS_ZERO:
-		acpivout_brightness_zero(sc);
+		wsdisplay_brightness_zero(NULL);
 		break;
 	case NOTIFY_DISPLAY_OFF:
 		/* TODO: D3 state change */
@@ -147,65 +151,6 @@ acpivout_notify(struct aml_node *node, int notify, void *arg)
 	return (0);
 }
 
-void
-acpivout_brightness_cycle(struct acpivout_softc *sc)
-{
-	int	cur_level;
-
-	if (sc->sc_bcl_len == 0)
-		return;
-	cur_level = acpivout_get_brightness(sc);
-	if (cur_level == sc->sc_bcl[sc->sc_bcl_len - 1])
-		acpivout_brightness_zero(sc);
-	else
-		acpivout_brightness_up(sc);
-}
-
-void
-acpivout_brightness_up(struct acpivout_softc *sc)
-{
-	int i, cur_level;
-
-	if (sc->sc_bcl_len == 0)
-		return;
-	cur_level = acpivout_get_brightness(sc);
-	if (cur_level == -1)
-		return;
-
-	/* check for max brightness level */
-	if (cur_level == sc->sc_bcl[sc->sc_bcl_len - 1])
-		return;
-
-	for (i = 0; i < sc->sc_bcl_len && cur_level != sc->sc_bcl[i]; i++);
-	acpivout_set_brightness(sc, sc->sc_bcl[i + 1]);
-}
-
-void
-acpivout_brightness_down(struct acpivout_softc *sc)
-{
-	int i, cur_level;
-
-	if (sc->sc_bcl_len == 0)
-		return;
-	cur_level = acpivout_get_brightness(sc);
-	if (cur_level == -1)
-		return;
-
-	/* check for min brightness level */
-	if (cur_level == sc->sc_bcl[0])
-		return;
-
-	for (i = 0; i < sc->sc_bcl_len && cur_level != sc->sc_bcl[i]; i++);
-	acpivout_set_brightness(sc, sc->sc_bcl[i - 1]);
-}
-
-void
-acpivout_brightness_zero(struct acpivout_softc *sc)
-{
-	if (sc->sc_bcl_len == 0)
-		return;
-	acpivout_set_brightness(sc, sc->sc_bcl[0]);
-}
 
 int
 acpivout_get_brightness(struct acpivout_softc *sc)
@@ -218,10 +163,29 @@ acpivout_get_brightness(struct acpivout_softc *sc)
 	aml_freevalue(&res);
 	DPRINTF(("%s: BQC = %d\n", DEVNAME(sc), level));
 
-	if (level < sc->sc_bcl[0] || level > sc->sc_bcl[sc->sc_bcl_len -1])
-		level = -1;
+	if (level < sc->sc_bcl[0])
+		level = sc->sc_bcl[0];
+	else if (level > sc->sc_bcl[sc->sc_bcl_len - 1])
+		level = sc->sc_bcl[sc->sc_bcl_len - 1];
 
 	return (level);
+}
+
+int
+acpivout_select_brightness(struct acpivout_softc *sc, int nlevel)
+{
+	int nindex, level;
+
+	level = sc->sc_brightness;
+	nindex = acpivout_find_brightness(sc, nlevel);
+	if (sc->sc_bcl[nindex] == level) {
+		if (nlevel > level && (nindex + 1 < sc->sc_bcl_len))
+			nindex++;
+		else if (nlevel < level && (nindex - 1 >= 0))
+			nindex--;
+	}
+
+	return nindex;
 }
 
 int
@@ -232,26 +196,27 @@ acpivout_find_brightness(struct acpivout_softc *sc, int level)
 	for (i = 0; i < sc->sc_bcl_len - 1; i++) {
 		mid = sc->sc_bcl[i] + (sc->sc_bcl[i + 1] - sc->sc_bcl[i]) / 2;
 		if (sc->sc_bcl[i] <= level && level <=  mid)
-			return sc->sc_bcl[i];
+			return i;
 		if  (mid < level && level <= sc->sc_bcl[i + 1])
-			return sc->sc_bcl[i + 1];
+			return i + 1;
 	}
 	if (level < sc->sc_bcl[0])
-		return sc->sc_bcl[0];
+		return 0;
 	else
-		return sc->sc_bcl[i];
+		return i;
 }
 
 void
-acpivout_set_brightness(struct acpivout_softc *sc, int level)
+acpivout_set_brightness(void *arg0, int arg1)
 {
+	struct acpivout_softc *sc = arg0;
 	struct aml_value args, res;
 
 	memset(&args, 0, sizeof(args));
-	args.v_integer = level;
+	args.v_integer = sc->sc_brightness;
 	args.type = AML_OBJTYPE_INTEGER;
 
-	DPRINTF(("%s: BCM = %d\n", DEVNAME(sc), level));
+	DPRINTF(("%s: BCM = %d\n", DEVNAME(sc), sc->sc_brightness));
 	aml_evalname(sc->sc_acpi, sc->sc_devnode, "_BCM", 1, &args, &res);
 
 	aml_freevalue(&res);
@@ -317,12 +282,9 @@ acpivout_get_param(struct wsdisplay_param *dp)
 		}
 		if (sc != NULL && sc->sc_bcl_len != 0) {
 			dp->min = 0;
-			dp->max =  sc->sc_bcl[sc->sc_bcl_len - 1];
-			rw_enter_write(&sc->sc_acpi->sc_lck);
-			dp->curval = acpivout_get_brightness(sc);
-			rw_exit_write(&sc->sc_acpi->sc_lck);
-			if (dp->curval != -1)
-				return 0;
+			dp->max = sc->sc_bcl[sc->sc_bcl_len - 1];
+			dp->curval = sc->sc_brightness;
+			return 0;
 		}
 		return -1;
 	default:
@@ -334,7 +296,7 @@ int
 acpivout_set_param(struct wsdisplay_param *dp)
 {
 	struct acpivout_softc	*sc = NULL;
-	int i, exact;
+	int i, nindex;
 
 	switch (dp->param) {
 	case WSDISPLAYIO_PARAM_BRIGHTNESS:
@@ -347,10 +309,11 @@ acpivout_set_param(struct wsdisplay_param *dp)
 				break;
 		}
 		if (sc != NULL && sc->sc_bcl_len != 0) {
-			rw_enter_write(&sc->sc_acpi->sc_lck);
-			exact = acpivout_find_brightness(sc, dp->curval);
-			acpivout_set_brightness(sc, exact);
-			rw_exit_write(&sc->sc_acpi->sc_lck);
+			nindex = acpivout_select_brightness(sc, dp->curval);
+			sc->sc_brightness = sc->sc_bcl[nindex];
+			acpi_addtask(sc->sc_acpi,
+			    acpivout_set_brightness, sc, 0);
+			acpi_wakeup(sc->sc_acpi);
 			return 0;
 		}
 		return -1;

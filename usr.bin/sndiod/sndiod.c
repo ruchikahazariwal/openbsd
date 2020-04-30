@@ -1,4 +1,4 @@
-/*	$OpenBSD: sndiod.c,v 1.37 2019/09/21 04:52:07 ratchov Exp $	*/
+/*	$OpenBSD: sndiod.c,v 1.39 2020/04/01 16:54:17 ratchov Exp $	*/
 /*
  * Copyright (c) 2008-2012 Alexandre Ratchov <alex@caoua.org>
  *
@@ -117,6 +117,15 @@ char usagestr[] = "usage: sndiod [-d] [-a flag] [-b nframes] "
     "[-e enc] [-F device] [-f device] [-j flag] [-L addr] [-m mode]\n\t"
     "[-Q port] [-q port] [-r rate] [-s name] [-t mode] [-U unit]\n\t"
     "[-v volume] [-w flag] [-z nframes]\n";
+
+/*
+ * default MIDI ports
+ */
+static char *default_ports[] = {
+	"rmidi/0", "rmidi/1", "rmidi/2", "rmidi/3",
+	"rmidi/4", "rmidi/5", "rmidi/6", "rmidi/7",
+	NULL
+};
 
 /*
  * SIGINT handler, it raises the quit flag. If the flag is already set,
@@ -413,8 +422,10 @@ start_helper(int background)
 				err(1, "cannot drop privileges");
 		}
 		for (d = dev_list; d != NULL; d = d->next) {
-			for (n = d->path_list; n != NULL; n = n->next)
+			for (n = d->path_list; n != NULL; n = n->next) {
 				dounveil(n->str, "rsnd/", "/dev/audio");
+				dounveil(n->str, "rsnd/", "/dev/audioctl");
+			}
 		}
 		for (p = port_list; p != NULL; p = p->next) {
 			for (n = p->path_list; n != NULL; n = n->next)
@@ -443,7 +454,7 @@ stop_helper(void)
 int
 main(int argc, char **argv)
 {
-	int c, background, unit;
+	int c, i, background, unit;
 	int pmin, pmax, rmin, rmax;
 	char base[SOCKPATH_MAX], path[SOCKPATH_MAX];
 	unsigned int mode, dup, mmc, vol;
@@ -580,6 +591,10 @@ main(int argc, char **argv)
 	if (argc > 0) {
 		fputs(usagestr, stderr);
 		return 1;
+	}
+	if (port_list == NULL) {
+		for (i = 0; default_ports[i] != NULL; i++)
+			mkport(default_ports[i], 0);
 	}
 	if (dev_list == NULL)
 		mkdev(DEFAULT_DEV, &par, 0, bufsz, round, rate, hold, autovol);

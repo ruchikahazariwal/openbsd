@@ -1,4 +1,4 @@
-/* $OpenBSD: format-draw.c,v 1.13 2019/09/15 21:42:57 nicm Exp $ */
+/* $OpenBSD: format-draw.c,v 1.16 2020/04/09 15:35:27 nicm Exp $ */
 
 /*
  * Copyright (c) 2019 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -142,7 +142,8 @@ format_draw_put_list(struct screen_write_ctx *octx,
 		width -= list_left->cx;
 	}
 	if (start + width < list->cx && width > list_right->cx) {
-		screen_write_cursormove(octx, ocx + offset + width - 1, ocy, 0);
+		screen_write_cursormove(octx, ocx + offset + width -
+		    list_right->cx, ocy, 0);
 		screen_write_fast_copy(octx, list_right, 0, 0, list_right->cx,
 		    1);
 		width -= list_right->cx;
@@ -803,7 +804,7 @@ format_width(const char *expanded)
 		if (cp[0] == '#' && cp[1] == '[') {
 			end = format_skip(cp + 2, "]");
 			if (end == NULL)
-				return 0;
+				return (0);
 			cp = end + 1;
 		} else if ((more = utf8_open(&ud, *cp)) == UTF8_MORE) {
 			while (*++cp != '\0' && more == UTF8_MORE)
@@ -849,8 +850,10 @@ format_trim_left(const char *expanded, u_int limit)
 					out += ud.size;
 				}
 				width += ud.width;
-			} else
+			} else {
 				cp -= ud.have;
+				cp++;
+			}
 		} else if (*cp > 0x1f && *cp < 0x7f) {
 			if (width + 1 <= limit)
 				*out++ = *cp;
@@ -896,8 +899,10 @@ format_trim_right(const char *expanded, u_int limit)
 					out += ud.size;
 				}
 				width += ud.width;
-			} else
+			} else {
 				cp -= ud.have;
+				cp++;
+			}
 		} else if (*cp > 0x1f && *cp < 0x7f) {
 			if (width >= skip)
 				*out++ = *cp;

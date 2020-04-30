@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmctl.c,v 1.71 2019/09/07 09:11:14 tobhe Exp $	*/
+/*	$OpenBSD: vmctl.c,v 1.74 2020/03/11 12:47:49 jasper Exp $	*/
 
 /*
  * Copyright (c) 2014 Mike Larkin <mlarkin@openbsd.org>
@@ -48,6 +48,72 @@ uint32_t info_id;
 char info_name[VMM_MAX_NAME_LEN];
 enum actions info_action;
 unsigned int info_flags;
+
+int
+vm_balloon(uint32_t vm_id, const char *name, int memsize)
+{
+	struct vmop_balloon_params *vbp;
+	const char *s;
+
+	if ((vbp = calloc(1, sizeof(struct vmop_balloon_params))) == NULL)
+		return (ENOMEM);
+
+	if (name != NULL) {
+		/*
+		 * Allow VMs names with alphanumeric characters, dot, hyphen
+		 * and underscore. But disallow dot, hyphen and underscore at
+		 * the start.
+		 */
+		if (*name == '-' || *name == '.' || *name == '_')
+			errx(1, "invalid VM name");
+
+		for (s = name; *s != '\0'; ++s) {
+			if (!(isalnum(*s) || *s == '.' || *s == '-' ||
+			    *s == '_'))
+				errx(1, "invalid VM name");
+		}
+
+		if (strlcpy(vbp->vbp_name, name,
+		    sizeof(vbp->vbp_name)) >= sizeof(vbp->vbp_name))
+			errx(1, "vm name too long");
+	}
+
+	vbp->vbp_id = vm_id;
+	vbp->vbp_memsize = memsize;
+
+	imsg_compose(ibuf, IMSG_VMDOP_BALLOON_VM_REQUEST, 0, 0, -1,
+	    vbp, sizeof(struct vmop_balloon_params));
+
+	free(vbp);
+
+	return (0);
+}
+
+int
+vm_balloon_complete(struct imsg *imsg, int *ret)
+{
+	struct vmop_result *vmr;
+	int res;
+
+	if (imsg->hdr.type == IMSG_VMDOP_BALLOON_VM_RESPONSE) {
+		vmr = (struct vmop_result *)imsg->data;
+		res = vmr->vmr_result;
+		if (res) {
+			errno = res;
+			warn("balloon vm command failed");
+			*ret = EIO;
+		} else {
+			warnx("balloon adjusted on vm %d successfully",
+			    vmr->vmr_id);
+			*ret = 0;
+		}
+	} else {
+		warnx("unexpected response received from vmd");
+		*ret = EINVAL;
+	}
+
+	return (1);
+}
 
 /*
  * vm_start
@@ -153,6 +219,7 @@ vm_start(uint32_t start_id, const char *name, int memsize, int nnics,
 				errx(1, "interface name too long");
 		}
 	}
+
 	if (name != NULL) {
 		/*
 		 * Allow VMs names with alphanumeric characters, dot, hyphen
@@ -459,7 +526,7 @@ terminate_vm(uint32_t terminate_id, const char *name, unsigned int flags)
  * terminate_vm_complete
  *
  * Callback function invoked when we are expecting an
- * IMSG_VMDOP_TERMINATE_VMM_RESPONSE message indicating the completion of
+ * IMSG_VMDOP_TERMINATE_VM_RESPONSE message indicating the completion of
  * a terminate vm operation.
  *
  * Parameters:
@@ -716,6 +783,8 @@ vm_state(unsigned int mask)
 {
 	if (mask & VM_STATE_PAUSED)
 		return "paused";
+	else if (mask & VM_STATE_WAITING)
+		return "waiting";
 	else if (mask & VM_STATE_RUNNING)
 		return "running";
 	else if (mask & VM_STATE_SHUTDOWN)
@@ -744,13 +813,14 @@ print_vm_info(struct vmop_info_result *list, size_t ct)
 	size_t i;
 	char *tty;
 	char curmem[FMT_SCALED_STRSIZE];
+	char swap[FMT_SCALED_STRSIZE];
 	char maxmem[FMT_SCALED_STRSIZE];
 	char user[16], group[16];
 	const char *name;
 	int running;
 
-	printf("%5s %5s %5s %7s %7s %7s %12s %8s %s\n", "ID", "PID", "VCPUS",
-	    "MAXMEM", "CURMEM", "TTY", "OWNER", "STATE", "NAME");
+	printf("%5s %5s %5s %7s %7s %7s %7s %12s %8s %s\n", "ID", "PID", "VCPUS",
+	    "MAXMEM", "CURMEM", "SWAP", "TTY", "OWNER", "STATE", "NAME");
 
 	for (i = 0; i < ct; i++) {
 		vmi = &list[i];
@@ -766,8 +836,6 @@ print_vm_info(struct vmop_info_result *list, size_t ct)
 				(void)strlcpy(user, name, sizeof(user));
 			/* get group name */
 			if (vmi->vir_gid != -1) {
-				if (vmi->vir_uid == 0)
-					*user = '\0';
 				name = group_from_gid(vmi->vir_gid, 1);
 				if (name == NULL)
 					(void)snprintf(group, sizeof(group),
@@ -780,6 +848,7 @@ print_vm_info(struct vmop_info_result *list, size_t ct)
 
 			(void)strlcpy(curmem, "-", sizeof(curmem));
 			(void)strlcpy(maxmem, "-", sizeof(maxmem));
+			(void)strlcpy(swap, "-", sizeof(swap));
 
 			(void)fmt_scaled(vir->vir_memory_size * 1024 * 1024,
 			    maxmem);
@@ -793,18 +862,20 @@ print_vm_info(struct vmop_info_result *list, size_t ct)
 					tty = list[i].vir_ttyname;
 
 				(void)fmt_scaled(vir->vir_used_size, curmem);
+				/* Needs mult by 4k XXX */
+				(void)fmt_scaled(vir->vir_swpginuse, swap);
 
 				/* running vm */
-				printf("%5u %5u %5zd %7s %7s %7s %12s %8s %s\n",
+				printf("%5u %5u %5zd %7s %7s %7s %7s %12s %8s %s\n",
 				    vir->vir_id, vir->vir_creator_pid,
-				    vir->vir_ncpus, maxmem, curmem,
+				    vir->vir_ncpus, maxmem, curmem, swap,
 				    tty, user, vm_state(vmi->vir_state),
 				    vir->vir_name);
 			} else {
 				/* disabled vm */
-				printf("%5u %5s %5zd %7s %7s %7s %12s %8s %s\n",
+				printf("%5u %5s %5zd %7s %7s %7s %7s %12s %8s %s\n",
 				    vir->vir_id, "-",
-				    vir->vir_ncpus, maxmem, curmem,
+				    vir->vir_ncpus, maxmem, curmem, swap,
 				    "-", user, vm_state(vmi->vir_state),
 				    vir->vir_name);
 			}
@@ -949,4 +1020,3 @@ create_imagefile(int type, const char *imgfile_path, const char *base_path,
 
 	return (ret);
 }
-

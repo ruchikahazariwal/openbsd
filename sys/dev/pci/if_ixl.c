@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ixl.c,v 1.45 2019/10/02 04:51:34 yasuoka Exp $ */
+/*	$OpenBSD: if_ixl.c,v 1.47 2020/04/22 07:09:40 mpi Exp $ */
 
 /*
  * Copyright (c) 2013-2015, Intel Corporation
@@ -319,12 +319,12 @@ struct ixl_aq_phy_abilities {
 	uint32_t	phy_type;
 
 	uint8_t		link_speed;
-#define IXL_AQ_PHY_LINK_SPEED_100MB	0x1
-#define IXL_AQ_PHY_LINK_SPEED_1000MB	0x2
-#define IXL_AQ_PHY_LINK_SPEED_10GB	0x3
-#define IXL_AQ_PHY_LINK_SPEED_40GB	0x4
-#define IXL_AQ_PHY_LINK_SPEED_20GB	0x5
-#define IXL_AQ_PHY_LINK_SPEED_25GB	0x6
+#define IXL_AQ_PHY_LINK_SPEED_100MB	(1 << 1)
+#define IXL_AQ_PHY_LINK_SPEED_1000MB	(1 << 2)
+#define IXL_AQ_PHY_LINK_SPEED_10GB	(1 << 3)
+#define IXL_AQ_PHY_LINK_SPEED_40GB	(1 << 4)
+#define IXL_AQ_PHY_LINK_SPEED_20GB	(1 << 5)
+#define IXL_AQ_PHY_LINK_SPEED_25GB	(1 << 6)
 	uint8_t		abilities;
 	uint16_t	eee_capability;
 
@@ -4263,7 +4263,6 @@ ixl_clear_hw(struct ixl_softc *sc)
 	uint32_t num_vfs;
 	uint32_t i, j;
 	uint32_t val;
-	uint32_t eol = 0x7ff;
 
 	/* get number of interrupts, queues, and vfs */
 	val = ixl_rd(sc, I40E_GLPCI_CNF2);
@@ -4299,11 +4298,11 @@ ixl_clear_hw(struct ixl_softc *sc)
 		ixl_wr(sc, I40E_PFINT_DYN_CTLN(i), val);
 
 	/* Set the FIRSTQ_INDX field to 0x7FF in PFINT_LNKLSTx */
-	val = eol << I40E_PFINT_LNKLST0_FIRSTQ_INDX_SHIFT;
+	val = I40E_QUEUE_TYPE_EOL << I40E_PFINT_LNKLST0_FIRSTQ_INDX_SHIFT;
 	ixl_wr(sc, I40E_PFINT_LNKLST0, val);
 	for (i = 0; i < num_pf_int - 2; i++)
 		ixl_wr(sc, I40E_PFINT_LNKLSTN(i), val);
-	val = eol << I40E_VPINT_LNKLST0_FIRSTQ_INDX_SHIFT;
+	val = I40E_QUEUE_TYPE_EOL << I40E_VPINT_LNKLST0_FIRSTQ_INDX_SHIFT;
 	for (i = 0; i < num_vfs; i++)
 		ixl_wr(sc, I40E_VPINT_LNKLST0(i), val);
 	for (i = 0; i < num_vf_int - 2; i++)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: wsmux.c,v 1.48 2019/05/22 19:13:34 anton Exp $	*/
+/*	$OpenBSD: wsmux.c,v 1.50 2020/03/24 07:53:24 anton Exp $	*/
 /*      $NetBSD: wsmux.c,v 1.37 2005/04/30 03:47:12 augustss Exp $      */
 
 /*
@@ -90,7 +90,7 @@ int	wsmuxdebug = 0;
 int	wsmux_mux_open(struct wsevsrc *, struct wseventvar *);
 int	wsmux_mux_close(struct wsevsrc *);
 
-void	wsmux_do_open(struct wsmux_softc *, struct wseventvar *);
+int	wsmux_do_open(struct wsmux_softc *, struct wseventvar *);
 
 void	wsmux_do_close(struct wsmux_softc *);
 #if NWSDISPLAY > 0
@@ -184,7 +184,7 @@ wsmuxopen(dev_t dev, int flags, int mode, struct proc *p)
 {
 	struct wsmux_softc *sc;
 	struct wseventvar *evar;
-	int unit;
+	int error, unit;
 
 	unit = minor(dev);
 	sc = wsmux_getmux(unit);
@@ -215,9 +215,10 @@ wsmuxopen(dev_t dev, int flags, int mode, struct proc *p)
 	sc->sc_rawkbd = 0;
 #endif
 
-	wsmux_do_open(sc, evar);
-
-	return (0);
+	error = wsmux_do_open(sc, evar);
+	if (error)
+                wsevent_fini(evar);
+	return (error);
 }
 
 /*
@@ -229,23 +230,17 @@ wsmux_mux_open(struct wsevsrc *me, struct wseventvar *evar)
 	struct wsmux_softc *sc = (struct wsmux_softc *)me;
 
 #ifdef DIAGNOSTIC
-	if (sc->sc_base.me_evp != NULL) {
-		printf("wsmux_mux_open: busy\n");
-		return (EBUSY);
-	}
 	if (sc->sc_base.me_parent == NULL) {
 		printf("wsmux_mux_open: no parent\n");
 		return (EINVAL);
 	}
 #endif
 
-	wsmux_do_open(sc, evar);
-
-	return (0);
+	return (wsmux_do_open(sc, evar));
 }
 
 /* Common part of opening a mux. */
-void
+int
 wsmux_do_open(struct wsmux_softc *sc, struct wseventvar *evar)
 {
 	struct wsevsrc *me;
@@ -253,6 +248,9 @@ wsmux_do_open(struct wsmux_softc *sc, struct wseventvar *evar)
 	int error;
 #endif
 
+	/* The device could already be attached to a mux. */
+	if (sc->sc_base.me_evp != NULL)
+		return (EBUSY);
 	sc->sc_base.me_evp = evar; /* remember event variable, mark as open */
 
 	/* Open all children. */
@@ -280,6 +278,8 @@ wsmux_do_open(struct wsmux_softc *sc, struct wseventvar *evar)
 #endif
 	}
 	rw_exit_read(&sc->sc_lock);
+
+	return (0);
 }
 
 /*
@@ -501,21 +501,23 @@ wsmux_do_ioctl(struct device *dv, u_long cmd, caddr_t data, int flag,
 			return (EINVAL);
 		evar->async = *(int *)data != 0;
 		return (0);
+	case FIOGETOWN:
 	case TIOCGPGRP:
-		DPRINTF(("%s: TIOCGPGRP\n", sc->sc_base.me_dv.dv_xname));
+		DPRINTF(("%s: getown (%lu)\n", sc->sc_base.me_dv.dv_xname,
+			 cmd));
 		evar = sc->sc_base.me_evp;
 		if (evar == NULL)
 			return (EINVAL);
-		*(int *)data = -sigio_getown(&evar->sigio);
+		sigio_getown(&evar->sigio, cmd, data);
 		return (0);
+	case FIOSETOWN:
 	case TIOCSPGRP:
-		DPRINTF(("%s: TIOCSPGRP\n", sc->sc_base.me_dv.dv_xname));
-		if (*(int *)data < 0)
-			return (EINVAL);
+		DPRINTF(("%s: setown (%lu)\n", sc->sc_base.me_dv.dv_xname,
+			 cmd));
 		evar = sc->sc_base.me_evp;
 		if (evar == NULL)
 			return (EINVAL);
-		return (sigio_setown(&evar->sigio, -*(int *)data));
+		return (sigio_setown(&evar->sigio, cmd, data));
 	default:
 		DPRINTF(("%s: unknown\n", sc->sc_base.me_dv.dv_xname));
 		break;

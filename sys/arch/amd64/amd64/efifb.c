@@ -1,4 +1,4 @@
-/*	$OpenBSD: efifb.c,v 1.25 2019/10/13 10:56:31 kettenis Exp $	*/
+/*	$OpenBSD: efifb.c,v 1.27 2020/01/24 05:27:31 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2015 YASUOKA Masahiko <yasuoka@yasuoka.net>
@@ -105,6 +105,8 @@ int	 efifb_load_font(void *, void *, struct wsdisplay_font *);
 void	 efifb_scrollback(void *, void *, int lines);
 void	 efifb_efiinfo_init(struct efifb *);
 void	 efifb_cnattach_common(void);
+vaddr_t	 efifb_early_map(paddr_t);
+void	 efifb_early_cleanup(void);
 
 struct cb_framebuffer *cb_find_fb(paddr_t);
 
@@ -430,7 +432,7 @@ efifb_cnattach_common(void)
 	struct rasops_info	*ri = &fb->rinfo;
 	long			 defattr = 0;
 
-	ri->ri_bits = (u_char *)PMAP_DIRECT_MAP(fb->paddr);
+	ri->ri_bits = (u_char *)efifb_early_map(fb->paddr);
 
 	efifb_rasops_preinit(fb);
 
@@ -459,14 +461,17 @@ efifb_cnremap(void)
 		return;
 
 	if (_bus_space_map(iot, fb->paddr, fb->psize,
-	    BUS_SPACE_MAP_PREFETCHABLE | BUS_SPACE_MAP_LINEAR, &ioh) == 0)
-		ri->ri_origbits = bus_space_vaddr(iot, ioh);
+	    BUS_SPACE_MAP_PREFETCHABLE | BUS_SPACE_MAP_LINEAR, &ioh))
+		panic("can't remap framebuffer");
+	ri->ri_origbits = bus_space_vaddr(iot, ioh);
 
 	efifb_rasops_preinit(fb);
 	ri->ri_flg &= ~RI_CLEAR;
 	ri->ri_flg |= RI_CENTER | RI_WRONLY;
 
 	rasops_init(ri, efifb_std_descr.nrows, efifb_std_descr.ncols);
+
+	efifb_early_cleanup();
 }
 
 int
@@ -520,15 +525,20 @@ efifb_is_primary(struct pci_attach_args *pa)
 		if (pci_mapreg_info(pc, tag, reg, type, &base, &size, NULL))
 			continue;
 
-		if (bios_efiinfo != NULL && bios_efiinfo->fb_addr != 0)
-			return (1);
+		if (bios_efiinfo != NULL &&
+		    bios_efiinfo->fb_addr >= base &&
+		    bios_efiinfo->fb_addr < base + size)
+			return 1;
+
+		if (efifb_console.paddr >= base &&
+		    efifb_console.paddr < base + size)
+			return 1;
 
 		if (type & PCI_MAPREG_MEM_TYPE_64BIT)
 			reg += 4;
 	}
 
-	/* XXX coreboot framebuffer isn't matched above. */
-	return efifb_is_console(pa);;
+	return 0;
 }
 
 void
@@ -631,4 +641,16 @@ efifb_stolen(void)
 {
 	struct efifb *fb = &efifb_console;
 	return fb->psize;
+}
+
+vaddr_t
+efifb_early_map(paddr_t pa)
+{
+	return pmap_set_pml4_early(pa);
+}
+
+void
+efifb_early_cleanup(void)
+{
+	pmap_clear_pml4_early();
 }
