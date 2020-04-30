@@ -439,6 +439,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI:
 			switch (sz) {
 			case 4:
+				printf("%s: num_pages: %u \n",__func__, viombh.num_pages);
 				*data = (uint32_t)(viombh.num_pages);
 				break;
 			case 2:
@@ -494,6 +495,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 4:
 			switch (sz) {
 			case 4:
+				printf("%s: actual: %u \n",__func__, viombh.actual);
 				*data = (uint32_t)(viombh.actual);
 				break;
 			case 2:
