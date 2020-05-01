@@ -1110,10 +1110,12 @@ ctl_balloon(struct parse_result *res, int argc, char *argv[])
 int
 ctl_stats(struct parse_result *res, int argc, char *argv[])
 {
-	printf("%s: arc:%d \n", __func__, argc);
 	if (argc == 2) {
-		if (parse_vmid(res, argv[0], 0) == -1)
-			errx(1, "invalid id: %s", argv[1]);
+		printf("%s: argv[0]: %c \n", *argv[0]);
+		if (parse_vmid(res, argv[0], 0) == -1){
+			printf("%s: argv[1]: %c \n", *argv[1]);
+			errx(1, "invalid id: %s", argv[0]);
+		}
 	} else if (argc != 2)
 		ctl_usage(res->ctl);
 
