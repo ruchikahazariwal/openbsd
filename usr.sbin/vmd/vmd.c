@@ -430,7 +430,7 @@ vmd_dispatch_vmm(int fd, struct privsep_proc *p, struct imsg *imsg)
 		    imsg->hdr.type, imsg->hdr.peerid, -1,
 		    imsg->data, sizeof(imsg->data));
 		log_info("%s: stats of vm %d updated successfully",
-		    vm->vm_params.vmc_params.vsp_name,
+		    vm->vm_params.vmc_params.vcp_name,
 		    vm->vm_vmid);
 		break;
 	case IMSG_VMDOP_PAUSE_VM_RESPONSE:
