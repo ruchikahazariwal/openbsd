@@ -1111,7 +1111,7 @@ int
 ctl_stats(struct parse_result *res, int argc, char *argv[])
 {
 	if (argc == 2) {
-		if (parse_vmid(res, argv[1], 0) == -1)
+		if (parse_vmid(res, argv[1], 1) == -1)
 			errx(1, "invalid id: %s", argv[1]);
 	} else if (argc != 2)
 		ctl_usage(res->ctl);
