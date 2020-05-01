@@ -243,7 +243,7 @@ viombh_notifyq(void)
 
 		for (i = 0; i < (sz / 4); i++) {
 			log_debug("%s: got page number 0x%llx from vm for "
-			    "inflate %d/%llu\n", __func__,
+			    "inflate %d/%llu", __func__,
 			    (uint64_t)buf_bl_pages[i],
 			    i, (uint64_t)(sz / 4));
 			vibp.vibp_buf_bl_pages[i] = (uint64_t)buf_bl_pages[i];
@@ -289,7 +289,7 @@ viombh_notifyq(void)
 	}
 	else if (viombh.cfg.queue_notify == 2) // stats queue
 	{
-		printf("Stats queue is notified");
+		printf("%s: stats queue is notified\n",__func__);
 	}
 
 	return (ret);
