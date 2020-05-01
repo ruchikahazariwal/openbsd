@@ -2849,17 +2849,12 @@ virtio_start(struct vm_create_params *vcp)
 void
 balloon_vm(struct vmd_vm *vm, uint32_t size)
 {
-	viombh.num_pages = size;
+	viombh.num_pages = viombh.num_pages + size;
+
+	log_debug("%s: received request to balloon %d pages", __func__,
+	    size);
 
 	if (viombh.num_pages > viombh.actual) {
-		log_debug("%s: received request to inflate balloon %d pages", __func__,
-	    size);
-		viombh.cfg.isr_status |= VIRTIO_CONFIG_ISR_CONFIG_CHANGE;
-		vcpu_assert_pic_irq(viombh.vm_id, 0, viombh.irq);
-	}
-	else if(viombh.num_pages < viombh.actual){
-		log_debug("%s: received request to deflate balloon %d pages", __func__,
-	    size);
 		viombh.cfg.isr_status |= VIRTIO_CONFIG_ISR_CONFIG_CHANGE;
 		vcpu_assert_pic_irq(viombh.vm_id, 0, viombh.irq);
 	}
