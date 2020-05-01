@@ -38,7 +38,8 @@ enum actions {
 	CMD_UNPAUSE,
 	CMD_SEND,
 	CMD_RECEIVE,
-	CMD_BALLOON
+	CMD_BALLOON,
+	CMD_STATS
 };
 
 struct ctl_command;
