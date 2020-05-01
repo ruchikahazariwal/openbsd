@@ -272,10 +272,10 @@ viombh_notifyq(void)
 			log_warnx("viombh: error writing vio ring");
 		}
 
-		// free(buf);
 		free(buf_bl_pages);
 	}
-	else if (viombh.cfg.queue_notify == 1) // deflate queue
+	/* Deflate queue */
+	else if (viombh.cfg.queue_notify == 1)
 	{
 		/* Nothing to do in the deflate case, just advance the ring */
 		ret = 1;
@@ -288,9 +288,9 @@ viombh_notifyq(void)
 			log_warnx("viombh: error writing vio ring");
 		}
 
-		//free(buf);
 	}
-	else if (viombh.cfg.queue_notify == 2) // stats queue
+	/* Stats queue */
+	else if (viombh.cfg.queue_notify == 2)
 	{
 		printf("%s: stats queue is notified\n",__func__);
 		buf_bl_stats = calloc(1, sz);

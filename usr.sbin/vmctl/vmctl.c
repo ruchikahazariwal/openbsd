@@ -121,8 +121,6 @@ vm_stats(uint32_t vm_id, const char *name)
 	struct vmop_stats_params *vsp;
 	const char *s;
 
-	printf("%s: is being called \n",__func__);
-
 	if ((vsp = calloc(1, sizeof(struct vmop_stats_params))) == NULL)
 		return (ENOMEM);
 

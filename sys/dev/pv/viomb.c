@@ -381,8 +381,6 @@ viomb_stats_worker(void *arg1)
 	printf("%s: leaving\n", __func__);
 	splx(s);
 
-	// XXX investigate why there is a stuck irq without this?
-	//task_del(sc->sc_stats_taskq, &sc->sc_stats_task);
 }
 
 /*
