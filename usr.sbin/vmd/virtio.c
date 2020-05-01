@@ -2902,6 +2902,7 @@ stats_vm(struct vmd_vm *vm)
 
 	if (read_mem(q_gpa, buf, vr_sz)) {
 		free(buf);
+		return;
 	}
 
 	desc = (struct vring_desc *)(buf);
