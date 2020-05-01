@@ -237,6 +237,7 @@ viombh_notifyq(void)
 
 		if (read_mem(desc[avail->ring[aidx]].addr, buf_bl_pages, sz)) {
 			printf("error from %s", __func__);
+			free(buf_bl_pages);
 			goto out;
 		}
 
@@ -257,6 +258,7 @@ viombh_notifyq(void)
 		if (ioctl(env->vmd_fd, VMM_IOC_BALLOON_INFLATE, &vibp) == -1) {
 			log_warn("balloon inflate ioctl failed: %s",
 				strerror(errno));
+			free(buf_bl_pages);
 			goto out;
 		}
 
@@ -271,7 +273,7 @@ viombh_notifyq(void)
 		}
 
 		// free(buf);
-		// free(buf_bl_pages);
+		free(buf_bl_pages);
 	}
 	else if (viombh.cfg.queue_notify == 1) // deflate queue
 	{
@@ -295,6 +297,7 @@ viombh_notifyq(void)
 
 		if (read_mem(desc[avail->ring[aidx]].addr, buf_bl_stats, sz)) {
 			printf("error from %s", __func__);
+			free(buf_bl_stats);
 			goto out;
 		}
 
@@ -306,12 +309,11 @@ viombh_notifyq(void)
 				buf_bl_stats[i].val);
 		}
 		printf("%s: leaving\n", __func__);
+		free(buf_bl_stats);
 	}
 
 out:
 	free(buf);
-	free(buf_bl_pages);
-	free(buf_bl_stats);
 	return (ret);
 }
 
