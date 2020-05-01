@@ -2881,12 +2881,12 @@ stats_vm(struct vmd_vm *vm)
 	buf = calloc(1, vr_sz);
 	if (buf == NULL) {
 		log_warn("calloc error getting viombh ring");
-		return (0);
+		return NULL;
 	}
 
 	if (read_mem(q_gpa, buf, vr_sz)) {
 		free(buf);
-		return (0);
+		return NULL;
 	}
 
 	desc = (struct vring_desc *)(buf);
