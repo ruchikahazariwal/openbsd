@@ -188,6 +188,7 @@ viombh_notifyq(void)
 	int ret;
 	uint32_t i;
 	uint32_t *buf_bl_pages;
+	struct virtio_balloon_stat *buf_bl_stats;
 	uint16_t aidx, uidx;
 	char *buf;
 	struct vring_desc *desc;
@@ -269,8 +270,8 @@ viombh_notifyq(void)
 			log_warnx("viombh: error writing vio ring");
 		}
 
-		free(buf);
-		free(buf_bl_pages);
+		// free(buf);
+		// free(buf_bl_pages);
 	}
 	else if (viombh.cfg.queue_notify == 1) // deflate queue
 	{
@@ -285,17 +286,32 @@ viombh_notifyq(void)
 			log_warnx("viombh: error writing vio ring");
 		}
 
-		free(buf);
+		//free(buf);
 	}
 	else if (viombh.cfg.queue_notify == 2) // stats queue
 	{
 		printf("%s: stats queue is notified\n",__func__);
+		buf_bl_stats = calloc(1, sz);
+
+		if (read_mem(desc[avail->ring[aidx]].addr, buf_bl_stats, sz)) {
+			printf("error from %s", __func__);
+			goto out;
+		}
+
+		sz = sz/(sizeof(struct virtio_balloon_stat));
+
+		for (i = 0; i < sz; i++) {
+			printf("%s: stats[%d]: tag=0x%x val=0x%llx\n", __func__, i,
+				buf_bl_stats[i]->tag,
+				buf_bl_stats[i]->val);
+		}
+		printf("%s: leaving\n", __func__);
 	}
 
-	return (ret);
 out:
 	free(buf);
 	free(buf_bl_pages);
+	free(buf_bl_stats);
 	return (ret);
 }
 

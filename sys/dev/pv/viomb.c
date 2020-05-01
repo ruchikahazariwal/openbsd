@@ -382,7 +382,7 @@ viomb_stats_worker(void *arg1)
 	splx(s);
 
 	// XXX investigate why there is a stuck irq without this?
-	task_del(sc->sc_stats_taskq, &sc->sc_stats_task);
+	//task_del(sc->sc_stats_taskq, &sc->sc_stats_task);
 }
 
 /*
