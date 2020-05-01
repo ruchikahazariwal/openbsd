@@ -302,8 +302,8 @@ viombh_notifyq(void)
 
 		for (i = 0; i < sz; i++) {
 			printf("%s: stats[%d]: tag=0x%x val=0x%llx\n", __func__, i,
-				buf_bl_stats[i]->tag,
-				buf_bl_stats[i]->val);
+				buf_bl_stats[i].tag,
+				buf_bl_stats[i].val);
 		}
 		printf("%s: leaving\n", __func__);
 	}
