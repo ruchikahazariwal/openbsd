@@ -121,7 +121,7 @@ vm_stats(uint32_t vm_id, const char *name)
 	struct vmop_stats_params *vsp;
 	const char *s;
 
-	printf("%s: is being called",__func__);
+	printf("%s: is being called \n",__func__);
 
 	if ((vsp = calloc(1, sizeof(struct vmop_stats_params))) == NULL)
 		return (ENOMEM);
@@ -148,7 +148,7 @@ vm_stats(uint32_t vm_id, const char *name)
 
 	vsp->vsp_id = vm_id;
 
-	imsg_compose(ibuf, IMSG_VMDOP_BALLOON_VM_REQUEST, 0, 0, -1,
+	imsg_compose(ibuf, IMSG_VMDOP_STATS_VM_REQUEST, 0, 0, -1,
 	    vsp, sizeof(struct vmop_stats_params));
 
 	free(vsp);
