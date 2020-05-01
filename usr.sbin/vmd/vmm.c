@@ -393,6 +393,15 @@ vmm_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 		    peerid, -1, &vmr, sizeof(vmr)) == -1)
 			return (-1);
 		break;
+	case IMSG_VMDOP_STATS_VM_RESPONSE:
+		memset(&vmr, 0, sizeof(vmr));
+		vmr.vmr_result = res;
+		vmr.vmr_id = id;
+		vmr.vmr_pid = pid;
+		if (proc_compose_imsg(ps, PROC_PARENT, -1, cmd,
+		    peerid, -1, &vmr, sizeof(vmr)) == -1)
+			return (-1);
+		break;
 	default:
 		if (proc_compose_imsg(ps, PROC_PARENT, -1, cmd,
 		    peerid, -1, &res, sizeof(res)) == -1)
