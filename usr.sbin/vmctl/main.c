@@ -1111,9 +1111,9 @@ int
 ctl_stats(struct parse_result *res, int argc, char *argv[])
 {
 	if (argc == 2) {
-		printf("%s: argv[0]: %c \n", *argv[0]);
+		printf("%s: argv[0]: %c \n", __func__, *argv[0]);
 		if (parse_vmid(res, argv[0], 0) == -1){
-			printf("%s: argv[1]: %c \n", *argv[1]);
+			printf("%s: argv[1]: %c \n", __func__,  *argv[1]);
 			errx(1, "invalid id: %s", argv[0]);
 		}
 	} else if (argc != 2)
