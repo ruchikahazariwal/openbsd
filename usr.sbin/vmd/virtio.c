@@ -373,6 +373,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 5:
 			switch (sz) {
 			case 1:
@@ -383,6 +384,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 6:
 			switch (sz) {
 			case 1:
@@ -397,6 +399,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 7:
 			switch (sz) {
 			case 1:
@@ -407,6 +410,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		}
 	} else {
 		switch (reg) {
@@ -453,6 +457,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 1:
 			switch (sz) {
 			case 1:
@@ -464,6 +469,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 2:
 			switch (sz) {
 			case 1:
@@ -480,6 +486,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 3:
 			switch (sz) {
 			case 1:
@@ -491,6 +498,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 4:
 			switch (sz) {
 			case 4:
@@ -508,6 +516,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 5:
 			switch (sz) {
 			case 1:
@@ -519,6 +528,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 6:
 			switch (sz) {
 			case 1:
@@ -535,6 +545,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		case VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI + 7:
 			switch (sz) {
 			case 1:
@@ -546,6 +557,7 @@ virtio_mbh_io(int dir, uint16_t reg, uint32_t *data, uint8_t *intr,
 				/* XXX handle invalid sz */
 				break;
 			}
+			break;
 		}
 	}
 
@@ -2837,14 +2849,13 @@ virtio_start(struct vm_create_params *vcp)
 void
 balloon_vm(struct vmd_vm *vm, uint32_t size)
 {
-	viombh.num_pages = size;
+	viombh.num_pages = viombh.num_pages + size;
 
 	log_debug("%s: received request to balloon %d pages", __func__,
 	    size);
-#if 0
+
 	if (viombh.num_pages > viombh.actual) {
 		viombh.cfg.isr_status |= VIRTIO_CONFIG_ISR_CONFIG_CHANGE;
 		vcpu_assert_pic_irq(viombh.vm_id, 0, viombh.irq);
 	}
-#endif
 }
