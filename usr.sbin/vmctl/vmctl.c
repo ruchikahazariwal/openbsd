@@ -121,6 +121,8 @@ vm_stats(uint32_t vm_id, const char *name)
 	struct vmop_stats_params *vsp;
 	const char *s;
 
+	printf("%s: is being called",__func__);
+
 	if ((vsp = calloc(1, sizeof(struct vmop_stats_params))) == NULL)
 		return (ENOMEM);
 
@@ -159,6 +161,7 @@ vm_stats_complete(struct imsg *imsg, int *ret)
 {
 	struct vmop_result *vmr;
 	int res;
+	printf("%s: is being called",__func__);
 
 	if (imsg->hdr.type == IMSG_VMDOP_STATS_VM_RESPONSE) {
 		vmr = (struct vmop_result *)imsg->data;
@@ -174,6 +177,7 @@ vm_stats_complete(struct imsg *imsg, int *ret)
 		}
 	} else {
 		warnx("unexpected response received from vmd");
+		printf("%s: unexpected response received from vmd",__func__);
 		*ret = EINVAL;
 	}
 
