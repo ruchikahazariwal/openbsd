@@ -363,3 +363,4 @@ int viombh_notifyq(void);
 int viombh_restore(int, struct vm_create_params *);
 int viombh_dump(int);
 void balloon_vm(struct vmd_vm *, uint32_t size);
+void stats_vm(struct vmd_vm *);

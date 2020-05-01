@@ -125,6 +125,8 @@ enum imsg_type {
 	IMSG_VMDOP_CONFIG,
 	IMSG_VMDOP_BALLOON_VM_REQUEST,
 	IMSG_VMDOP_BALLOON_VM_RESPONSE,
+	IMSG_VMDOP_STATS_VM_REQUEST,
+	IMSG_VMDOP_STATS_VM_RESPONSE,
 	IMSG_VMDOP_DONE
 };
 
@@ -170,6 +172,12 @@ struct vmop_balloon_params {
 	uint32_t		vbp_id;
 	char			vbp_name[VMM_MAX_NAME_LEN];
 	uint32_t		vbp_memsize;
+};
+
+struct vmop_stats_params {
+	uid_t			vsp_uid;
+	uint32_t		vsp_id;
+	char			vsp_name[VMM_MAX_NAME_LEN];
 };
 
 struct vmop_create_params {
