@@ -2866,7 +2866,6 @@ stats_vm(struct vmd_vm *vm)
 
 	uint64_t q_gpa;
 	uint32_t vr_sz;
-	size_t sz;
 	uint16_t aidx, uidx;
 	char *buf;
 	struct vring_desc *desc;
@@ -2881,12 +2880,10 @@ stats_vm(struct vmd_vm *vm)
 	buf = calloc(1, vr_sz);
 	if (buf == NULL) {
 		log_warn("calloc error getting viombh ring");
-		return NULL;
 	}
 
 	if (read_mem(q_gpa, buf, vr_sz)) {
 		free(buf);
-		return NULL;
 	}
 
 	desc = (struct vring_desc *)(buf);
