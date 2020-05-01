@@ -111,6 +111,7 @@ vmm_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 	struct vmop_result	 vmr;
 	struct vmop_create_params vmc;
 	struct vmop_balloon_params vbp;
+	struct vmop_stats_params vsp;
 	uint32_t		 id = 0, peerid = imsg->hdr.peerid;
 	pid_t			 pid = 0;
 	unsigned int		 mode, flags;
@@ -283,6 +284,20 @@ vmm_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 		imsg_compose_event(&vm->vm_iev,
 		    imsg->hdr.type, imsg->hdr.peerid, imsg->hdr.pid,
 		    imsg->fd, &vbp, sizeof(vbp));
+		break;
+	case IMSG_VMDOP_STATS_VM_REQUEST:
+		IMSG_SIZE_CHECK(imsg, &vsp);
+		memcpy(&vsp, imsg->data, sizeof(vsp));
+		id = vsp.vsp_id;
+		vm = vm_getbyvmid(id);
+		if ((vm = vm_getbyvmid(id)) == NULL) {
+			res = ENOENT;
+			cmd = IMSG_VMDOP_STATS_VM_RESPONSE;
+			break;
+		}
+		imsg_compose_event(&vm->vm_iev,
+		    imsg->hdr.type, imsg->hdr.peerid, imsg->hdr.pid,
+		    imsg->fd, &vsp, sizeof(vsp));
 		break;
 	case IMSG_VMDOP_PAUSE_VM:
 		IMSG_SIZE_CHECK(imsg, &vid);
@@ -569,6 +584,15 @@ vmm_dispatch_vm(int fd, short event, void *arg)
 			}
 			break;
 		case IMSG_VMDOP_BALLOON_VM_RESPONSE:
+			for (i = 0; i < sizeof(procs); i++) {
+				if (procs[i].p_id == PROC_PARENT) {
+					proc_forward_imsg(procs[i].p_ps,
+					    &imsg, PROC_PARENT, -1);
+					break;
+				}
+			}
+			break;
+		case IMSG_VMDOP_STATS_VM_RESPONSE:
 			for (i = 0; i < sizeof(procs); i++) {
 				if (procs[i].p_id == PROC_PARENT) {
 					proc_forward_imsg(procs[i].p_ps,

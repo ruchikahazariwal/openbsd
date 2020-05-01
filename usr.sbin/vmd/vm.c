@@ -403,6 +403,7 @@ vm_dispatch_vmm(int fd, short event, void *arg)
 	ssize_t			 n;
 	int			 verbose;
 	struct vmop_balloon_params vbp;
+	struct vmop_stats_params vsp;
 
 	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1 && errno != EAGAIN)
@@ -451,6 +452,16 @@ vm_dispatch_vmm(int fd, short event, void *arg)
 			balloon_vm(vm, vbp.vbp_memsize / PAGE_SIZE);
 			imsg_compose_event(&vm->vm_iev,
 			    IMSG_VMDOP_BALLOON_VM_RESPONSE,
+			    imsg.hdr.peerid, imsg.hdr.pid, -1, &vmr,
+			    sizeof(vmr));
+			break;
+		case IMSG_VMDOP_STATS_VM_REQUEST:
+			memcpy(&vsp, imsg.data, sizeof(vsp));
+			vmr.vmr_result = 0;
+			vmr.vmr_id = vm->vm_vmid;
+			stats_vm(vm);
+			imsg_compose_event(&vm->vm_iev,
+			    IMSG_VMDOP_STATS_VM_RESPONSE,
 			    imsg.hdr.peerid, imsg.hdr.pid, -1, &vmr,
 			    sizeof(vmr));
 			break;

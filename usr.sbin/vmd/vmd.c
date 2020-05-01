@@ -92,6 +92,7 @@ vmd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 	unsigned int			 v = 0, flags;
 	struct vmop_create_params	 vmc;
 	struct vmop_balloon_params	 vbp;
+	struct vmop_stats_params	 vsp;
 	struct vmop_id			 vid;
 	struct vmop_result		 vmr;
 	struct vm_dump_header		 vmh;
@@ -133,6 +134,40 @@ vmd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 
 		if (proc_compose_imsg(ps, PROC_VMM, -1, imsg->hdr.type,
 		    imsg->hdr.peerid, -1, &vbp, sizeof(vbp)) == -1)
+			return (-1);
+		break;
+	case IMSG_VMDOP_STATS_VM_REQUEST:
+		IMSG_SIZE_CHECK(imsg, &vsp);
+		memcpy(&vsp, imsg->data, sizeof(vsp));
+
+		if ((id = vsp.vsp_id) == 0) {
+			/* Lookup vm (id) by name */
+			if ((vm = vm_getbyname(vsp.vsp_name)) == NULL) {
+				res = ENOENT;
+				cmd = IMSG_VMDOP_STATS_VM_RESPONSE;
+				break;
+			} else if (!(vm->vm_state & VM_STATE_RUNNING)) {
+				res = EINVAL;
+				cmd = IMSG_VMDOP_STATS_VM_RESPONSE;
+				break;
+			}
+			id = vm->vm_vmid;
+		} else if ((vm = vm_getbyvmid(id)) == NULL) {
+			res = ENOENT;
+			cmd = IMSG_VMDOP_STATS_VM_RESPONSE;
+			break;
+		}
+		if (vm_checkperm(vm, &vm->vm_params.vmc_owner,
+		    vsp.vsp_uid) != 0) {
+			res = EPERM;
+			cmd = IMSG_VMDOP_STATS_VM_RESPONSE;
+			break;
+		}
+
+		vsp.vsp_id = id;
+
+		if (proc_compose_imsg(ps, PROC_VMM, -1, imsg->hdr.type,
+		    imsg->hdr.peerid, -1, &vsp, sizeof(vsp)) == -1)
 			return (-1);
 		break;
 	case IMSG_VMDOP_START_VM_REQUEST:

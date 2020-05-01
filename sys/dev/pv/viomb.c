@@ -690,8 +690,8 @@ viomb_stats_intr(struct virtqueue *vq)
 	bus_dmamap_sync(vsc->sc_dmat, sc->sc_stats_dmamap, 0,
 	    VIOMB_STATS_MAX * sizeof(struct virtio_balloon_stat),
 	    BUS_DMASYNC_POSTWRITE);
-
-	task_add(sc->sc_stats_taskq, &sc->sc_stats_task);
+	if (virtio_has_feature(vsc, VIRTIO_BALLOON_F_STATS_VQ))
+		task_add(sc->sc_stats_taskq, &sc->sc_stats_task);
 
 	return(1);
 }

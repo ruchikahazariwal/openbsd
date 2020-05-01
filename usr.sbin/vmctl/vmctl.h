@@ -109,6 +109,8 @@ void	 send_vm(uint32_t, const char *);
 void	 vm_receive(uint32_t, const char *);
 int	 vm_balloon(uint32_t, const char *, int);
 int	 vm_balloon_complete(struct imsg *, int *);
+int	 vm_stats(uint32_t, const char *, int);
+int	 vm_stats_complete(struct imsg *, int *);
 int	 check_info_id(const char *, uint32_t);
 void	 get_info_vm(uint32_t, const char *, enum actions, unsigned int);
 int	 add_info(struct imsg *, int *);

@@ -289,7 +289,7 @@ viombh_notifyq(void)
 	}
 	else if (viombh.cfg.queue_notify == 2) // stats queue
 	{
-
+		printf("Stats queue is notified");
 	}
 
 	return (ret);
@@ -2858,4 +2858,56 @@ balloon_vm(struct vmd_vm *vm, uint32_t size)
 		viombh.cfg.isr_status |= VIRTIO_CONFIG_ISR_CONFIG_CHANGE;
 		vcpu_assert_pic_irq(viombh.vm_id, 0, viombh.irq);
 	}
+}
+
+void
+stats_vm(struct vmd_vm *vm)
+{
+
+	uint64_t q_gpa;
+	uint32_t vr_sz;
+	size_t sz;
+	uint16_t aidx, uidx;
+	char *buf;
+	struct vring_desc *desc;
+	struct vring_avail *avail;
+	struct vring_used *used;
+
+
+	vr_sz = vring_size(VIOMBH_QUEUE_SIZE);
+	q_gpa = viombh.vq[2].qa;
+	q_gpa = q_gpa * VIRTIO_PAGE_SIZE;
+
+	buf = calloc(1, vr_sz);
+	if (buf == NULL) {
+		log_warn("calloc error getting viombh ring");
+		return (0);
+	}
+
+	if (read_mem(q_gpa, buf, vr_sz)) {
+		free(buf);
+		return (0);
+	}
+
+	desc = (struct vring_desc *)(buf);
+	avail = (struct vring_avail *)(buf +
+	    viombh.vq[2].vq_availoffset);
+	used = (struct vring_used *)(buf +
+	    viombh.vq[2].vq_usedoffset);
+
+	aidx = avail->idx & VIOMBH_QUEUE_MASK;
+	uidx = used->idx & VIOMBH_QUEUE_MASK;
+
+	viombh.cfg.isr_status = 1;
+	used->ring[uidx].id = avail->ring[aidx] & VIOMBH_QUEUE_MASK;
+	used->ring[uidx].len = desc[avail->ring[aidx]].len;
+	used->idx++;
+
+	if (write_mem(q_gpa, buf, vr_sz)) {
+		log_warnx("viombh: error writing vio ring");
+	}
+
+	vcpu_assert_pic_irq(viombh.vm_id, 0, viombh.irq);
+
+	free(buf);
 }

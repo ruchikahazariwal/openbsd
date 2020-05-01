@@ -310,6 +310,7 @@ control_dispatch_imsg(int fd, short event, void *arg)
 	struct imsg			 imsg;
 	struct vmop_create_params	 vmc;
 	struct vmop_balloon_params	 vbp;
+	struct vmop_stats_params	 vsp;
 	struct vmop_id			 vid;
 	int				 n, v, ret = 0;
 
@@ -349,6 +350,7 @@ control_dispatch_imsg(int fd, short event, void *arg)
 		case IMSG_VMDOP_PAUSE_VM:
 		case IMSG_VMDOP_UNPAUSE_VM:
 		case IMSG_VMDOP_BALLOON_VM_REQUEST:
+		case IMSG_VMDOP_STATS_VM_REQUEST:
 			break;
 		default:
 			if (c->peercred.uid != 0) {
@@ -398,6 +400,18 @@ control_dispatch_imsg(int fd, short event, void *arg)
 
 			if (proc_compose_imsg(ps, PROC_PARENT, -1,
 			    imsg.hdr.type, fd, -1, &vbp, sizeof(vbp)) == -1) {
+				control_close(fd, cs);
+				return;
+			}
+			break;
+		case IMSG_VMDOP_STATS_VM_REQUEST:
+			if (IMSG_DATA_SIZE(&imsg) < sizeof(vsp))
+				goto fail;
+			memcpy(&vsp, imsg.data, sizeof(vsp));
+			vsp.vsp_uid = c->peercred.uid;
+
+			if (proc_compose_imsg(ps, PROC_PARENT, -1,
+			    imsg.hdr.type, fd, -1, &vsp, sizeof(vsp)) == -1) {
 				control_close(fd, cs);
 				return;
 			}

@@ -115,6 +115,71 @@ vm_balloon_complete(struct imsg *imsg, int *ret)
 	return (1);
 }
 
+int
+vm_stats(uint32_t vm_id, const char *name)
+{
+	struct vmop_stats_params *vsp;
+	const char *s;
+
+	if ((vsp = calloc(1, sizeof(struct vmop_stats_params))) == NULL)
+		return (ENOMEM);
+
+	if (name != NULL) {
+		/*
+		 * Allow VMs names with alphanumeric characters, dot, hyphen
+		 * and underscore. But disallow dot, hyphen and underscore at
+		 * the start.
+		 */
+		if (*name == '-' || *name == '.' || *name == '_')
+			errx(1, "invalid VM name");
+
+		for (s = name; *s != '\0'; ++s) {
+			if (!(isalnum(*s) || *s == '.' || *s == '-' ||
+			    *s == '_'))
+				errx(1, "invalid VM name");
+		}
+
+		if (strlcpy(vsp->vsp_name, name,
+		    sizeof(vsp->vsp_name)) >= sizeof(vsp->vsp_name))
+			errx(1, "vm name too long");
+	}
+
+	vsp->vsp_id = vm_id;
+
+	imsg_compose(ibuf, IMSG_VMDOP_BALLOON_VM_REQUEST, 0, 0, -1,
+	    vsp, sizeof(struct vmop_stats_params));
+
+	free(vsp);
+
+	return (0);
+}
+
+int
+vm_stats_complete(struct imsg *imsg, int *ret)
+{
+	struct vmop_result *vmr;
+	int res;
+
+	if (imsg->hdr.type == IMSG_VMDOP_STATS_VM_RESPONSE) {
+		vmr = (struct vmop_result *)imsg->data;
+		res = vmr->vmr_result;
+		if (res) {
+			errno = res;
+			warn("stats vm command failed");
+			*ret = EIO;
+		} else {
+			warnx("getting stats from vm %d successfully",
+			    vmr->vmr_id);
+			*ret = 0;
+		}
+	} else {
+		warnx("unexpected response received from vmd");
+		*ret = EINVAL;
+	}
+
+	return (1);
+}
+
 /*
  * vm_start
  *

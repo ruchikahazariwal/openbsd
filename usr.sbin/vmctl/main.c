@@ -69,6 +69,7 @@ int		 ctl_unpause(struct parse_result *, int, char *[]);
 int		 ctl_send(struct parse_result *, int, char *[]);
 int		 ctl_receive(struct parse_result *, int, char *[]);
 int		 ctl_balloon(struct parse_result *, int, char *[]);
+int		 ctl_stats(struct parse_result *, int, char *[]);
 
 struct ctl_command ctl_commands[] = {
 	{ "console",	CMD_CONSOLE,	ctl_console,	"id" },
@@ -90,6 +91,7 @@ struct ctl_command ctl_commands[] = {
 	{ "unpause",	CMD_UNPAUSE,	ctl_unpause,	"id" },
 	{ "wait",	CMD_WAITFOR,	ctl_waitfor,	"id" },
 	{ "balloon",	CMD_BALLOON,	ctl_balloon,	"[-m size] id" },
+	{ "stats",	CMD_STATS,	ctl_stats,	"id" },
 	{ NULL }
 };
 
@@ -279,6 +281,13 @@ vmmaction(struct parse_result *res)
 			err(1, "balloon operation failed");
 		}
 		break;
+	case CMD_STATS:
+		ret = vm_stats(res->id, res->name);
+		if (ret) {
+			errno = ret;
+			err(1, "stats operation failed");
+		}
+		break;
 	case CMD_CREATE:
 	case NONE:
 		/* The action is not expected here */
@@ -348,6 +357,9 @@ vmmaction(struct parse_result *res)
 				break;
 			case CMD_BALLOON:
 				done = vm_balloon_complete(&imsg, &ret);
+				break;
+			case CMD_STATS:
+				done = vm_stats_complete(&imsg, &ret);
 				break;
 			default:
 				done = 1;
@@ -1091,6 +1103,18 @@ ctl_balloon(struct parse_result *res, int argc, char *argv[])
 
 	if (parse_vmid(res, argv[0], 0) == -1)
 		errx(1, "invalid id: %s", argv[1]);
+
+	return (vmmaction(res));
+}
+
+int
+ctl_stats(struct parse_result *res, int argc, char *argv[])
+{
+	if (argc == 2) {
+		if (parse_vmid(res, argv[1], 0) == -1)
+			errx(1, "invalid id: %s", argv[1]);
+	} else if (argc != 2)
+		ctl_usage(res->ctl);
 
 	return (vmmaction(res));
 }
