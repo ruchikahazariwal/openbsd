@@ -76,8 +76,8 @@ extern struct bcachestats bcstats;
 #define VIRTIO_BALLOON_CONFIG_ACTUAL	4	/* 32bit */
 
 /* Feature bits */
-#define VIRTIO_BALLOON_F_MUST_TELL_HOST (1ULL<<0)
-#define VIRTIO_BALLOON_F_STATS_VQ	(1ULL<<1)
+#define VIRTIO_BALLOON_F_MUST_TELL_HOST 0
+#define VIRTIO_BALLOON_F_STATS_VQ		1
 
 #define VIOMB_STATS_MAX		  6   /* Maximum number of tags */
 #define VIRTIO_BALLOON_S_SWAP_IN  0   /* Amount of memory swapped in */
@@ -367,6 +367,9 @@ viomb_stats_worker(void *arg1)
 {
 	struct viomb_softc *sc = (struct viomb_softc *)arg1;
 	int s, i;
+f
+	if (virtio_has_feature(vsc, VIRTIO_BALLOON_F_STATS_VQ))
+		printf("%s: stats feature bit negotiated\n", __func__);
 
 	s = splbio();
 	printf("%s: entered\n", __func__);
@@ -691,7 +694,9 @@ viomb_stats_intr(struct virtqueue *vq)
 	    VIOMB_STATS_MAX * sizeof(struct virtio_balloon_stat),
 	    BUS_DMASYNC_POSTWRITE);
 
-	task_add(sc->sc_stats_taskq, &sc->sc_stats_task);
+	
+	if (virtio_has_feature(vsc, VIRTIO_BALLOON_F_STATS_VQ))
+		task_add(sc->sc_stats_taskq, &sc->sc_stats_task);
 
 	return(1);
 }
