@@ -183,7 +183,7 @@ viomb_match(struct device *parent, void *match, void *aux)
 void
 viomb_attach(struct device *parent, struct device *self, void *aux)
 {
-	printf("%s - attaching viomb cmpe\n",__func__);
+	printf("%s - attaching viomb \n",__func__);
 	struct viomb_softc *sc = (struct viomb_softc *)self;
 	struct virtio_softc *vsc = (struct virtio_softc *)parent;
 	int i;
@@ -232,7 +232,7 @@ viomb_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_vq[VQ_STATS].vq_done = viomb_stats_intr;
 	virtio_start_vq_intr(vsc, &sc->sc_vq[VQ_INFLATE]);
 	virtio_start_vq_intr(vsc, &sc->sc_vq[VQ_DEFLATE]);
-//	virtio_start_vq_intr(vsc, &sc->sc_vq[VQ_STATS]);
+	virtio_start_vq_intr(vsc, &sc->sc_vq[VQ_STATS]);
 
 	viomb_read_config(sc);
 	TAILQ_INIT(&sc->sc_balloon_pages);
@@ -366,12 +366,8 @@ void
 viomb_stats_worker(void *arg1)
 {
 	struct viomb_softc *sc = (struct viomb_softc *)arg1;
-	struct virtio_softc *vsc = (struct virtio_softc *)sc->sc_virtio;
 
 	int s, i;
-
-	if (virtio_has_feature(vsc, VIRTIO_BALLOON_F_STATS_VQ))
-		printf("%s: stats feature bit negotiated\n", __func__);
 
 	s = splbio();
 	printf("%s: entered\n", __func__);
