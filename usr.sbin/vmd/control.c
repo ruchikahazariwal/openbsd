@@ -83,6 +83,7 @@ control_dispatch_vmd(int fd, struct privsep_proc *p, struct imsg *imsg)
 
 	switch (imsg->hdr.type) {
 	case IMSG_VMDOP_BALLOON_VM_RESPONSE:
+	case IMSG_VMDOP_STATS_VM_RESPONSE:
 	case IMSG_VMDOP_START_VM_RESPONSE:
 	case IMSG_VMDOP_PAUSE_VM_RESPONSE:
 	case IMSG_VMDOP_SEND_VM_RESPONSE:
