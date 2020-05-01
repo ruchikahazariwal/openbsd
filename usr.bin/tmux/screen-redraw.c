@@ -1,4 +1,4 @@
-/* $OpenBSD: screen-redraw.c,v 1.65 2019/07/24 21:16:17 nicm Exp $ */
+/* $OpenBSD: screen-redraw.c,v 1.73 2020/04/20 14:59:31 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -435,19 +435,28 @@ screen_redraw_screen(struct client *c)
 
 	flags = screen_redraw_update(c, c->flags);
 	screen_redraw_set_context(c, &ctx);
+	tty_sync_start(&c->tty);
 
 	if (flags & (CLIENT_REDRAWWINDOW|CLIENT_REDRAWBORDERS)) {
+		log_debug("%s: redrawing borders", c->name);
 		if (ctx.pane_status != PANE_STATUS_OFF)
 			screen_redraw_draw_pane_status(&ctx);
 		screen_redraw_draw_borders(&ctx);
 	}
-	if (flags & CLIENT_REDRAWWINDOW)
+	if (flags & CLIENT_REDRAWWINDOW) {
+		log_debug("%s: redrawing panes", c->name);
 		screen_redraw_draw_panes(&ctx);
+	}
 	if (ctx.statuslines != 0 &&
-	    (flags & (CLIENT_REDRAWSTATUS|CLIENT_REDRAWSTATUSALWAYS)))
+	    (flags & (CLIENT_REDRAWSTATUS|CLIENT_REDRAWSTATUSALWAYS))) {
+		log_debug("%s: redrawing status", c->name);
 		screen_redraw_draw_status(&ctx);
-	if (c->overlay_draw != NULL && (flags & CLIENT_REDRAWOVERLAY))
+	}
+	if (c->overlay_draw != NULL && (flags & CLIENT_REDRAWOVERLAY)) {
+		log_debug("%s: redrawing overlay", c->name);
 		c->overlay_draw(c, &ctx);
+	}
+
 	tty_reset(&c->tty);
 }
 
@@ -461,8 +470,10 @@ screen_redraw_pane(struct client *c, struct window_pane *wp)
 		return;
 
 	screen_redraw_set_context(c, &ctx);
+	tty_sync_start(&c->tty);
 
 	screen_redraw_draw_pane(&ctx, wp);
+
 	tty_reset(&c->tty);
 }
 
@@ -482,6 +493,8 @@ screen_redraw_draw_borders_cell(struct screen_redraw_ctx *ctx, u_int i, u_int j,
 	u_int			 type, x = ctx->ox + i, y = ctx->oy + j;
 	int			 flag, pane_status = ctx->pane_status;
 
+	if (c->overlay_check != NULL && !c->overlay_check(c, x, y))
+		return;
 	type = screen_redraw_check_cell(c, x, y, pane_status, &wp);
 	if (type == CELL_INSIDE)
 		return;

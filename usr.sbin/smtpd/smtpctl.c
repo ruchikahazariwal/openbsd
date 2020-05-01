@@ -1,4 +1,4 @@
-/*	$OpenBSD: smtpctl.c,v 1.165 2019/07/23 08:11:10 gilles Exp $	*/
+/*	$OpenBSD: smtpctl.c,v 1.167 2020/02/24 16:16:07 millert Exp $	*/
 
 /*
  * Copyright (c) 2013 Eric Faurot <eric@openbsd.org>
@@ -945,7 +945,7 @@ do_encrypt(int argc, struct parameter *argv)
 
 	if (argv)
 		p = argv[0].u.u_str;
-	execl(PATH_ENCRYPT, "encrypt", p, (char *)NULL);
+	execl(PATH_ENCRYPT, "encrypt", "--", p, (char *)NULL);
 	errx(1, "execl");
 }
 
@@ -1125,7 +1125,7 @@ sendmail_compat(int argc, char **argv)
 		 */
 		for (i = 1; i < argc; i++)
 			if (strncmp(argv[i], "-bi", 3) == 0)
-				exit(makemap(P_NEWALIASES, argc, argv));
+				exit(makemap(P_SENDMAIL, argc, argv));
 
 		if (!srv_connect())
 			offlinefp = offline_file();

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.35 2019/01/20 06:50:26 tb Exp $
+#	$OpenBSD: Makefile,v 1.38 2020/04/06 16:53:45 jsing Exp $
 
 SUBDIR += asn1
 SUBDIR += buffer
@@ -8,6 +8,7 @@ SUBDIR += client
 SUBDIR += handshake
 SUBDIR += pqueue
 SUBDIR += record
+SUBDIR += record_layer
 SUBDIR += server
 SUBDIR += ssl
 SUBDIR += tlsext

@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.387 2019/06/24 22:26:25 bluhm Exp $	*/
+/*	$OpenBSD: route.c,v 1.393 2020/04/20 17:25:23 krw Exp $	*/
 /*	$NetBSD: route.c,v 1.14 1996/02/13 22:00:46 christos Exp $	*/
 
 /*
@@ -313,7 +313,7 @@ rt_hash(struct rtentry *rt, struct sockaddr *dst, uint32_t *src)
 
 		sin = satosin(dst);
 		a += sin->sin_addr.s_addr;
-		b += (src != NULL) ? src[0] : 0;
+		b += src[0];
 		mix(a, b, c);
 		break;
 	    }
@@ -328,19 +328,19 @@ rt_hash(struct rtentry *rt, struct sockaddr *dst, uint32_t *src)
 		sin6 = satosin6(dst);
 		a += sin6->sin6_addr.s6_addr32[0];
 		b += sin6->sin6_addr.s6_addr32[2];
-		c += (src != NULL) ? src[0] : 0;
+		c += src[0];
 		mix(a, b, c);
 		a += sin6->sin6_addr.s6_addr32[1];
 		b += sin6->sin6_addr.s6_addr32[3];
-		c += (src != NULL) ? src[1] : 0;
+		c += src[1];
 		mix(a, b, c);
 		a += sin6->sin6_addr.s6_addr32[2];
 		b += sin6->sin6_addr.s6_addr32[1];
-		c += (src != NULL) ? src[2] : 0;
+		c += src[2];
 		mix(a, b, c);
 		a += sin6->sin6_addr.s6_addr32[3];
 		b += sin6->sin6_addr.s6_addr32[0];
-		c += (src != NULL) ? src[3] : 0;
+		c += src[3];
 		mix(a, b, c);
 		break;
 	    }
@@ -452,7 +452,7 @@ rt_setgwroute(struct rtentry *rt, u_int rtableid)
 	/*
 	 * To avoid reference counting problems when writting link-layer
 	 * addresses in an outgoing packet, we ensure that the lifetime
-	 * of a cached entry is greater that the bigger lifetime of the
+	 * of a cached entry is greater than the bigger lifetime of the
 	 * gateway entries it is pointed by.
 	 */
 	nhrt->rt_flags |= RTF_CACHED;
@@ -944,7 +944,8 @@ rtrequest(int req, struct rt_addrinfo *info, u_int8_t prio,
 		if (error != 0 &&
 		    (crt = rtable_match(tableid, ndst, NULL)) != NULL) {
 			/* overwrite cloned route */
-			if (ISSET(crt->rt_flags, RTF_CLONED)) {
+			if (ISSET(crt->rt_flags, RTF_CLONED) &&
+			    !ISSET(crt->rt_flags, RTF_CACHED)) {
 				struct ifnet *cifp;
 
 				cifp = if_get(crt->rt_ifidx);
@@ -1101,6 +1102,8 @@ rt_ifa_add(struct ifaddr *ifa, int flags, struct sockaddr *dst,
 	uint8_t			 prio = ifp->if_priority + RTP_STATIC;
 	int			 error;
 
+	KASSERT(rdomain == rtable_l2(rdomain));
+
 	memset(&info, 0, sizeof(info));
 	info.rti_ifa = ifa;
 	info.rti_flags = flags;
@@ -1109,12 +1112,7 @@ rt_ifa_add(struct ifaddr *ifa, int flags, struct sockaddr *dst,
 		info.rti_info[RTAX_GATEWAY] = sdltosa(ifp->if_sadl);
 	else
 		info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
-
-	KASSERT(rdomain == rtable_l2(rdomain));
-	if (rdomain == rtable_l2(ifp->if_rtlabelid)) {
-		info.rti_info[RTAX_LABEL] =
-		    rtlabel_id2sa(ifp->if_rtlabelid, &sa_rl);
-	}
+	info.rti_info[RTAX_LABEL] = rtlabel_id2sa(ifp->if_rtlabelid, &sa_rl);
 
 #ifdef MPLS
 	if ((flags & RTF_MPLS) == RTF_MPLS)
@@ -1158,6 +1156,8 @@ rt_ifa_del(struct ifaddr *ifa, int flags, struct sockaddr *dst,
 	uint8_t			 prio = ifp->if_priority + RTP_STATIC;
 	int			 error;
 
+	KASSERT(rdomain == rtable_l2(rdomain));
+
 	if ((flags & RTF_HOST) == 0 && ifa->ifa_netmask) {
 		m = m_get(M_DONTWAIT, MT_SONAME);
 		if (m == NULL)
@@ -1173,11 +1173,7 @@ rt_ifa_del(struct ifaddr *ifa, int flags, struct sockaddr *dst,
 	info.rti_info[RTAX_DST] = dst;
 	if ((flags & RTF_LLINFO) == 0)
 		info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
-
-	if (rdomain == rtable_l2(ifp->if_rtlabelid)) {
-		info.rti_info[RTAX_LABEL] =
-		    rtlabel_id2sa(ifp->if_rtlabelid, &sa_rl);
-	}
+	info.rti_info[RTAX_LABEL] = rtlabel_id2sa(ifp->if_rtlabelid, &sa_rl);
 
 	if ((flags & RTF_HOST) == 0)
 		info.rti_info[RTAX_NETMASK] = ifa->ifa_netmask;
@@ -1302,7 +1298,7 @@ rt_ifa_dellocal(struct ifaddr *ifa)
 /*
  * Remove all addresses attached to ``ifa''.
  */
-int
+void
 rt_ifa_purge(struct ifaddr *ifa)
 {
 	struct ifnet		*ifp = ifa->ifa_ifp;
@@ -1335,8 +1331,6 @@ rt_ifa_purge(struct ifaddr *ifa)
 		if (error)
 			break;
 	}
-
-	return error;
 }
 
 int
@@ -1674,7 +1668,7 @@ rt_if_track(struct ifnet *ifp)
 {
 	unsigned int rtableid;
 	struct rtentry *rt = NULL;
-	int i, error;
+	int i, error = 0;
 
 	for (rtableid = 0; rtableid < rtmap_limit; rtableid++) {
 		/* skip rtables that are not in the rdomain of the ifp */

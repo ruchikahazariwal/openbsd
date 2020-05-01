@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls.c,v 1.336 2019/10/06 16:24:14 beck Exp $	*/
+/*	$OpenBSD: vfs_syscalls.c,v 1.344 2020/03/19 13:55:20 anton Exp $	*/
 /*	$NetBSD: vfs_syscalls.c,v 1.71 1996/04/23 10:29:02 mycroft Exp $	*/
 
 /*
@@ -258,8 +258,7 @@ update:
 		vput(vp);
 		if (mp->mnt_flag & MNT_WANTRDWR)
 			mp->mnt_flag &= ~MNT_RDONLY;
-		mp->mnt_flag &=~
-		    (MNT_UPDATE | MNT_RELOAD | MNT_FORCE | MNT_WANTRDWR);
+		mp->mnt_flag &= ~MNT_OP_FLAGS;
 		if (error)
 			mp->mnt_flag = mntflag;
 
@@ -276,6 +275,7 @@ update:
 		goto fail;
 	}
 
+	mp->mnt_flag &= ~MNT_OP_FLAGS;
 	vp->v_mountedhere = mp;
 
 	/*
@@ -489,7 +489,7 @@ dounmount_leaf(struct mount *mp, int flags, struct proc *p)
 	 * Before calling file system unmount, make sure
 	 * all unveils to vnodes in here are dropped.
 	 */
-	LIST_FOREACH_SAFE(vp , &mp->mnt_vnodelist, v_mntvnodes, nvp) {
+	TAILQ_FOREACH_SAFE(vp , &mp->mnt_vnodelist, v_mntvnodes, nvp) {
 		unveil_removevnode(vp);
 	}
 
@@ -511,7 +511,7 @@ dounmount_leaf(struct mount *mp, int flags, struct proc *p)
 		vrele(coveredvp);
 	}
 
-	if (!LIST_EMPTY(&mp->mnt_vnodelist))
+	if (!TAILQ_EMPTY(&mp->mnt_vnodelist))
 		panic("unmount: dangling vnode");
 
 	vfs_unbusy(mp);
@@ -928,13 +928,8 @@ sys___realpath(struct proc *p, void *v, register_t *retval)
 		if (*c != '/')
 			break;
 	}
-	if (*c == '\0')
-		/* root directory */
-		NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF | SAVENAME | REALPATH,
-		    UIO_SYSSPACE, pathname, p);
-	else
-		NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF | LOCKPARENT | SAVENAME |
-		    REALPATH, UIO_SYSSPACE, pathname, p);
+	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF | SAVENAME | REALPATH,
+	    UIO_SYSSPACE, pathname, p);
 
 	nd.ni_cnd.cn_rpbuf = rpbuf;
 	nd.ni_cnd.cn_rpi = strlen(rpbuf);
@@ -949,11 +944,6 @@ sys___realpath(struct proc *p, void *v, register_t *retval)
 		VOP_UNLOCK(nd.ni_vp);
 		vrele(nd.ni_vp);
 	}
-	if (nd.ni_dvp && nd.ni_dvp != nd.ni_vp)
-		VOP_UNLOCK(nd.ni_dvp);
-	if (nd.ni_dvp)
-		vrele(nd.ni_dvp);
-
 	error = copyoutstr(nd.ni_cnd.cn_rpbuf, SCARG(uap, resolved),
 	    MAXPATHLEN, NULL);
 
@@ -975,6 +965,7 @@ sys_unveil(struct proc *p, void *v, register_t *retval)
 		syscallarg(const char *) path;
 		syscallarg(const char *) permissions;
 	} */ *uap = v;
+	struct process *pr = p->p_p;
 	char *pathname, *c;
 	struct nameidata nd;
 	size_t pathlen;
@@ -982,11 +973,11 @@ sys_unveil(struct proc *p, void *v, register_t *retval)
 	int error, allow;
 
 	if (SCARG(uap, path) == NULL && SCARG(uap, permissions) == NULL) {
-		p->p_p->ps_uvdone = 1;
+		pr->ps_uvdone = 1;
 		return (0);
 	}
 
-	if (p->p_p->ps_uvdone != 0)
+	if (pr->ps_uvdone != 0)
 		return EPERM;
 
 	error = copyinstr(SCARG(uap, permissions), permissions,
@@ -1043,15 +1034,8 @@ sys_unveil(struct proc *p, void *v, register_t *retval)
 	if (nd.ni_dvp && nd.ni_dvp != nd.ni_vp)
 		VOP_UNLOCK(nd.ni_dvp);
 
-	if (allow) {
+	if (allow)
 		error = unveil_add(p, &nd, permissions);
-		p->p_p->ps_uvpcwd = unveil_lookup(p->p_fd->fd_cdir, p, NULL);
-		if (p->p_p->ps_uvpcwd == NULL) {
-			ssize_t i = unveil_find_cover(p->p_fd->fd_cdir, p);
-			if (i >= 0)
-				p->p_p->ps_uvpcwd = &p->p_p->ps_uvpaths[i];
-		}
-	}
 	else
 		error = EPERM;
 
@@ -1197,7 +1181,7 @@ doopenat(struct proc *p, int fd, const char *path, int oflags, mode_t mode,
 			goto out;
 		}
 		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
-		fp->f_iflags |= FIF_HASLOCK;
+		atomic_setbits_int(&fp->f_iflags, FIF_HASLOCK);
 	}
 	if (localtrunc) {
 		if ((fp->f_flag & FWRITE) == 0)
@@ -1225,6 +1209,90 @@ doopenat(struct proc *p, int fd, const char *path, int oflags, mode_t mode,
 	fdplock(fdp);
 	fdinsert(fdp, indx, cloexec, fp);
 	FRELE(fp, p);
+out:
+	fdpunlock(fdp);
+	return (error);
+}
+
+/*
+ * Open a new created file (in /tmp) suitable for mmaping.
+ */
+int
+sys___tmpfd(struct proc *p, void *v, register_t *retval)
+{
+	struct sys___tmpfd_args /* {
+		syscallarg(int) flags;
+	} */ *uap = v;
+	struct filedesc *fdp = p->p_fd;
+	struct file *fp;
+	struct vnode *vp;
+	int oflags = SCARG(uap, flags);
+	int flags, cloexec, cmode;
+	int indx, error;
+	unsigned int i;
+	struct nameidata nd;
+	char path[64];
+	static const char *letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
+
+	/* most flags are hardwired */
+	oflags = O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | (oflags & O_CLOEXEC);
+
+	cloexec = (oflags & O_CLOEXEC) ? UF_EXCLOSE : 0;
+
+	fdplock(fdp);
+	if ((error = falloc(p, &fp, &indx)) != 0)
+		goto out;
+	fdpunlock(fdp);
+
+	flags = FFLAGS(oflags);
+
+	arc4random_buf(path, sizeof(path));
+	memcpy(path, "/tmp/", 5);
+	for (i = 5; i < sizeof(path) - 1; i++)
+		path[i] = letters[(unsigned char)path[i] & 63];
+	path[sizeof(path)-1] = 0;
+
+	cmode = 0600;
+	NDINITAT(&nd, 0, KERNELPATH, UIO_SYSSPACE, AT_FDCWD, path, p);
+	if ((error = vn_open(&nd, flags, cmode)) != 0) {
+		fdplock(fdp);
+		if (error == ERESTART)
+			error = EINTR;
+		fdremove(fdp, indx);
+		closef(fp, p);
+		goto out;
+	}
+	vp = nd.ni_vp;
+	fp->f_flag = flags & FMASK;
+	fp->f_type = DTYPE_VNODE;
+	fp->f_ops = &vnops;
+	fp->f_data = vp;
+	VOP_UNLOCK(vp);
+	*retval = indx;
+	fdplock(fdp);
+	fdinsert(fdp, indx, cloexec, fp);
+	FRELE(fp, p);
+
+	/* unlink it */
+	/* XXX
+	 * there is a wee race here, although it is mostly inconsequential.
+	 * perhaps someday we can create a file like object without a name...
+	 */
+	NDINITAT(&nd, DELETE, KERNELPATH | LOCKPARENT | LOCKLEAF, UIO_SYSSPACE,
+	    AT_FDCWD, path, p);
+	if ((error = namei(&nd)) != 0) {
+		printf("can't unlink temp file! %d\n", error);
+		error = 0;
+	} else {
+		vp = nd.ni_vp;
+		uvm_vnp_uncache(vp);
+		error = VOP_REMOVE(nd.ni_dvp, nd.ni_vp, &nd.ni_cnd);
+		if (error) {
+			printf("error removing vop: %d\n", error);
+			error = 0;
+		}
+	}
+
 out:
 	fdpunlock(fdp);
 	return (error);
@@ -1382,7 +1450,7 @@ sys_fhopen(struct proc *p, void *v, register_t *retval)
 			goto bad;
 		}
 		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
-		fp->f_iflags |= FIF_HASLOCK;
+		atomic_setbits_int(&fp->f_iflags, FIF_HASLOCK);
 	}
 	VOP_UNLOCK(vp);
 	*retval = indx;
@@ -3072,11 +3140,12 @@ sys_umask(struct proc *p, void *v, register_t *retval)
 	struct sys_umask_args /* {
 		syscallarg(mode_t) newmask;
 	} */ *uap = v;
-	struct filedesc *fdp;
+	struct filedesc *fdp = p->p_fd;
 
-	fdp = p->p_fd;
+	fdplock(fdp);
 	*retval = fdp->fd_cmask;
 	fdp->fd_cmask = SCARG(uap, newmask) & ACCESSPERMS;
+	fdpunlock(fdp);
 	return (0);
 }
 

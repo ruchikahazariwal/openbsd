@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.396 2019/08/08 02:19:55 cheloha Exp $ */
+/* $OpenBSD: softraid.c,v 1.401 2020/04/14 07:38:21 jca Exp $ */
 /*
  * Copyright (c) 2007, 2008, 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -93,7 +93,6 @@ struct cfdriver softraid_cd = {
 
 /* scsi & discipline */
 void			sr_scsi_cmd(struct scsi_xfer *);
-void			sr_minphys(struct buf *, struct scsi_link *);
 int			sr_scsi_probe(struct scsi_link *);
 void			sr_copy_internal_data(struct scsi_xfer *,
 			    void *, size_t);
@@ -179,7 +178,7 @@ extern void		(*softraid_disk_attach)(struct disk *, int);
 
 /* scsi glue */
 struct scsi_adapter sr_switch = {
-	sr_scsi_cmd, sr_minphys, sr_scsi_probe, NULL, sr_scsi_ioctl
+	sr_scsi_cmd, NULL, sr_scsi_probe, NULL, sr_scsi_ioctl
 };
 
 /* native metadata format */
@@ -1887,17 +1886,6 @@ sr_error(struct sr_softc *sc, const char *fmt, ...)
 }
 
 void
-sr_minphys(struct buf *bp, struct scsi_link *sl)
-{
-	DNPRINTF(SR_D_MISC, "sr_minphys: %ld\n", bp->b_bcount);
-
-	/* XXX currently using SR_MAXFER = MAXPHYS */
-	if (bp->b_bcount > SR_MAXFER)
-		bp->b_bcount = SR_MAXFER;
-	minphys(bp);
-}
-
-void
 sr_copy_internal_data(struct scsi_xfer *xs, void *v, size_t size)
 {
 	size_t			copy_cnt;
@@ -2858,8 +2846,6 @@ sr_hotspare(struct sr_softc *sc, dev_t dev)
 	    NOCRED, curproc)) {
 		DNPRINTF(SR_D_META, "%s: sr_hotspare ioctl failed\n",
 		    DEVNAME(sc));
-		VOP_CLOSE(vn, FREAD | FWRITE, NOCRED, curproc);
-		vput(vn);
 		goto fail;
 	}
 	if (label.d_partitions[part].p_fstype != FS_RAID) {
@@ -3680,7 +3666,7 @@ sr_ioctl_installboot(struct sr_softc *sc, struct sr_discipline *sd,
 	struct sr_meta_opt_item *omi;
 	struct sr_meta_boot	*sbm;
 	struct disk		*dk;
-	u_int32_t		bbs, bls, secsize;
+	u_int32_t		bbs = 0, bls = 0, secsize;
 	u_char			duid[8];
 	int			rv = EINVAL;
 	int			i;
@@ -3781,7 +3767,7 @@ sr_ioctl_installboot(struct sr_softc *sc, struct sr_discipline *sd,
 
 		if (sr_rw(sc, chunk->src_dev_mm, bootblk, bbs,
 		    SR_BOOT_BLOCKS_OFFSET, B_WRITE)) {
-			sr_error(sc, "failed to write boot block", DEVNAME(sc));
+			sr_error(sc, "failed to write boot block");
 			goto done;
 		}
 

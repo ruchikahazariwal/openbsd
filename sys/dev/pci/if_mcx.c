@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_mcx.c,v 1.36 2019/10/05 09:15:53 jmatthew Exp $ */
+/*	$OpenBSD: if_mcx.c,v 1.43 2020/04/21 05:49:25 jmatthew Exp $ */
 
 /*
  * Copyright (c) 2017 David Gwynne <dlg@openbsd.org>
@@ -71,7 +71,7 @@
 
 /* queue sizes */
 #define MCX_LOG_EQ_SIZE		 6		/* one page */
-#define MCX_LOG_CQ_SIZE		 11
+#define MCX_LOG_CQ_SIZE		 12
 #define MCX_LOG_RQ_SIZE		 10
 #define MCX_LOG_SQ_SIZE		 11
 
@@ -2070,7 +2070,7 @@ static void	mcx_arm_cq(struct mcx_softc *, struct mcx_cq *);
 static void	mcx_arm_eq(struct mcx_softc *);
 static int	mcx_intr(void *);
 
-static void	mcx_up(struct mcx_softc *);
+static int	mcx_up(struct mcx_softc *);
 static void	mcx_down(struct mcx_softc *);
 static int	mcx_ioctl(struct ifnet *, u_long, caddr_t);
 static int	mcx_rxrinfo(struct mcx_softc *, struct if_rxrinfo *);
@@ -2150,6 +2150,12 @@ static const struct mcx_eth_proto_capability mcx_eth_cap_map[] = {
 	[MCX_ETHER_CAP_50G_CR2]		= { IFM_50G_CR2,	IF_Gbps(50) },
 	[MCX_ETHER_CAP_50G_KR2]		= { IFM_50G_KR2,	IF_Gbps(50) },
 };
+
+static int
+mcx_get_id(uint32_t val)
+{
+	return betoh32(val) & 0x00ffffff;
+}
 
 static int
 mcx_match(struct device *parent, void *match, void *aux)
@@ -2450,11 +2456,8 @@ mcx_cmdq_poll(struct mcx_softc *sc, struct mcx_cmdq_entry *cqe,
 		    0, MCX_DMA_LEN(&sc->sc_cmdq_mem), BUS_DMASYNC_POSTRW);
 
 		if ((cqe->cq_status & MCX_CQ_STATUS_OWN_MASK) ==
-		    MCX_CQ_STATUS_OWN_SW) {
-			if (sc->sc_eqn != 0)
-				mcx_intr(sc);
+		    MCX_CQ_STATUS_OWN_SW)
 			return (0);
-		}
 
 		delay(1000);
 	}
@@ -2762,6 +2765,30 @@ mcx_cmdq_mboxes_copyin(struct mcx_dmamem *mxm, unsigned int nmb,
 		buf += sizeof(mb->mb_data);
 		len -= sizeof(mb->mb_data);
 		mb++;
+	}
+}
+
+static void
+mcx_cmdq_mboxes_pas(struct mcx_dmamem *mxm, int offset, int npages,
+    struct mcx_dmamem *buf)
+{
+	uint64_t *pas;
+	int mbox, mbox_pages, i;
+
+	mbox = offset / MCX_CMDQ_MAILBOX_DATASIZE;
+	offset %= MCX_CMDQ_MAILBOX_DATASIZE;
+
+	pas = mcx_cq_mbox_data(mcx_cq_mbox(mxm, mbox));
+	pas += (offset / sizeof(*pas));
+	mbox_pages = (MCX_CMDQ_MAILBOX_DATASIZE - offset) / sizeof(*pas);
+	for (i = 0; i < npages; i++) {
+		if (i == mbox_pages) {
+			mbox++;
+			pas = mcx_cq_mbox_data(mcx_cq_mbox(mxm, mbox));
+			mbox_pages += MCX_CMDQ_MAILBOX_DATASIZE / sizeof(*pas);
+		}
+		*pas = htobe64(MCX_DMA_DVA(buf) + (i * MCX_PAGE_SIZE));
+		pas++;
 	}
 }
 
@@ -3543,7 +3570,7 @@ mcx_alloc_uar(struct mcx_softc *sc)
 		return (-1);
 	}
 
-	sc->sc_uar = betoh32(out->cmd_uar);
+	sc->sc_uar = mcx_get_id(out->cmd_uar);
 
 	return (0);
 }
@@ -3602,11 +3629,7 @@ mcx_create_eq(struct mcx_softc *sc)
 	    (1ull << MCX_EVENT_TYPE_PAGE_REQUEST));
 
 	/* physical addresses follow the mailbox in data */
-	pas = (uint64_t *)(mbin + 1);
-	for (i = 0; i < npages; i++) {
-		pas[i] = htobe64(MCX_DMA_DVA(&sc->sc_eq_mem) +
-		    (i * MCX_PAGE_SIZE));
-	}
+	mcx_cmdq_mboxes_pas(&mxm, sizeof(*mbin), npages, &sc->sc_eq_mem);
 	mcx_cmdq_mboxes_sign(&mxm, howmany(insize, MCX_CMDQ_MAILBOX_DATASIZE));
 	mcx_cmdq_post(sc, cqe, 0);
 
@@ -3628,7 +3651,7 @@ mcx_create_eq(struct mcx_softc *sc)
 		goto free;
 	}
 
-	sc->sc_eqn = betoh32(out->cmd_eqn);
+	sc->sc_eqn = mcx_get_id(out->cmd_eqn);
 	mcx_arm_eq(sc);
 free:
 	mcx_dmamem_free(sc, &mxm);
@@ -3668,7 +3691,7 @@ mcx_alloc_pd(struct mcx_softc *sc)
 		return (-1);
 	}
 
-	sc->sc_pd = betoh32(out->cmd_pd);
+	sc->sc_pd = mcx_get_id(out->cmd_pd);
 	return (0);
 }
 
@@ -3706,7 +3729,7 @@ mcx_alloc_tdomain(struct mcx_softc *sc)
 		return (-1);
 	}
 
-	sc->sc_tdomain = betoh32(out->cmd_tdomain);
+	sc->sc_tdomain = mcx_get_id(out->cmd_tdomain);
 	return (0);
 }
 
@@ -3895,10 +3918,7 @@ mcx_create_cq(struct mcx_softc *sc, int eqn)
 	    MCX_CQ_DOORBELL_OFFSET + (MCX_CQ_DOORBELL_SIZE * sc->sc_num_cq));
 
 	/* physical addresses follow the mailbox in data */
-	pas = (uint64_t *)(mbin + 1);
-	for (i = 0; i < npages; i++) {
-		pas[i] = htobe64(MCX_DMA_DVA(&cq->cq_mem) + (i * MCX_PAGE_SIZE));
-	}
+	mcx_cmdq_mboxes_pas(&mxm, sizeof(*mbin), npages, &cq->cq_mem);
 	mcx_cmdq_post(sc, cmde, 0);
 
 	error = mcx_cmdq_poll(sc, cmde, 1000);
@@ -3919,7 +3939,7 @@ mcx_create_cq(struct mcx_softc *sc, int eqn)
 		goto free;
 	}
 
-	cq->cq_n = betoh32(out->cmd_cqn);
+	cq->cq_n = mcx_get_id(out->cmd_cqn);
 	cq->cq_cons = 0;
 	cq->cq_count = 0;
 	cq->cq_doorbell = MCX_DMA_KVA(&sc->sc_doorbell_mem) +
@@ -3986,7 +4006,7 @@ mcx_create_rq(struct mcx_softc *sc, int cqn)
 	int error;
 	uint64_t *pas;
 	uint8_t *doorbell;
-	int insize, npages, paslen, i, token;
+	int insize, npages, paslen, token;
 
 	npages = howmany((1 << MCX_LOG_RQ_SIZE) * sizeof(struct mcx_rq_entry),
 	    MCX_PAGE_SIZE);
@@ -4026,11 +4046,7 @@ mcx_create_rq(struct mcx_softc *sc, int cqn)
 	mbin->rq_wq.wq_log_size = MCX_LOG_RQ_SIZE;
 
 	/* physical addresses follow the mailbox in data */
-	pas = (uint64_t *)(mbin + 1);
-	for (i = 0; i < npages; i++) {
-		pas[i] = htobe64(MCX_DMA_DVA(&sc->sc_rq_mem) +
-		    (i * MCX_PAGE_SIZE));
-	}
+	mcx_cmdq_mboxes_pas(&mxm, sizeof(*mbin) + 0x10, npages, &sc->sc_rq_mem);
 	mcx_cmdq_post(sc, cqe, 0);
 
 	error = mcx_cmdq_poll(sc, cqe, 1000);
@@ -4051,7 +4067,7 @@ mcx_create_rq(struct mcx_softc *sc, int cqn)
 		goto free;
 	}
 
-	sc->sc_rqn = betoh32(out->cmd_rqn);
+	sc->sc_rqn = mcx_get_id(out->cmd_rqn);
 
 	doorbell = MCX_DMA_KVA(&sc->sc_doorbell_mem);
 	sc->sc_rx_doorbell = (uint32_t *)(doorbell + MCX_RQ_DOORBELL_OFFSET);
@@ -4202,7 +4218,7 @@ mcx_create_tir(struct mcx_softc *sc)
 		goto free;
 	}
 
-	sc->sc_tirn = betoh32(out->cmd_tirn);
+	sc->sc_tirn = mcx_get_id(out->cmd_tirn);
 free:
 	mcx_dmamem_free(sc, &mxm);
 	return (error);
@@ -4259,7 +4275,7 @@ mcx_create_sq(struct mcx_softc *sc, int cqn)
 	int error;
 	uint64_t *pas;
 	uint8_t *doorbell;
-	int insize, npages, paslen, i, token;
+	int insize, npages, paslen, token;
 
 	npages = howmany((1 << MCX_LOG_SQ_SIZE) * sizeof(struct mcx_sq_entry),
 	    MCX_PAGE_SIZE);
@@ -4302,11 +4318,7 @@ mcx_create_sq(struct mcx_softc *sc, int cqn)
 	mbin->sq_wq.wq_log_size = MCX_LOG_SQ_SIZE;
 
 	/* physical addresses follow the mailbox in data */
-	pas = (uint64_t *)(mbin + 1);
-	for (i = 0; i < npages; i++) {
-		pas[i] = htobe64(MCX_DMA_DVA(&sc->sc_sq_mem) +
-		    (i * MCX_PAGE_SIZE));
-	}
+	mcx_cmdq_mboxes_pas(&mxm, sizeof(*mbin) + 0x10, npages, &sc->sc_sq_mem);
 	mcx_cmdq_post(sc, cqe, 0);
 
 	error = mcx_cmdq_poll(sc, cqe, 1000);
@@ -4327,7 +4339,7 @@ mcx_create_sq(struct mcx_softc *sc, int cqn)
 		goto free;
 	}
 
-	sc->sc_sqn = betoh32(out->cmd_sqn);
+	sc->sc_sqn = mcx_get_id(out->cmd_sqn);
 
 	doorbell = MCX_DMA_KVA(&sc->sc_doorbell_mem);
 	sc->sc_tx_doorbell = (uint32_t *)(doorbell + MCX_SQ_DOORBELL_OFFSET + 4);
@@ -4476,7 +4488,7 @@ mcx_create_tis(struct mcx_softc *sc)
 		goto free;
 	}
 
-	sc->sc_tisn = betoh32(out->cmd_tisn);
+	sc->sc_tisn = mcx_get_id(out->cmd_tisn);
 free:
 	mcx_dmamem_free(sc, &mxm);
 	return (error);
@@ -4612,7 +4624,7 @@ mcx_create_flow_table(struct mcx_softc *sc, int log_size)
 		goto free;
 	}
 
-	sc->sc_flow_table_id = betoh32(out->cmd_table_id);
+	sc->sc_flow_table_id = mcx_get_id(out->cmd_table_id);
 free:
 	mcx_dmamem_free(sc, &mxm);
 	return (error);
@@ -4783,7 +4795,7 @@ mcx_create_flow_group(struct mcx_softc *sc, int group, int start, int size,
 		goto free;
 	}
 
-	sc->sc_flow_group_id[group] = betoh32(out->cmd_group_id);
+	sc->sc_flow_group_id[group] = mcx_get_id(out->cmd_group_id);
 	sc->sc_flow_group_size[group] = size;
 	sc->sc_flow_group_start[group] = start;
 
@@ -5871,7 +5883,7 @@ mcx_free_slots(struct mcx_softc *sc, struct mcx_slot *slots, int allocated,
 	free(slots, M_DEVBUF, total * sizeof(*ms));
 }
 
-static void
+static int
 mcx_up(struct mcx_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_ac.ac_if;
@@ -5883,7 +5895,7 @@ mcx_up(struct mcx_softc *sc)
 	    M_DEVBUF, M_WAITOK | M_ZERO);
 	if (sc->sc_rx_slots == NULL) {
 		printf("%s: failed to allocate rx slots\n", DEVNAME(sc));
-		return;
+		return ENOMEM;
 	}
 
 	for (i = 0; i < (1 << MCX_LOG_RQ_SIZE); i++) {
@@ -6008,7 +6020,7 @@ mcx_up(struct mcx_softc *sc)
 	ifq_clr_oactive(&ifp->if_snd);
 	ifq_restart(&ifp->if_snd);
 
-	return;
+	return ENETRESET;
 destroy_tx_slots:
 	mcx_free_slots(sc, sc->sc_tx_slots, i, (1 << MCX_LOG_SQ_SIZE));
 	sc->sc_rx_slots = NULL;
@@ -6019,6 +6031,7 @@ destroy_rx_slots:
 	sc->sc_rx_slots = NULL;
 down:
 	mcx_down(sc);
+	return ENOMEM;
 }
 
 static void
@@ -6105,7 +6118,7 @@ mcx_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			if (ISSET(ifp->if_flags, IFF_RUNNING))
 				error = ENETRESET;
 			else
-				mcx_up(sc);
+				error = mcx_up(sc);
 		} else {
 			if (ISSET(ifp->if_flags, IFF_RUNNING))
 				mcx_down(sc);

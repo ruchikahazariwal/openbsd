@@ -1,4 +1,4 @@
-/* $OpenBSD: wsevent.c,v 1.21 2019/08/08 02:19:18 cheloha Exp $ */
+/* $OpenBSD: wsevent.c,v 1.24 2020/04/07 13:27:51 visa Exp $ */
 /* $NetBSD: wsevent.c,v 1.16 2003/08/07 16:31:29 agc Exp $ */
 
 /*
@@ -89,10 +89,10 @@ void	filt_wseventdetach(struct knote *);
 int	filt_wseventread(struct knote *, long);
 
 const struct filterops wsevent_filtops = {
-	1,
-	NULL,
-	filt_wseventdetach,
-	filt_wseventread
+	.f_flags	= FILTEROP_ISFD,
+	.f_attach	= NULL,
+	.f_detach	= filt_wseventdetach,
+	.f_event	= filt_wseventread,
 };
 
 /*
@@ -236,7 +236,7 @@ wsevent_kqfilter(struct wseventvar *ev, struct knote *kn)
 	kn->kn_hook = ev;
 
 	s = splwsevent();
-	SLIST_INSERT_HEAD(klist, kn, kn_selnext);
+	klist_insert(klist, kn);
 	splx(s);
 
 	return (0);
@@ -250,7 +250,7 @@ filt_wseventdetach(struct knote *kn)
 	int s;
 
 	s = splwsevent();
-	SLIST_REMOVE(klist, kn, knote, kn_selnext);
+	klist_remove(klist, kn);
 	splx(s);
 }
 

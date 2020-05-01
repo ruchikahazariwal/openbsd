@@ -1,4 +1,4 @@
-/*	$OpenBSD: aac.c,v 1.71 2019/10/05 20:41:27 jan Exp $	*/
+/*	$OpenBSD: aac.c,v 1.76 2020/02/18 16:05:56 krw Exp $	*/
 
 /*-
  * Copyright (c) 2000 Michael Smith
@@ -53,6 +53,7 @@
 #include <sys/kthread.h>
 #include <sys/malloc.h>
 #include <sys/rwlock.h>
+#include <sys/selinfo.h>
 #include <sys/time.h>
 
 #include <machine/bus.h>
@@ -130,11 +131,7 @@ struct cfdriver aac_cd = {
 };
 
 struct scsi_adapter aac_switch = {
-	aac_scsi_cmd,
-	scsi_minphys,
-	NULL,		/* probe */
-	NULL,		/* free */
-	NULL		/* ioctl */
+	aac_scsi_cmd, NULL, NULL, NULL, NULL
 };
 
 /* Falcon/PPC interface */
@@ -573,8 +570,8 @@ aac_command_thread(void *arg)
 				    ("%s: command thread sleeping\n",
 				     sc->aac_dev.dv_xname));
 			AAC_LOCK_RELEASE(&sc->aac_io_lock);
-			retval = tsleep(sc->aifthread, PRIBIO, "aifthd",
-					AAC_PERIODIC_INTERVAL * hz);
+			retval = tsleep_nsec(sc->aifthread, PRIBIO, "aifthd",
+			    SEC_TO_NSEC(AAC_PERIODIC_INTERVAL));
 			AAC_LOCK_ACQUIRE(&sc->aac_io_lock);
 		}
 
@@ -844,7 +841,7 @@ aac_bio_complete(struct aac_command *cm)
  *     spam the memory of a command that has been recycled.
  */
 int
-aac_wait_command(struct aac_command *cm, int timeout)
+aac_wait_command(struct aac_command *cm, int msecs)
 {
 	struct aac_softc *sc = cm->cm_sc;
 	int error = 0;
@@ -860,7 +857,7 @@ aac_wait_command(struct aac_command *cm, int timeout)
 		AAC_DPRINTF(AAC_D_MISC, ("%s: sleeping until command done\n",
 					 sc->aac_dev.dv_xname));
 		AAC_LOCK_RELEASE(&sc->aac_io_lock);
-		error = tsleep(cm, PRIBIO, "aacwait", timeout);
+		error = tsleep_nsec(cm, PRIBIO, "aacwait", MSEC_TO_NSEC(msecs));
 		AAC_LOCK_ACQUIRE(&sc->aac_io_lock);
 	}
 	return (error);
@@ -972,8 +969,8 @@ aac_alloc_commands(struct aac_softc *sc)
 			(i * sizeof(struct aac_fib));
 		cm->cm_index = sc->total_fibs;
 
-		if (bus_dmamap_create(sc->aac_dmat, MAXBSIZE, AAC_MAXSGENTRIES,
-		    MAXBSIZE, 0, BUS_DMA_NOWAIT, &cm->cm_datamap)) {
+		if (bus_dmamap_create(sc->aac_dmat, MAXPHYS, AAC_MAXSGENTRIES,
+		    MAXPHYS, 0, BUS_DMA_NOWAIT, &cm->cm_datamap)) {
 			break;
 		}
 		aac_release_command(sc, cm);

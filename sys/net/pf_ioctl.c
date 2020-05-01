@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_ioctl.c,v 1.344 2019/05/09 14:59:30 claudio Exp $ */
+/*	$OpenBSD: pf_ioctl.c,v 1.351 2020/04/19 22:31:06 sashan Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -51,7 +51,7 @@
 #include <sys/timeout.h>
 #include <sys/pool.h>
 #include <sys/malloc.h>
-#include <sys/kthread.h>
+#include <sys/proc.h>
 #include <sys/rwlock.h>
 #include <sys/syslog.h>
 #include <uvm/uvm_extern.h>
@@ -1195,7 +1195,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		struct pf_rule		*rule, *tail;
 
 		PF_LOCK();
-		pr->anchor[sizeof(pr->anchor) - 1] = 0;
+		pr->anchor[sizeof(pr->anchor) - 1] = '\0';
 		ruleset = pf_find_ruleset(pr->anchor);
 		if (ruleset == NULL) {
 			error = EINVAL;
@@ -1292,7 +1292,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		struct pf_rule		*tail;
 
 		PF_LOCK();
-		pr->anchor[sizeof(pr->anchor) - 1] = 0;
+		pr->anchor[sizeof(pr->anchor) - 1] = '\0';
 		ruleset = pf_find_ruleset(pr->anchor);
 		if (ruleset == NULL) {
 			error = EINVAL;
@@ -1316,7 +1316,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		int			 i;
 
 		PF_LOCK();
-		pr->anchor[sizeof(pr->anchor) - 1] = 0;
+		pr->anchor[sizeof(pr->anchor) - 1] = '\0';
 		ruleset = pf_find_ruleset(pr->anchor);
 		if (ruleset == NULL) {
 			error = EINVAL;
@@ -1807,6 +1807,18 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		int			 m = 0, direction = pnl->direction;
 		int			 sidx, didx;
 
+		switch (pnl->af) {
+		case AF_INET:
+			break;
+#ifdef INET6
+		case AF_INET6:
+			break;
+#endif /* INET6 */
+		default:
+			error = EAFNOSUPPORT;
+			goto fail;
+		}
+
 		/* NATLOOK src and dst are reversed, so reverse sidx/didx */
 		sidx = (direction == PF_IN) ? 1 : 0;
 		didx = (direction == PF_IN) ? 0 : 1;
@@ -1939,7 +1951,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		struct pf_anchor	*anchor;
 
 		PF_LOCK();
-		pr->path[sizeof(pr->path) - 1] = 0;
+		pr->path[sizeof(pr->path) - 1] = '\0';
 		if ((ruleset = pf_find_ruleset(pr->path)) == NULL) {
 			error = EINVAL;
 			PF_UNLOCK();
@@ -1967,20 +1979,19 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		u_int32_t		 nr = 0;
 
 		PF_LOCK();
-		pr->path[sizeof(pr->path) - 1] = 0;
+		pr->path[sizeof(pr->path) - 1] = '\0';
 		if ((ruleset = pf_find_ruleset(pr->path)) == NULL) {
 			error = EINVAL;
 			PF_UNLOCK();
 			break;
 		}
-		pr->name[0] = 0;
+		pr->name[0] = '\0';
 		if (ruleset == &pf_main_ruleset) {
 			/* XXX kludge for pf_main_ruleset */
 			RB_FOREACH(anchor, pf_anchor_global, &pf_anchors)
 				if (anchor->parent == NULL && nr++ == pr->nr) {
 					strlcpy(pr->name, anchor->name,
 					    sizeof(pr->name));
-					PF_UNLOCK();
 					break;
 				}
 		} else {
@@ -1989,13 +2000,12 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 				if (nr++ == pr->nr) {
 					strlcpy(pr->name, anchor->name,
 					    sizeof(pr->name));
-					PF_UNLOCK();
 					break;
 				}
 		}
+		PF_UNLOCK();
 		if (!pr->name[0])
 			error = EBUSY;
-		PF_UNLOCK();
 		break;
 	}
 
@@ -2772,6 +2782,7 @@ pf_pool_copyin(struct pf_pool *from, struct pf_pool *to)
 {
 	memmove(to, from, sizeof(*to));
 	to->kif = NULL;
+	to->addr.p.tbl = NULL;
 }
 
 int
@@ -2781,7 +2792,9 @@ pf_rule_copyin(struct pf_rule *from, struct pf_rule *to,
 	int i;
 
 	to->src = from->src;
+	to->src.addr.p.tbl = NULL;
 	to->dst = from->dst;
+	to->dst.addr.p.tbl = NULL;
 
 	/* XXX union skip[] */
 
@@ -2863,6 +2876,7 @@ pf_rule_copyin(struct pf_rule *from, struct pf_rule *to,
 		if ((to->match_tag = pf_tagname2tag(to->match_tagname, 1)) == 0)
 			return (EBUSY);
 	to->scrub_flags = from->scrub_flags;
+	to->delay = from->delay;
 	to->uid = from->uid;
 	to->gid = from->gid;
 	to->rule_flag = from->rule_flag;
@@ -2910,12 +2924,12 @@ pf_sysctl(void *oldp, size_t *oldlenp, void *newp, size_t newlen)
 {
 	struct pf_status	pfs;
 
-	NET_RLOCK();
+	NET_LOCK();
 	PF_LOCK();
 	memcpy(&pfs, &pf_status, sizeof(struct pf_status));
 	pfi_update_status(pfs.ifname, &pfs);
 	PF_UNLOCK();
-	NET_RUNLOCK();
+	NET_UNLOCK();
 
 	return sysctl_rdstruct(oldp, oldlenp, newp, &pfs, sizeof(pfs));
 }

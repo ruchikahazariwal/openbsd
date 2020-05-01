@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm.c,v 1.51 2019/07/17 05:51:07 pd Exp $	*/
+/*	$OpenBSD: vm.c,v 1.56 2020/04/21 03:36:56 pd Exp $	*/
 
 /*
  * Copyright (c) 2015 Mike Larkin <mlarkin@openbsd.org>
@@ -81,6 +81,7 @@ void init_emulated_hw(struct vmop_create_params *, int,
 void restore_emulated_hw(struct vm_create_params *, int, int *,
     int[][VM_MAX_BASE_PER_DISK],int);
 void vcpu_exit_inout(struct vm_run_params *);
+int vcpu_exit_eptviolation(struct vm_run_params *);
 uint8_t vcpu_exit_pci(struct vm_run_params *);
 int vcpu_pic_intr(uint32_t, uint32_t, uint8_t);
 int loadfile_bios(FILE *, struct vcpu_reg_state *);
@@ -111,6 +112,9 @@ pthread_cond_t threadcond;
 
 pthread_cond_t vcpu_run_cond[VMM_MAX_VCPUS_PER_VM];
 pthread_mutex_t vcpu_run_mtx[VMM_MAX_VCPUS_PER_VM];
+pthread_barrier_t vm_pause_barrier;
+pthread_cond_t vcpu_unpause_cond[VMM_MAX_VCPUS_PER_VM];
+pthread_mutex_t vcpu_unpause_mtx[VMM_MAX_VCPUS_PER_VM];
 uint8_t vcpu_hlt[VMM_MAX_VCPUS_PER_VM];
 uint8_t vcpu_done[VMM_MAX_VCPUS_PER_VM];
 
@@ -365,10 +369,10 @@ start_vm(struct vmd_vm *vm, int fd)
 	if (vm->vm_state & VM_STATE_RECEIVED) {
 		restore_emulated_hw(vcp, vm->vm_receive_fd, nicfds,
 		    vm->vm_disks, vm->vm_cdrom);
-		mc146818_start();
 		restore_mem(vm->vm_receive_fd, vcp);
 		if (restore_vm_params(vm->vm_receive_fd, vcp))
 			fatal("restore vm params failed");
+		unpause_vm(vcp);
 	}
 
 	if (vmm_pipe(vm, fd, vm_dispatch_vmm) == -1)
@@ -398,6 +402,7 @@ vm_dispatch_vmm(int fd, short event, void *arg)
 	struct imsg		 imsg;
 	ssize_t			 n;
 	int			 verbose;
+	struct vmop_balloon_params vbp;
 
 	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1 && errno != EAGAIN)
@@ -438,6 +443,16 @@ vm_dispatch_vmm(int fd, short event, void *arg)
 		case IMSG_VMDOP_VM_REBOOT:
 			if (vmmci_ctl(VMMCI_REBOOT) == -1)
 				_exit(0);
+			break;
+		case IMSG_VMDOP_BALLOON_VM_REQUEST:
+			memcpy(&vbp, imsg.data, sizeof(vbp));
+			vmr.vmr_result = 0;
+			vmr.vmr_id = vm->vm_vmid;
+			balloon_vm(vm, vbp.vbp_memsize / PAGE_SIZE);
+			imsg_compose_event(&vm->vm_iev,
+			    IMSG_VMDOP_BALLOON_VM_RESPONSE,
+			    imsg.hdr.peerid, imsg.hdr.pid, -1, &vmr,
+			    sizeof(vmr));
 			break;
 		case IMSG_VMDOP_PAUSE_VM:
 			vmr.vmr_result = 0;
@@ -732,32 +747,70 @@ restore_vmr(int fd, struct vm_mem_range *vmr)
 void
 pause_vm(struct vm_create_params *vcp)
 {
+	unsigned int n;
+	int ret;
 	if (current_vm->vm_state & VM_STATE_PAUSED)
 		return;
 
 	current_vm->vm_state |= VM_STATE_PAUSED;
 
-	/* XXX: vcpu_run_loop is running in another thread and we have to wait
-	 * for the vm to exit before returning */
-	sleep(1);
+	ret = pthread_barrier_init(&vm_pause_barrier, NULL, vcp->vcp_ncpus + 1);
+	if (ret) {
+		log_warnx("%s: cannot initialize pause barrier (%d)",
+		    __progname, ret);
+		return;
+	}
+
+	for (n = 0; n < vcp->vcp_ncpus; n++) {
+		ret = pthread_cond_broadcast(&vcpu_run_cond[n]);
+		if (ret) {
+			log_warnx("%s: can't broadcast vcpu run cond (%d)",
+			    __func__, (int)ret);
+			return;
+		}
+	}
+	ret = pthread_barrier_wait(&vm_pause_barrier);
+	if (ret != 0 && ret != PTHREAD_BARRIER_SERIAL_THREAD) {
+		log_warnx("%s: could not wait on pause barrier (%d)",
+		    __func__, (int)ret);
+		return;
+	}
+
+	ret = pthread_barrier_destroy(&vm_pause_barrier);
+	if (ret) {
+		log_warnx("%s: could not destroy pause barrier (%d)",
+		    __progname, ret);
+		return;
+	}
 
 	i8253_stop();
 	mc146818_stop();
+	ns8250_stop();
+	virtio_stop(vcp);
 }
 
 void
 unpause_vm(struct vm_create_params *vcp)
 {
 	unsigned int n;
+	int ret;
 	if (!(current_vm->vm_state & VM_STATE_PAUSED))
 		return;
 
 	current_vm->vm_state &= ~VM_STATE_PAUSED;
+	for (n = 0; n < vcp->vcp_ncpus; n++) {
+		ret = pthread_cond_broadcast(&vcpu_unpause_cond[n]);
+		if (ret) {
+			log_warnx("%s: can't broadcast vcpu unpause cond (%d)",
+			    __func__, (int)ret);
+			return;
+		}
+	}
 
 	i8253_start();
 	mc146818_start();
-	for (n = 0; n <= vcp->vcp_ncpus; n++)
-		pthread_cond_broadcast(&vcpu_run_cond[n]);
+	ns8250_start();
+	virtio_start(vcp);
 }
 
 /*
@@ -1219,6 +1272,20 @@ run_vm(int child_cdrom, int child_disks[][VM_MAX_BASE_PER_DISK],
 			return (ret);
 		}
 
+		ret = pthread_cond_init(&vcpu_unpause_cond[i], NULL);
+		if (ret) {
+			log_warnx("%s: cannot initialize unpause var (%d)",
+			    __progname, ret);
+			return (ret);
+		}
+
+		ret = pthread_mutex_init(&vcpu_unpause_mtx[i], NULL);
+		if (ret) {
+			log_warnx("%s: cannot initialize unpause mtx (%d)",
+			    __progname, ret);
+			return (ret);
+		}
+
 		vcpu_hlt[i] = 0;
 
 		/* Start each VCPU run thread at vcpu_run_loop */
@@ -1340,32 +1407,50 @@ vcpu_run_loop(void *arg)
 			return ((void *)ret);
 		}
 
-		/* If we are halted or paused, wait */
-		if (vcpu_hlt[n]) {
-			while (current_vm->vm_state & VM_STATE_PAUSED) {
-				ret = pthread_cond_wait(&vcpu_run_cond[n],
-				    &vcpu_run_mtx[n]);
-				if (ret) {
-					log_warnx(
-					    "%s: can't wait on cond (%d)",
-					    __func__, (int)ret);
-					(void)pthread_mutex_unlock(
-					    &vcpu_run_mtx[n]);
-					break;
-				}
+		/* If we are halted and need to pause, pause */
+		if (vcpu_hlt[n] && (current_vm->vm_state & VM_STATE_PAUSED)) {
+			ret = pthread_barrier_wait(&vm_pause_barrier);
+			if (ret != 0 && ret != PTHREAD_BARRIER_SERIAL_THREAD) {
+				log_warnx("%s: could not wait on pause barrier (%d)",
+				    __func__, (int)ret);
+				return ((void *)ret);
 			}
-			if (vcpu_hlt[n]) {
-				ret = pthread_cond_wait(&vcpu_run_cond[n],
-				    &vcpu_run_mtx[n]);
 
-				if (ret) {
-					log_warnx(
-					    "%s: can't wait on cond (%d)",
-					    __func__, (int)ret);
-					(void)pthread_mutex_unlock(
-					    &vcpu_run_mtx[n]);
-					break;
-				}
+			ret = pthread_mutex_lock(&vcpu_unpause_mtx[n]);
+			if (ret) {
+				log_warnx("%s: can't lock vcpu unpause mtx (%d)",
+				    __func__, (int)ret);
+				return ((void *)ret);
+			}
+
+			ret = pthread_cond_wait(&vcpu_unpause_cond[n],
+			    &vcpu_unpause_mtx[n]);
+			if (ret) {
+				log_warnx(
+				    "%s: can't wait on unpause cond (%d)",
+				    __func__, (int)ret);
+				break;
+			}
+			ret = pthread_mutex_unlock(&vcpu_unpause_mtx[n]);
+			if (ret) {
+				log_warnx("%s: can't unlock unpause mtx (%d)",
+				    __func__, (int)ret);
+				break;
+			}
+		}
+
+		/* If we are halted and not paused, wait */
+		if (vcpu_hlt[n]) {
+			ret = pthread_cond_wait(&vcpu_run_cond[n],
+			    &vcpu_run_mtx[n]);
+
+			if (ret) {
+				log_warnx(
+				    "%s: can't wait on cond (%d)",
+				    __func__, (int)ret);
+				(void)pthread_mutex_unlock(
+				    &vcpu_run_mtx[n]);
+				break;
 			}
 		}
 
@@ -1514,6 +1599,38 @@ vcpu_exit_inout(struct vm_run_params *vrp)
 }
 
 /*
+ * vcpu_exit_eptviolation
+ *
+ * handle an EPT Violation
+ *
+ *
+ * Parameters:
+ *  vrp: vcpu run parameters containing guest state for this exit
+ *
+ * Return values:
+ *  0: no action required
+ *  EAGAIN: a protection fault occured, kill the vm.
+ */
+int
+vcpu_exit_eptviolation(struct vm_run_params *vrp)
+{
+	struct vm_exit *ve = vrp->vrp_exit;
+	/*
+	 * vmd may be exiting to vmd to handle a pending interrupt
+	 * but last exit type may have bee VMX_EXIT_EPT_VIOLATION,
+	 * check the fault_type to ensure we really are processing
+	 * a VMX_EXIT_EPT_VIOLATION.
+	 */
+	if (ve->vee.vee_fault_type == VEE_FAULT_PROTECT) {
+		log_debug("%s: EPT Violation: rip=0x%llx",
+		    __progname, vrp->vrp_exit->vrs.vrs_gprs[VCPU_REGS_RIP]);
+		return (EAGAIN);
+	}
+
+	return (0);
+}
+
+/*
  * vcpu_exit
  *
  * Handle a vcpu exit. This function is called when it is determined that
@@ -1543,7 +1660,6 @@ vcpu_exit(struct vm_run_params *vrp)
 	case VMX_EXIT_CPUID:
 	case VMX_EXIT_EXTINT:
 	case SVM_VMEXIT_INTR:
-	case VMX_EXIT_EPT_VIOLATION:
 	case SVM_VMEXIT_NPF:
 	case SVM_VMEXIT_MSR:
 	case SVM_VMEXIT_CPUID:
@@ -1554,6 +1670,12 @@ vcpu_exit(struct vm_run_params *vrp)
 		 * here (and falling through to the default case below results
 		 * in more vmd log spam).
 		 */
+		break;
+	case VMX_EXIT_EPT_VIOLATION:
+		ret = vcpu_exit_eptviolation(vrp);
+		if (ret)
+			return (ret);
+
 		break;
 	case VMX_EXIT_IO:
 	case SVM_VMEXIT_IOIO:

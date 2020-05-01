@@ -41,7 +41,7 @@
 #define	VIORND_ONESHOT			0x1000
 #define	VIORND_BUFSIZE			16
 
-#define VIORND_DEBUG 0
+#define VIORND_DEBUG 1
 
 struct viornd_softc {
 	struct device		 sc_dev;
@@ -90,6 +90,9 @@ viornd_attach(struct device *parent, struct device *self, void *aux)
 	vsc->sc_vqs = &sc->sc_vq;
 	vsc->sc_nvqs = 1;
 	vsc->sc_config_change = 0;
+	#if VIORND_DEBUG
+		printf("CMPE %s\n", __func__);
+	#endif
 	if (vsc->sc_child != NULL)
 		panic("already attached to something else");
 	vsc->sc_child = self;

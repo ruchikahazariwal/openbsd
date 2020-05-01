@@ -1,4 +1,4 @@
-/* $OpenBSD: tmux.h,v 1.929 2019/09/23 15:41:11 nicm Exp $ */
+/* $OpenBSD: tmux.h,v 1.1015 2020/04/22 21:01:28 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -39,9 +39,12 @@ extern char   **environ;
 struct args;
 struct args_value;
 struct client;
+struct cmd;
 struct cmd_find_state;
 struct cmdq_item;
 struct cmdq_list;
+struct cmdq_state;
+struct cmds;
 struct environ;
 struct format_job_tree;
 struct format_tree;
@@ -50,8 +53,8 @@ struct job;
 struct mode_tree_data;
 struct mouse_event;
 struct options;
-struct options_entry;
 struct options_array_item;
+struct options_entry;
 struct session;
 struct tmuxpeer;
 struct tmuxproc;
@@ -60,9 +63,9 @@ struct winlink;
 /* Client-server protocol version. */
 #define PROTOCOL_VERSION 8
 
-/* Default global configuration file. */
+/* Default configuration files. */
 #ifndef TMUX_CONF
-#define TMUX_CONF "/etc/tmux.conf"
+#define TMUX_CONF "/etc/tmux.conf:~/.tmux.conf"
 #endif
 
 /* Minimum layout cell size, NOT including border lines. */
@@ -76,7 +79,11 @@ struct winlink;
 #define NAME_INTERVAL 500000
 
 /* Maximum size of data to hold from a pane. */
-#define READ_SIZE 4096
+#define READ_SIZE 8192
+
+/* Default pixel cell sizes. */
+#define DEFAULT_XPIXEL 16
+#define DEFAULT_YPIXEL 32
 
 /* Attribute to make GCC check printf-like arguments. */
 #define printflike(a, b) __attribute__ ((format (printf, a, b)))
@@ -98,24 +105,24 @@ struct winlink;
 #define VISUAL_BOTH 2
 
 /* Special key codes. */
-#define KEYC_NONE 0xffff00000000ULL
-#define KEYC_UNKNOWN 0xfffe00000000ULL
-#define KEYC_BASE 0x000010000000ULL
-#define KEYC_USER 0x000020000000ULL
+#define KEYC_NONE    0x00ff000000000ULL
+#define KEYC_UNKNOWN 0x00fe000000000ULL
+#define KEYC_BASE    0x0001000000000ULL
+#define KEYC_USER    0x0002000000000ULL
+
+/* Key modifier bits. */
+#define KEYC_ESCAPE  0x0100000000000ULL
+#define KEYC_CTRL    0x0200000000000ULL
+#define KEYC_SHIFT   0x0400000000000ULL
+#define KEYC_XTERM   0x0800000000000ULL
+#define KEYC_LITERAL 0x1000000000000ULL
 
 /* Available user keys. */
 #define KEYC_NUSER 1000
 
-/* Key modifier bits. */
-#define KEYC_ESCAPE 0x200000000000ULL
-#define KEYC_CTRL 0x400000000000ULL
-#define KEYC_SHIFT 0x800000000000ULL
-#define KEYC_XTERM 0x1000000000000ULL
-#define KEYC_LITERAL 0x2000000000000ULL
-
 /* Mask to obtain key w/o modifiers. */
-#define KEYC_MASK_MOD (KEYC_ESCAPE|KEYC_CTRL|KEYC_SHIFT|KEYC_XTERM|KEYC_LITERAL)
-#define KEYC_MASK_KEY (~KEYC_MASK_MOD)
+#define KEYC_MASK_MOD 0xff00000000000ULL
+#define KEYC_MASK_KEY 0x00fffffffffffULL
 
 /* Is this a mouse key? */
 #define KEYC_IS_MOUSE(key) (((key) & KEYC_MASK_KEY) >= KEYC_MOUSE &&	\
@@ -162,6 +169,7 @@ enum {
 	/* Mouse keys. */
 	KEYC_MOUSE, /* unclassified mouse event */
 	KEYC_DRAGGING, /* dragging in progress */
+	KEYC_DOUBLECLICK, /* double click complete */
 	KEYC_MOUSE_KEY(MOUSEMOVE),
 	KEYC_MOUSE_KEY(MOUSEDOWN1),
 	KEYC_MOUSE_KEY(MOUSEDOWN2),
@@ -177,6 +185,9 @@ enum {
 	KEYC_MOUSE_KEY(MOUSEDRAGEND3),
 	KEYC_MOUSE_KEY(WHEELUP),
 	KEYC_MOUSE_KEY(WHEELDOWN),
+	KEYC_MOUSE_KEY(SECONDCLICK1),
+	KEYC_MOUSE_KEY(SECONDCLICK2),
+	KEYC_MOUSE_KEY(SECONDCLICK3),
 	KEYC_MOUSE_KEY(DOUBLECLICK1),
 	KEYC_MOUSE_KEY(DOUBLECLICK2),
 	KEYC_MOUSE_KEY(DOUBLECLICK3),
@@ -441,6 +452,7 @@ enum tty_code_code {
 	TTYC_SMUL,
 	TTYC_SMXX,
 	TTYC_SS,
+	TTYC_SYNC,
 	TTYC_TC,
 	TTYC_TSL,
 	TTYC_U8,
@@ -462,6 +474,7 @@ enum msgtype {
 	MSG_IDENTIFY_DONE,
 	MSG_IDENTIFY_CLIENTPID,
 	MSG_IDENTIFY_CWD,
+	MSG_IDENTIFY_FEATURES,
 
 	MSG_COMMAND = 200,
 	MSG_DETACH,
@@ -474,13 +487,21 @@ enum msgtype {
 	MSG_RESIZE,
 	MSG_SHELL,
 	MSG_SHUTDOWN,
-	MSG_STDERR,
-	MSG_STDIN,
-	MSG_STDOUT,
+	MSG_OLDSTDERR, /* unused */
+	MSG_OLDSTDIN, /* unused */
+	MSG_OLDSTDOUT, /* unused */
 	MSG_SUSPEND,
 	MSG_UNLOCK,
 	MSG_WAKEUP,
 	MSG_EXEC,
+
+	MSG_READ_OPEN = 300,
+	MSG_READ,
+	MSG_READ_DONE,
+	MSG_WRITE_OPEN,
+	MSG_WRITE,
+	MSG_WRITE_READY,
+	MSG_WRITE_CLOSE
 };
 
 /*
@@ -488,23 +509,41 @@ enum msgtype {
  *
  * Don't forget to bump PROTOCOL_VERSION if any of these change!
  */
-struct msg_command_data {
+struct msg_command {
 	int	argc;
 }; /* followed by packed argv */
 
-struct msg_stdin_data {
-	ssize_t	size;
-	char	data[BUFSIZ];
+struct msg_read_open {
+	int	stream;
+	int	fd;
+}; /* followed by path */
+
+struct msg_read_data {
+	int	stream;
 };
 
-struct msg_stdout_data {
-	ssize_t	size;
-	char	data[BUFSIZ];
+struct msg_read_done {
+	int	stream;
+	int	error;
 };
 
-struct msg_stderr_data {
-	ssize_t	size;
-	char	data[BUFSIZ];
+struct msg_write_open {
+	int	stream;
+	int	fd;
+	int	flags;
+}; /* followed by path */
+
+struct msg_write_data {
+	int	stream;
+}; /* followed by data */
+
+struct msg_write_ready {
+	int	stream;
+	int	error;
+};
+
+struct msg_write_close {
+	int	stream;
 };
 
 /* Mode keys. */
@@ -530,6 +569,7 @@ struct msg_stderr_data {
 
 #define ALL_MODES 0xffffff
 #define ALL_MOUSE_MODES (MODE_MOUSE_STANDARD|MODE_MOUSE_BUTTON|MODE_MOUSE_ALL)
+#define MOTION_MOUSE_MODES (MODE_MOUSE_BUTTON|MODE_MOUSE_ALL)
 
 /*
  * A single UTF-8 character. UTF8_SIZE must be big enough to hold
@@ -706,6 +746,7 @@ struct screen_sel;
 struct screen_titles;
 struct screen {
 	char			*title;
+	char			*path;
 	struct screen_titles	*titles;
 
 	struct grid		*grid;		/* grid data */
@@ -721,9 +762,16 @@ struct screen {
 
 	int			 mode;
 
-	bitstr_t		*tabs;
+	u_int			 saved_cx;
+	u_int			 saved_cy;
+	struct grid		*saved_grid;
+	struct grid_cell	 saved_cell;
+	int			 saved_flags;
 
+	bitstr_t		*tabs;
 	struct screen_sel	*sel;
+
+	struct screen_write_collect_line *write_list;
 };
 
 /* Screen write context. */
@@ -732,9 +780,9 @@ struct screen_write_collect_line;
 struct screen_write_ctx {
 	struct window_pane	*wp;
 	struct screen		*s;
+	int			 sync;
 
 	struct screen_write_collect_item *item;
-	struct screen_write_collect_line *list;
 	u_int			 scrolled;
 	u_int			 bg;
 
@@ -777,7 +825,6 @@ struct menu {
 	u_int			 width;
 };
 typedef void (*menu_choice_cb)(struct menu *, u_int, key_code, void *);
-#define MENU_NOMOUSE 0x1
 
 /*
  * Window mode. Windows can be in several modes and this is used to call the
@@ -803,11 +850,11 @@ struct window_mode {
 	void		 (*formats)(struct window_mode_entry *,
 			     struct format_tree *);
 };
-#define WINDOW_MODE_TIMEOUT 180
 
 /* Active window mode. */
 struct window_mode_entry {
 	struct window_pane		*wp;
+	struct window_pane		*swp;
 
 	const struct window_mode	*mode;
 	void				*data;
@@ -865,7 +912,6 @@ struct window_pane {
 
 	int		 fd;
 	struct bufferevent *event;
-	u_int		 disabled;
 
 	struct event	 resize_timer;
 
@@ -885,16 +931,13 @@ struct window_pane {
 	struct screen	 status_screen;
 	size_t		 status_size;
 
-	/* Saved in alternative screen mode. */
-	u_int		 saved_cx;
-	u_int		 saved_cy;
-	struct grid	*saved_grid;
-	struct grid_cell saved_cell;
-
 	TAILQ_HEAD (, window_mode_entry) modes;
-	struct event	 modetimer;
-	time_t		 modelast;
+
 	char		*searchstr;
+	int		 searchregex;
+
+	size_t		 written;
+	size_t		 skipped;
 
 	TAILQ_ENTRY(window_pane) entry;
 	RB_ENTRY(window_pane) tree_entry;
@@ -927,6 +970,8 @@ struct window {
 
 	u_int		 sx;
 	u_int		 sy;
+	u_int		 xpixel;
+	u_int		 ypixel;
 
 	int		 flags;
 #define WINDOW_BELL 0x1
@@ -1011,6 +1056,9 @@ struct environ_entry {
 	char		*name;
 	char		*value;
 
+	int		 flags;
+#define ENVIRON_HIDDEN 0x1
+
 	RB_ENTRY(environ_entry) entry;
 };
 
@@ -1083,6 +1131,7 @@ RB_HEAD(sessions, session);
 /* Mouse input. */
 struct mouse_event {
 	int		valid;
+	int		ignore;
 
 	key_code	key;
 
@@ -1128,14 +1177,18 @@ struct tty_key {
 struct tty_code;
 struct tty_term {
 	char		*name;
-	u_int		 references;
+	struct tty	*tty;
+	int		 features;
 
 	char		 acs[UCHAR_MAX + 1][2];
 
 	struct tty_code	*codes;
 
 #define TERM_256COLOURS 0x1
-#define TERM_EARLYWRAP 0x2
+#define TERM_NOXENL 0x2
+#define TERM_DECSLRM 0x4
+#define TERM_DECFRA 0x8
+#define TERM_RGBCOLOURS 0x10
 	int		 flags;
 
 	LIST_ENTRY(tty_term) entry;
@@ -1144,9 +1197,12 @@ LIST_HEAD(tty_terms, tty_term);
 
 struct tty {
 	struct client	*client;
+	struct event	 start_timer;
 
 	u_int		 sx;
 	u_int		 sy;
+	u_int		 xpixel;
+	u_int		 ypixel;
 
 	u_int		 cx;
 	u_int		 cy;
@@ -1185,25 +1241,17 @@ struct tty {
 #define TTY_NOCURSOR 0x1
 #define TTY_FREEZE 0x2
 #define TTY_TIMER 0x4
-#define TTY_UTF8 0x8
+/* 0x8 unused */
 #define TTY_STARTED 0x10
 #define TTY_OPENED 0x20
 #define TTY_FOCUS 0x40
 #define TTY_BLOCK 0x80
+#define TTY_HAVEDA 0x100
+#define TTY_HAVEDSR 0x200
+#define TTY_SYNCING 0x400
 	int		 flags;
 
 	struct tty_term	*term;
-	char		*term_name;
-	int		 term_flags;
-	enum {
-		TTY_VT100,
-		TTY_VT101,
-		TTY_VT102,
-		TTY_VT220,
-		TTY_VT320,
-		TTY_VT420,
-		TTY_UNKNOWN
-	} term_type;
 
 	u_int		 mouse_last_x;
 	u_int		 mouse_last_y;
@@ -1217,8 +1265,6 @@ struct tty {
 	struct event	 key_timer;
 	struct tty_key	*key_tree;
 };
-#define TTY_TYPES \
-	{ "VT100", "VT101", "VT102", "VT220", "VT320", "VT420", "Unknown" }
 
 /* TTY command context. */
 struct tty_ctx {
@@ -1227,8 +1273,8 @@ struct tty_ctx {
 	const struct grid_cell	*cell;
 	int			 wrapped;
 
-	u_int		 num;
-	void		*ptr;
+	u_int			 num;
+	void			*ptr;
 
 	/*
 	 * Cursor and region position before the screen was updated - this is
@@ -1299,27 +1345,11 @@ struct cmd_find_state {
 #define CMD_FIND_EXACT_WINDOW 0x20
 #define CMD_FIND_CANFAIL 0x40
 
-/* Command and list of commands. */
-struct cmd {
-	const struct cmd_entry	 *entry;
-	struct args		 *args;
-	u_int			  group;
-
-	char			 *file;
-	u_int			  line;
-
-	char			 *alias;
-	int			  argc;
-	char			**argv;
-
-	TAILQ_ENTRY(cmd)	  qentry;
-};
-TAILQ_HEAD(cmds, cmd);
-
+/* List of commands. */
 struct cmd_list {
-	int		references;
-	u_int		group;
-	struct cmds	list;
+	int		 references;
+	u_int		 group;
+	struct cmds	*list;
 };
 
 /* Command return values. */
@@ -1347,6 +1377,7 @@ struct cmd_parse_input {
 #define CMD_PARSE_PARSEONLY 0x2
 #define CMD_PARSE_NOALIAS 0x4
 #define CMD_PARSE_VERBOSE 0x8
+#define CMD_PARSE_ONEGROUP 0x10
 
 	const char		*file;
 	u_int			 line;
@@ -1356,59 +1387,13 @@ struct cmd_parse_input {
 	struct cmd_find_state	 fs;
 };
 
-/* Command queue item type. */
-enum cmdq_type {
-	CMDQ_COMMAND,
-	CMDQ_CALLBACK,
-};
+/* Command queue flags. */
+#define CMDQ_STATE_REPEAT 0x1
+#define CMDQ_STATE_CONTROL 0x2
+#define CMDQ_STATE_NOHOOKS 0x4
 
-/* Command queue item shared state. */
-struct cmdq_shared {
-	int			 references;
-
-	int			 flags;
-#define CMDQ_SHARED_REPEAT 0x1
-#define CMDQ_SHARED_CONTROL 0x2
-
-	struct format_tree	*formats;
-
-	struct mouse_event	 mouse;
-	struct cmd_find_state	 current;
-};
-
-/* Command queue item. */
+/* Command queue callback. */
 typedef enum cmd_retval (*cmdq_cb) (struct cmdq_item *, void *);
-struct cmdq_item {
-	char			*name;
-	struct cmdq_list	*queue;
-	struct cmdq_item	*next;
-
-	struct client		*client;
-
-	enum cmdq_type		 type;
-	u_int			 group;
-
-	u_int			 number;
-	time_t			 time;
-
-	int			 flags;
-#define CMDQ_FIRED 0x1
-#define CMDQ_WAITING 0x2
-#define CMDQ_NOHOOKS 0x4
-
-	struct cmdq_shared	*shared;
-	struct cmd_find_state	 source;
-	struct cmd_find_state	 target;
-
-	struct cmd_list		*cmdlist;
-	struct cmd		*cmd;
-
-	cmdq_cb			 cb;
-	void			*data;
-
-	TAILQ_ENTRY(cmdq_item)	 entry;
-};
-TAILQ_HEAD(cmdq_list, cmdq_item);
 
 /* Command definition flag. */
 struct cmd_entry_flag {
@@ -1435,6 +1420,9 @@ struct cmd_entry {
 #define CMD_STARTSERVER 0x1
 #define CMD_READONLY 0x2
 #define CMD_AFTERHOOK 0x4
+#define CMD_CLIENT_CFLAG 0x8
+#define CMD_CLIENT_TFLAG 0x10
+#define CMD_CLIENT_CANFAIL 0x20
 	int		 flags;
 
 	enum cmd_retval	 (*exec)(struct cmd *, struct cmdq_item *);
@@ -1457,16 +1445,41 @@ struct status_line {
 	struct status_line_entry entries[STATUS_LINES_LIMIT];
 };
 
+/* File in client. */
+typedef void (*client_file_cb) (struct client *, const char *, int, int,
+    struct evbuffer *, void *);
+struct client_file {
+	struct client			*c;
+	int				 references;
+	int				 stream;
+
+	char				*path;
+	struct evbuffer			*buffer;
+	struct bufferevent		*event;
+
+	int				 fd;
+	int				 error;
+	int				 closed;
+
+	client_file_cb			 cb;
+	void				*data;
+
+	RB_ENTRY (client_file)		 entry;
+};
+RB_HEAD(client_files, client_file);
+
 /* Client connection. */
 typedef int (*prompt_input_cb)(struct client *, void *, const char *, int);
 typedef void (*prompt_free_cb)(void *);
+typedef int (*overlay_check_cb)(struct client *, u_int, u_int);
+typedef int (*overlay_mode_cb)(struct client *, u_int *, u_int *);
 typedef void (*overlay_draw_cb)(struct client *, struct screen_redraw_ctx *);
 typedef int (*overlay_key_cb)(struct client *, struct key_event *);
 typedef void (*overlay_free_cb)(struct client *);
 struct client {
 	const char	*name;
 	struct tmuxpeer	*peer;
-	struct cmdq_list queue;
+	struct cmdq_list *queue;
 
 	pid_t		 pid;
 	int		 fd;
@@ -1482,7 +1495,9 @@ struct client {
 	char		*title;
 	const char	*cwd;
 
-	char		*term;
+	char		*term_name;
+	int		 term_features;
+
 	char		*ttyname;
 	struct tty	 tty;
 
@@ -1490,17 +1505,11 @@ struct client {
 	size_t		 discarded;
 	size_t		 redraw;
 
-	void		(*stdin_callback)(struct client *, int, void *);
-	void		*stdin_callback_data;
-	struct evbuffer	*stdin_data;
-	int		 stdin_closed;
-	struct evbuffer	*stdout_data;
-	struct evbuffer	*stderr_data;
-
 	struct event	 repeat_timer;
 
 	struct event	 click_timer;
 	u_int		 click_button;
+	struct mouse_event click_event;
 
 	struct status_line status;
 
@@ -1521,7 +1530,7 @@ struct client {
 #define CLIENT_CONTROLCONTROL 0x4000
 #define CLIENT_FOCUSED 0x8000
 #define CLIENT_UTF8 0x10000
-#define CLIENT_256COLOURS 0x20000
+/* 0x20000 unused */
 #define CLIENT_IDENTIFIED 0x40000
 #define CLIENT_STATUSFORCE 0x80000
 #define CLIENT_DOUBLECLICK 0x100000
@@ -1531,18 +1540,28 @@ struct client {
 #define CLIENT_REDRAWSTATUSALWAYS 0x1000000
 #define CLIENT_REDRAWOVERLAY 0x2000000
 #define CLIENT_CONTROL_NOOUTPUT 0x4000000
+#define CLIENT_DEFAULTSOCKET 0x8000000
+#define CLIENT_STARTSERVER 0x10000000
+#define CLIENT_REDRAWPANES 0x20000000
 #define CLIENT_ALLREDRAWFLAGS		\
 	(CLIENT_REDRAWWINDOW|		\
 	 CLIENT_REDRAWSTATUS|		\
 	 CLIENT_REDRAWSTATUSALWAYS|	\
 	 CLIENT_REDRAWBORDERS|		\
-	 CLIENT_REDRAWOVERLAY)
+	 CLIENT_REDRAWOVERLAY|		\
+	 CLIENT_REDRAWPANES)
+#define CLIENT_UNATTACHEDFLAGS	\
+	(CLIENT_DEAD|		\
+	 CLIENT_SUSPENDED|	\
+	 CLIENT_DETACHING)
 #define CLIENT_NOSIZEFLAGS	\
 	(CLIENT_DEAD|		\
 	 CLIENT_SUSPENDED|	\
 	 CLIENT_DETACHING)
 	int		 flags;
 	struct key_table *keytable;
+
+	uint64_t	 redraw_panes;
 
 	char		*message_string;
 	struct event	 message_timer;
@@ -1563,6 +1582,7 @@ struct client {
 #define PROMPT_NUMERIC 0x2
 #define PROMPT_INCREMENTAL 0x4
 #define PROMPT_NOFORMAT 0x8
+#define PROMPT_KEY 0x10
 	int		 prompt_flags;
 
 	struct session	*session;
@@ -1574,11 +1594,15 @@ struct client {
 	u_int		 pan_ox;
 	u_int		 pan_oy;
 
+	overlay_check_cb overlay_check;
+	overlay_mode_cb	 overlay_mode;
 	overlay_draw_cb	 overlay_draw;
 	overlay_key_cb	 overlay_key;
 	overlay_free_cb	 overlay_free;
 	void		*overlay_data;
 	struct event	 overlay_timer;
+
+	struct client_files files;
 
 	TAILQ_ENTRY(client) entry;
 };
@@ -1588,6 +1612,7 @@ TAILQ_HEAD(clients, client);
 struct key_binding {
 	key_code		 key;
 	struct cmd_list		*cmdlist;
+	const char		*note;
 
 	int			 flags;
 #define KEY_BINDING_REPEAT 0x1
@@ -1672,7 +1697,7 @@ struct spawn_context {
 
 	struct session		 *s;
 	struct winlink		 *wl;
-	struct client		 *c;
+	struct client		 *tc;
 
 	struct window_pane	 *wp0;
 	struct layout_cell	 *lc;
@@ -1711,10 +1736,12 @@ extern const char	*socket_path;
 extern const char	*shell_command;
 extern int		 ptm_fd;
 extern const char	*shell_command;
-int		 areshell(const char *);
+int		 checkshell(const char *);
 void		 setblocking(int, int);
+const char	*sig2name(int);
 const char	*find_cwd(void);
 const char	*find_home(void);
+const char	*getversion(void);
 
 /* proc.c */
 struct imsg;
@@ -1736,6 +1763,8 @@ extern struct client *cfg_client;
 void	start_cfg(void);
 int	load_cfg(const char *, struct client *, struct cmdq_item *, int,
 	    struct cmdq_item **);
+int	load_cfg_from_buffer(const void *, size_t, const char *,
+	    struct client *, struct cmdq_item *, int, struct cmdq_item **);
 void	set_cfg_file(const char *);
 void printflike(1, 2) cfg_add_cause(const char *, ...);
 void	cfg_print_causes(struct cmdq_item *);
@@ -1765,11 +1794,13 @@ char		*paste_make_sample(struct paste_buffer *);
 #define FORMAT_PANE 0x80000000U
 #define FORMAT_WINDOW 0x40000000U
 struct format_tree;
+struct format_modifier;
 const char	*format_skip(const char *, const char *);
 int		 format_true(const char *);
 struct format_tree *format_create(struct client *, struct cmdq_item *, int,
 		     int);
 void		 format_free(struct format_tree *);
+void		 format_merge(struct format_tree *, struct format_tree *);
 void printflike(3, 4) format_add(struct format_tree *, const char *,
 		     const char *, ...);
 void		 format_each(struct format_tree *, void (*)(const char *,
@@ -1779,6 +1810,7 @@ char		*format_expand(struct format_tree *, const char *);
 char		*format_single(struct cmdq_item *, const char *,
 		     struct client *, struct session *, struct winlink *,
 		     struct window_pane *);
+char		*format_single_from_target(struct cmdq_item *, const char *);
 void		 format_defaults(struct format_tree *, struct client *,
 		     struct session *, struct winlink *, struct window_pane *);
 void		 format_defaults_window(struct format_tree *, struct window *);
@@ -1787,6 +1819,8 @@ void		 format_defaults_pane(struct format_tree *,
 void		 format_defaults_paste_buffer(struct format_tree *,
 		     struct paste_buffer *);
 void		 format_lost_client(struct client *);
+char		*format_grid_word(struct grid *, u_int, u_int);
+char		*format_grid_line(struct grid *, u_int);
 
 /* format-draw.c */
 void		 format_draw(struct screen_write_ctx *,
@@ -1863,9 +1897,13 @@ typedef void (*job_update_cb) (struct job *);
 typedef void (*job_complete_cb) (struct job *);
 typedef void (*job_free_cb) (void *);
 #define JOB_NOWAIT 0x1
+#define JOB_KEEPWRITE 0x2
+#define JOB_PTY 0x4
 struct job	*job_run(const char *, struct session *, const char *,
-		     job_update_cb, job_complete_cb, job_free_cb, void *, int);
+		     job_update_cb, job_complete_cb, job_free_cb, void *, int,
+		     int, int);
 void		 job_free(struct job *);
+void		 job_resize(struct job *, u_int, u_int);
 void		 job_check_died(pid_t, int);
 int		 job_get_status(struct job *);
 void		*job_get_data(struct job *);
@@ -1881,10 +1919,10 @@ struct environ_entry *environ_first(struct environ *);
 struct environ_entry *environ_next(struct environ_entry *);
 void	environ_copy(struct environ *, struct environ *);
 struct environ_entry *environ_find(struct environ *, const char *);
-void printflike(3, 4) environ_set(struct environ *, const char *, const char *,
-	    ...);
+void printflike(4, 5) environ_set(struct environ *, const char *, int,
+	    const char *, ...);
 void	environ_clear(struct environ *, const char *);
-void	environ_put(struct environ *, const char *);
+void	environ_put(struct environ *, const char *, int);
 void	environ_unset(struct environ *, const char *);
 void	environ_update(struct options *, struct environ *, struct environ *);
 void	environ_push(struct environ *);
@@ -1914,19 +1952,22 @@ void	tty_putcode_ptr2(struct tty *, enum tty_code_code, const void *,
 void	tty_puts(struct tty *, const char *);
 void	tty_putc(struct tty *, u_char);
 void	tty_putn(struct tty *, const void *, size_t, u_int);
-int	tty_init(struct tty *, struct client *, int, char *);
+int	tty_init(struct tty *, struct client *, int);
 void	tty_resize(struct tty *);
-void	tty_set_size(struct tty *, u_int, u_int);
+void	tty_set_size(struct tty *, u_int, u_int, u_int, u_int);
 void	tty_start_tty(struct tty *);
+void	tty_send_requests(struct tty *);
 void	tty_stop_tty(struct tty *);
 void	tty_set_title(struct tty *, const char *);
 void	tty_update_mode(struct tty *, int, struct screen *);
 void	tty_draw_line(struct tty *, struct window_pane *, struct screen *,
 	    u_int, u_int, u_int, u_int, u_int);
+void	tty_sync_start(struct tty *);
+void	tty_sync_end(struct tty *);
 int	tty_open(struct tty *, char **);
 void	tty_close(struct tty *);
 void	tty_free(struct tty *);
-void	tty_set_type(struct tty *, int);
+void	tty_update_features(struct tty *);
 void	tty_write(void (*)(struct tty *, const struct tty_ctx *),
 	    struct tty_ctx *);
 void	tty_cmd_alignmenttest(struct tty *, const struct tty_ctx *);
@@ -1950,11 +1991,14 @@ void	tty_cmd_scrolldown(struct tty *, const struct tty_ctx *);
 void	tty_cmd_reverseindex(struct tty *, const struct tty_ctx *);
 void	tty_cmd_setselection(struct tty *, const struct tty_ctx *);
 void	tty_cmd_rawstring(struct tty *, const struct tty_ctx *);
+void	tty_cmd_syncstart(struct tty *, const struct tty_ctx *);
 
 /* tty-term.c */
 extern struct tty_terms tty_terms;
 u_int		 tty_term_ncodes(void);
-struct tty_term *tty_term_find(char *, int, char **);
+void		 tty_term_apply(struct tty_term *, const char *, int);
+void		 tty_term_apply_overrides(struct tty_term *);
+struct tty_term *tty_term_create(struct tty *, char *, int *, int, char **);
 void		 tty_term_free(struct tty_term *);
 int		 tty_term_has(struct tty_term *, enum tty_code_code);
 const char	*tty_term_string(struct tty_term *, enum tty_code_code);
@@ -1970,6 +2014,11 @@ const char	*tty_term_ptr2(struct tty_term *, enum tty_code_code,
 int		 tty_term_number(struct tty_term *, enum tty_code_code);
 int		 tty_term_flag(struct tty_term *, enum tty_code_code);
 const char	*tty_term_describe(struct tty_term *, enum tty_code_code);
+
+/* tty-features.c */
+void		 tty_add_features(int *, const char *, const char *);
+const char	*tty_get_features(int);
+int		 tty_apply_features(struct tty_term *, int);
 
 /* tty-acs.c */
 int		 tty_acs_needed(struct tty *);
@@ -1992,6 +2041,10 @@ const char	*args_first_value(struct args *, u_char, struct args_value **);
 const char	*args_next_value(struct args_value **);
 long long	 args_strtonum(struct args *, u_char, long long, long long,
 		     char **);
+long long	 args_percentage(struct args *, u_char, long long,
+		     long long, long long, char **);
+long long	 args_string_percentage(const char *, long long, long long,
+		     long long, char **);
 
 /* cmd-find.c */
 int		 cmd_find_target(struct cmd_find_state *, struct cmdq_item *,
@@ -2022,6 +2075,7 @@ int		 cmd_find_from_mouse(struct cmd_find_state *,
 int		 cmd_find_from_nothing(struct cmd_find_state *, int);
 
 /* cmd.c */
+extern const struct cmd_entry *cmd_table[];
 void printflike(3, 4) cmd_log_argv(int, char **, const char *, ...);
 void		 cmd_prepend_argv(int *, char ***, char *);
 void		 cmd_append_argv(int *, char ***, char *);
@@ -2031,16 +2085,28 @@ char	       **cmd_copy_argv(int, char **);
 void		 cmd_free_argv(int, char **);
 char		*cmd_stringify_argv(int, char **);
 char		*cmd_get_alias(const char *);
+const struct cmd_entry *cmd_get_entry(struct cmd *);
+struct args	*cmd_get_args(struct cmd *);
+u_int		 cmd_get_group(struct cmd *);
+void		 cmd_get_source(struct cmd *, const char **, u_int *);
 struct cmd	*cmd_parse(int, char **, const char *, u_int, char **);
 void		 cmd_free(struct cmd *);
 char		*cmd_print(struct cmd *);
+struct cmd_list	*cmd_list_new(void);
+void		 cmd_list_append(struct cmd_list *, struct cmd *);
+void		 cmd_list_move(struct cmd_list *, struct cmd_list *);
+void		 cmd_list_free(struct cmd_list *);
+char		*cmd_list_print(struct cmd_list *, int);
+struct cmd	*cmd_list_first(struct cmd_list *);
+struct cmd	*cmd_list_next(struct cmd *);
+int		 cmd_list_all_have(struct cmd_list *, int);
+int		 cmd_list_any_have(struct cmd_list *, int);
 int		 cmd_mouse_at(struct window_pane *, struct mouse_event *,
 		     u_int *, u_int *, int);
 struct winlink	*cmd_mouse_window(struct mouse_event *, struct session **);
 struct window_pane *cmd_mouse_pane(struct mouse_event *, struct session **,
 		     struct winlink **);
 char		*cmd_template_replace(const char *, const char *, int);
-extern const struct cmd_entry *cmd_table[];
 
 /* cmd-attach-session.c */
 enum cmd_retval	 cmd_attach_session(struct cmdq_item *, const char *, int, int,
@@ -2051,30 +2117,48 @@ void	    	 cmd_parse_empty(struct cmd_parse_input *);
 struct cmd_parse_result *cmd_parse_from_file(FILE *, struct cmd_parse_input *);
 struct cmd_parse_result *cmd_parse_from_string(const char *,
 		     struct cmd_parse_input *);
+enum cmd_parse_status cmd_parse_and_insert(const char *,
+		     struct cmd_parse_input *, struct cmdq_item *,
+		     struct cmdq_state *, char **);
+enum cmd_parse_status cmd_parse_and_append(const char *,
+		     struct cmd_parse_input *, struct client *,
+		     struct cmdq_state *, char **);
+struct cmd_parse_result *cmd_parse_from_buffer(const void *, size_t,
+		     struct cmd_parse_input *);
 struct cmd_parse_result *cmd_parse_from_arguments(int, char **,
 		     struct cmd_parse_input *);
 
-/* cmd-list.c */
-struct cmd_list	*cmd_list_new(void);
-void		 cmd_list_append(struct cmd_list *, struct cmd *);
-void		 cmd_list_move(struct cmd_list *, struct cmd_list *);
-void		 cmd_list_free(struct cmd_list *);
-char		*cmd_list_print(struct cmd_list *, int);
-
 /* cmd-queue.c */
-struct cmdq_item *cmdq_get_command(struct cmd_list *, struct cmd_find_state *,
-		     struct mouse_event *, int);
+struct cmdq_state *cmdq_new_state(struct cmd_find_state *, struct key_event *,
+		     int);
+struct cmdq_state *cmdq_link_state(struct cmdq_state *);
+struct cmdq_state *cmdq_copy_state(struct cmdq_state *);
+void		  cmdq_free_state(struct cmdq_state *);
+void printflike(3, 4) cmdq_add_format(struct cmdq_state *, const char *,
+		     const char *, ...);
+void		  cmdq_merge_formats(struct cmdq_item *, struct format_tree *);
+struct cmdq_list *cmdq_new(void);
+void cmdq_free(struct cmdq_list *);
+const char	 *cmdq_get_name(struct cmdq_item *);
+struct client	 *cmdq_get_client(struct cmdq_item *);
+struct client	 *cmdq_get_target_client(struct cmdq_item *);
+struct cmdq_state *cmdq_get_state(struct cmdq_item *);
+struct cmd_find_state *cmdq_get_target(struct cmdq_item *);
+struct cmd_find_state *cmdq_get_source(struct cmdq_item *);
+struct key_event *cmdq_get_event(struct cmdq_item *);
+struct cmd_find_state *cmdq_get_current(struct cmdq_item *);
+int		  cmdq_get_flags(struct cmdq_item *);
+struct cmdq_item *cmdq_get_command(struct cmd_list *, struct cmdq_state *);
 #define cmdq_get_callback(cb, data) cmdq_get_callback1(#cb, cb, data)
 struct cmdq_item *cmdq_get_callback1(const char *, cmdq_cb, void *);
 struct cmdq_item *cmdq_get_error(const char *);
-void		 cmdq_insert_after(struct cmdq_item *, struct cmdq_item *);
-void		 cmdq_append(struct client *, struct cmdq_item *);
+struct cmdq_item *cmdq_insert_after(struct cmdq_item *, struct cmdq_item *);
+struct cmdq_item *cmdq_append(struct client *, struct cmdq_item *);
 void		 cmdq_insert_hook(struct session *, struct cmdq_item *,
 		     struct cmd_find_state *, const char *, ...);
 void		 cmdq_continue(struct cmdq_item *);
-void printflike(3, 4) cmdq_format(struct cmdq_item *, const char *,
-		     const char *, ...);
 u_int		 cmdq_next(struct client *);
+struct cmdq_item *cmdq_running(struct client *);
 void		 cmdq_guard(struct cmdq_item *, const char *, int);
 void printflike(2, 3) cmdq_print(struct cmdq_item *, const char *, ...);
 void printflike(2, 3) cmdq_error(struct cmdq_item *, const char *, ...);
@@ -2083,7 +2167,7 @@ void printflike(2, 3) cmdq_error(struct cmdq_item *, const char *, ...);
 void	cmd_wait_for_flush(void);
 
 /* client.c */
-int	client_main(struct event_base *, int, char **, int);
+int	client_main(struct event_base *, int, char **, int, int);
 
 /* key-bindings.c */
 struct key_table *key_bindings_get_table(const char *, int);
@@ -2093,12 +2177,13 @@ void	 key_bindings_unref_table(struct key_table *);
 struct key_binding *key_bindings_get(struct key_table *, key_code);
 struct key_binding *key_bindings_first(struct key_table *);
 struct key_binding *key_bindings_next(struct key_table *, struct key_binding *);
-void	 key_bindings_add(const char *, key_code, int, struct cmd_list *);
+void	 key_bindings_add(const char *, key_code, const char *, int,
+	     struct cmd_list *);
 void	 key_bindings_remove(const char *, key_code);
 void	 key_bindings_remove_table(const char *);
 void	 key_bindings_init(void);
 struct cmdq_item *key_bindings_dispatch(struct key_binding *,
-	     struct cmdq_item *, struct client *, struct mouse_event *,
+	     struct cmdq_item *, struct client *, struct key_event *,
 	     struct cmd_find_state *);
 
 /* key-string.c */
@@ -2110,6 +2195,23 @@ void	alerts_reset_all(void);
 void	alerts_queue(struct window *, int);
 void	alerts_check_session(struct session *);
 
+/* file.c */
+int	 file_cmp(struct client_file *, struct client_file *);
+RB_PROTOTYPE(client_files, client_file, entry, file_cmp);
+struct client_file *file_create(struct client *, int, client_file_cb, void *);
+void	 file_free(struct client_file *);
+void	 file_fire_done(struct client_file *);
+void	 file_fire_read(struct client_file *);
+int	 file_can_print(struct client *);
+void printflike(2, 3) file_print(struct client *, const char *, ...);
+void 	 file_vprint(struct client *, const char *, va_list);
+void 	 file_print_buffer(struct client *, void *, size_t);
+void printflike(2, 3) file_error(struct client *, const char *, ...);
+void	 file_write(struct client *, const char *, int, const void *, size_t,
+	     client_file_cb, void *);
+void	 file_read(struct client *, const char *, client_file_cb, void *);
+void	 file_push(struct client_file *);
+
 /* server.c */
 extern struct tmuxproc *server_proc;
 extern struct clients clients;
@@ -2120,14 +2222,16 @@ void	 server_clear_marked(void);
 int	 server_is_marked(struct session *, struct winlink *,
 	     struct window_pane *);
 int	 server_check_marked(void);
-int	 server_start(struct tmuxproc *, struct event_base *, int, char *);
+int	 server_start(struct tmuxproc *, int, struct event_base *, int, char *);
 void	 server_update_socket(void);
 void	 server_add_accept(int);
 
 /* server-client.c */
 u_int	 server_client_how_many(void);
-void	 server_client_set_overlay(struct client *, u_int, overlay_draw_cb,
-    overlay_key_cb, overlay_free_cb, void *);
+void	 server_client_set_overlay(struct client *, u_int, overlay_check_cb,
+	     overlay_mode_cb, overlay_draw_cb, overlay_key_cb,
+	     overlay_free_cb, void *);
+void	 server_client_clear_overlay(struct client *);
 void	 server_client_set_key_table(struct client *, const char *);
 const char *server_client_get_key_table(struct client *);
 int	 server_client_check_nested(struct client *);
@@ -2144,7 +2248,6 @@ void	 server_client_push_stdout(struct client *);
 void	 server_client_push_stderr(struct client *);
 void printflike(2, 3) server_client_add_message(struct client *, const char *,
 	     ...);
-char	*server_client_get_path(struct client *, const char *);
 const char *server_client_get_cwd(struct client *, struct session *);
 
 /* server-fn.c */
@@ -2168,8 +2271,6 @@ void	 server_unlink_window(struct session *, struct winlink *);
 void	 server_destroy_pane(struct window_pane *, int);
 void	 server_destroy_session(struct session *);
 void	 server_check_unattached(void);
-int	 server_set_stdin_callback(struct client *, void (*)(struct client *,
-	     int, void *), void *, char **);
 void	 server_unzoom_window(struct window *);
 
 /* status.c */
@@ -2195,22 +2296,28 @@ void	 status_prompt_load_history(void);
 void	 status_prompt_save_history(void);
 
 /* resize.c */
-void	 resize_window(struct window *, u_int, u_int);
+void	 resize_window(struct window *, u_int, u_int, int, int);
 void	 default_window_size(struct client *, struct session *, struct window *,
-	     u_int *, u_int *, int);
+	     u_int *, u_int *, u_int *, u_int *, int);
 void	 recalculate_size(struct window *);
 void	 recalculate_sizes(void);
 
 /* input.c */
-void	 input_init(struct window_pane *);
-void	 input_free(struct window_pane *);
-void	 input_reset(struct window_pane *, int);
-struct evbuffer *input_pending(struct window_pane *);
-void	 input_parse(struct window_pane *);
+struct input_ctx *input_init(struct window_pane *, struct bufferevent *);
+void	 input_free(struct input_ctx *);
+void	 input_reset(struct input_ctx *, int);
+struct evbuffer *input_pending(struct input_ctx *);
+void	 input_parse_pane(struct window_pane *);
 void	 input_parse_buffer(struct window_pane *, u_char *, size_t);
+void	 input_parse_screen(struct input_ctx *, struct screen *, u_char *,
+	     size_t);
 
 /* input-key.c */
-void	 input_key(struct window_pane *, key_code, struct mouse_event *);
+int	 input_key_pane(struct window_pane *, key_code, struct mouse_event *);
+int	 input_key(struct window_pane *, struct screen *, struct bufferevent *,
+	     key_code);
+int	 input_key_get_mouse(struct screen *, struct mouse_event *, u_int,
+	     u_int, const char **, size_t *);
 
 /* xterm-keys.c */
 char	*xterm_keys_lookup(key_code);
@@ -2231,11 +2338,13 @@ int	 attributes_fromstring(const char *);
 
 /* grid.c */
 extern const struct grid_cell grid_default_cell;
+void	 grid_empty_line(struct grid *, u_int, u_int);
 int	 grid_cells_equal(const struct grid_cell *, const struct grid_cell *);
 struct grid *grid_create(u_int, u_int, u_int);
 void	 grid_destroy(struct grid *);
 int	 grid_compare(struct grid *, struct grid *);
 void	 grid_collect_history(struct grid *);
+void	 grid_remove_history(struct grid *, u_int );
 void	 grid_scroll_history(struct grid *, u_int);
 void	 grid_scroll_history_region(struct grid *, u_int, u_int, u_int);
 void	 grid_clear_history(struct grid *);
@@ -2280,6 +2389,8 @@ void	 grid_view_delete_cells(struct grid *, u_int, u_int, u_int, u_int);
 char	*grid_view_string_cells(struct grid *, u_int, u_int, u_int);
 
 /* screen-write.c */
+void	 screen_write_make_list(struct screen *);
+void	 screen_write_free_list(struct screen *);
 void	 screen_write_start(struct screen_write_ctx *, struct window_pane *,
 	     struct screen *);
 void	 screen_write_stop(struct screen_write_ctx *);
@@ -2299,7 +2410,8 @@ void	 screen_write_fast_copy(struct screen_write_ctx *, struct screen *,
 	     u_int, u_int, u_int, u_int);
 void	 screen_write_hline(struct screen_write_ctx *, u_int, int, int);
 void	 screen_write_vline(struct screen_write_ctx *, u_int, int, int);
-void	 screen_write_menu(struct screen_write_ctx *, struct menu *, int);
+void	 screen_write_menu(struct screen_write_ctx *, struct menu *, int,
+	     const struct grid_cell *);
 void	 screen_write_box(struct screen_write_ctx *, u_int, u_int);
 void	 screen_write_preview(struct screen_write_ctx *, struct screen *, u_int,
 	     u_int);
@@ -2348,10 +2460,13 @@ void	 screen_free(struct screen *);
 void	 screen_reset_tabs(struct screen *);
 void	 screen_set_cursor_style(struct screen *, u_int);
 void	 screen_set_cursor_colour(struct screen *, const char *);
-void	 screen_set_title(struct screen *, const char *);
+int	 screen_set_title(struct screen *, const char *);
+void	 screen_set_path(struct screen *, const char *);
 void	 screen_push_title(struct screen *);
 void	 screen_pop_title(struct screen *);
 void	 screen_resize(struct screen *, u_int, u_int, int);
+void	 screen_resize_cursor(struct screen *, u_int, u_int, int, int, u_int *,
+	     u_int *);
 void	 screen_set_selection(struct screen *, u_int, u_int, u_int, u_int,
 	     u_int, int, struct grid_cell *);
 void	 screen_clear_selection(struct screen *);
@@ -2359,6 +2474,8 @@ void	 screen_hide_selection(struct screen *);
 int	 screen_check_selection(struct screen *, u_int, u_int);
 void	 screen_select_cell(struct screen *, struct grid_cell *,
 	     const struct grid_cell *);
+void	 screen_alternate_on(struct screen *, struct grid_cell *, int);
+void	 screen_alternate_off(struct screen *, struct grid_cell *, int);
 
 /* window.c */
 extern struct windows windows;
@@ -2388,7 +2505,7 @@ void		 winlink_stack_remove(struct winlink_stack *, struct winlink *);
 struct window	*window_find_by_id_str(const char *);
 struct window	*window_find_by_id(u_int);
 void		 window_update_activity(struct window *);
-struct window	*window_create(u_int, u_int);
+struct window	*window_create(u_int, u_int, u_int, u_int);
 void		 window_pane_set_event(struct window_pane *);
 struct window_pane *window_get_active_at(struct window *, u_int, u_int);
 struct window_pane *window_find_string(struct window *, const char *);
@@ -2399,7 +2516,8 @@ void		 window_redraw_active_switch(struct window *,
 		     struct window_pane *);
 struct window_pane *window_add_pane(struct window *, struct window_pane *,
 		     u_int, int);
-void		 window_resize(struct window *, u_int, u_int);
+void		 window_resize(struct window *, u_int, u_int, int, int);
+void		 window_pane_send_resize(struct window_pane *, int);
 int		 window_zoom(struct window_pane *);
 int		 window_unzoom(struct window *);
 int		 window_push_zoom(struct window *, int);
@@ -2427,11 +2545,11 @@ void		 window_pane_unset_palette(struct window_pane *, u_int);
 void		 window_pane_reset_palette(struct window_pane *);
 int		 window_pane_get_palette(struct window_pane *, int);
 int		 window_pane_set_mode(struct window_pane *,
-		     const struct window_mode *, struct cmd_find_state *,
-		     struct args *);
+		     struct window_pane *, const struct window_mode *,
+		     struct cmd_find_state *, struct args *);
 void		 window_pane_reset_mode(struct window_pane *);
 void		 window_pane_reset_mode_all(struct window_pane *);
-void		 window_pane_key(struct window_pane *, struct client *,
+int		 window_pane_key(struct window_pane *, struct client *,
 		     struct session *, struct winlink *, key_code,
 		     struct mouse_event *);
 int		 window_pane_visible(struct window_pane *);
@@ -2503,7 +2621,8 @@ typedef void (*mode_tree_each_cb)(void *, void *, struct client *, key_code);
 u_int	 mode_tree_count_tagged(struct mode_tree_data *);
 void	*mode_tree_get_current(struct mode_tree_data *);
 void	 mode_tree_expand_current(struct mode_tree_data *);
-void	 mode_tree_set_current(struct mode_tree_data *, uint64_t);
+void	 mode_tree_expand(struct mode_tree_data *, uint64_t);
+int	 mode_tree_set_current(struct mode_tree_data *, uint64_t);
 void	 mode_tree_each_tagged(struct mode_tree_data *, mode_tree_each_cb,
 	     struct client *, key_code, int);
 void	 mode_tree_down(struct mode_tree_data *, int);
@@ -2545,6 +2664,8 @@ void printflike(2, 3) window_copy_add(struct window_pane *, const char *, ...);
 void		 window_copy_vadd(struct window_pane *, const char *, va_list);
 void		 window_copy_pageup(struct window_pane *, int);
 void		 window_copy_start_drag(struct client *, struct mouse_event *);
+char		*window_copy_get_word(struct window_pane *, u_int, u_int);
+char		*window_copy_get_line(struct window_pane *, u_int);
 
 /* names.c */
 void	 check_window_name(struct window *);
@@ -2552,9 +2673,8 @@ char	*default_window_name(struct window *);
 char	*parse_window_name(const char *);
 
 /* control.c */
-void	control_callback(struct client *, int, void *);
+void	control_start(struct client *);
 void printflike(2, 3) control_write(struct client *, const char *, ...);
-void	control_write_buffer(struct client *, struct evbuffer *);
 
 /* control-notify.c */
 void	control_notify_input(struct client *, struct window_pane *,
@@ -2607,6 +2727,7 @@ void		 session_group_add(struct session_group *, struct session *);
 void		 session_group_synchronize_to(struct session *);
 void		 session_group_synchronize_from(struct session *);
 u_int		 session_group_count(struct session_group *);
+u_int		 session_group_attached_count(struct session_group *);
 void		 session_renumber_windows(struct session *);
 
 /* utf8.c */
@@ -2626,10 +2747,12 @@ struct utf8_data *utf8_fromcstr(const char *);
 char		*utf8_tocstr(struct utf8_data *);
 u_int		 utf8_cstrwidth(const char *);
 char		*utf8_padcstr(const char *, u_int);
+char		*utf8_rpadcstr(const char *, u_int);
 int		 utf8_cstrhas(const char *, const struct utf8_data *);
 
 /* procname.c */
 char   *get_proc_name(int, char *);
+char   *get_proc_cwd(int);
 
 /* log.c */
 void	log_add_level(void);
@@ -2642,6 +2765,7 @@ __dead void printflike(1, 2) fatal(const char *, ...);
 __dead void printflike(1, 2) fatalx(const char *, ...);
 
 /* menu.c */
+#define MENU_NOMOUSE 0x1
 struct menu	*menu_create(const char *);
 void		 menu_add_items(struct menu *, const struct menu_item *,
 		    struct cmdq_item *, struct client *,
@@ -2649,11 +2773,21 @@ void		 menu_add_items(struct menu *, const struct menu_item *,
 void 		 menu_add_item(struct menu *, const struct menu_item *,
 		    struct cmdq_item *, struct client *,
 		    struct cmd_find_state *);
-
 void		 menu_free(struct menu *);
 int		 menu_display(struct menu *, int, struct cmdq_item *, u_int,
 		    u_int, struct client *, struct cmd_find_state *,
 		    menu_choice_cb, void *);
+
+/* popup.c */
+#define POPUP_WRITEKEYS 0x1
+#define POPUP_CLOSEEXIT 0x2
+#define POPUP_CLOSEEXITZERO 0x4
+u_int		 popup_width(struct cmdq_item *, u_int, const char **,
+		    struct client *, struct cmd_find_state *);
+u_int		 popup_height(u_int, const char **);
+int		 popup_display(int, struct cmdq_item *, u_int, u_int, u_int,
+		    u_int, u_int, const char **, const char *, const char *,
+		    const char *, struct client *, struct cmd_find_state *);
 
 /* style.c */
 int		 style_parse(struct style *,const struct grid_cell *,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: simplefb.c,v 1.6 2019/10/13 17:00:54 kettenis Exp $	*/
+/*	$OpenBSD: simplefb.c,v 1.8 2020/01/22 05:25:05 patrick Exp $	*/
 /*
  * Copyright (c) 2016 Mark Kettenis
  *
@@ -110,8 +110,12 @@ simplefb_match(struct device *parent, void *match, void *aux)
 {
 	struct fdt_attach_args *faa = aux;
 
+	/* Don't attach if it has no address space. */
+	if (faa->fa_nreg < 1 || faa->fa_reg[0].size == 0)
+		return 0;
+
 	/* Don't attach if another driver already claimed our framebuffer. */
-	if (faa->fa_nreg > 0 && rasops_check_framebuffer(faa->fa_reg[0].addr))
+	if (rasops_check_framebuffer(faa->fa_reg[0].addr))
 		return 0;
 
 	return OF_is_compatible(faa->fa_node, "simple-framebuffer");
@@ -127,9 +131,6 @@ simplefb_attach(struct device *parent, struct device *self, void *aux)
 	const char *format;
 	int console = 0;
 	long defattr;
-
-	if (faa->fa_nreg < 1)
-		return;
 
 	format = simplefb_init(faa->fa_node, ri);
 	if (format) {
@@ -243,7 +244,7 @@ simplefb_wsioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 			return ws_set_param(dp);
 		return -1;
 	case WSDISPLAYIO_GTYPE:
-		*(int *)data = WSDISPLAY_TYPE_EFIFB;
+		*(u_int *)data = WSDISPLAY_TYPE_EFIFB;
 		return 0;
 	case WSDISPLAYIO_GINFO:
 		wdf = (struct wsdisplay_fbinfo *)data;

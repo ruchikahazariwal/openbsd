@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.52 2019/05/14 06:05:45 anton Exp $	*/
+/*	$OpenBSD: parse.y,v 1.54 2019/12/12 19:52:10 kn Exp $	*/
 
 /*
  * Copyright (c) 2007-2016 Reyk Floeter <reyk@openbsd.org>
@@ -122,7 +122,8 @@ typedef struct {
 %token	INCLUDE ERROR
 %token	ADD ALLOW BOOT CDROM DEVICE DISABLE DISK DOWN ENABLE FORMAT GROUP
 %token	INET6 INSTANCE INTERFACE LLADDR LOCAL LOCKED MEMORY NET NIFS OWNER
-%token	PATH PREFIX RDOMAIN SIZE SOCKET SWITCH UP VM VMID
+%token  PATH PREFIX RDOMAIN SIZE SOCKET SWITCH UP VM VMBHIWAT VMBLOWAT VMBRECLAIM VMID
+%token	STAGGERED START PARALLEL DELAY
 %token	<v.number>	NUMBER
 %token	<v.string>	STRING
 %type	<v.lladdr>	lladdr
@@ -143,11 +144,24 @@ grammar		: /* empty */
 		| grammar include '\n'
 		| grammar '\n'
 		| grammar varset '\n'
+		| grammar balloon '\n'
 		| grammar main '\n'
 		| grammar switch '\n'
 		| grammar vm '\n'
 		| grammar error '\n'		{ file->errors++; }
 		;
+
+balloon		: VMBLOWAT NUMBER		{
+            	env->vmb_lowat = $2;
+			}
+			| VMBHIWAT NUMBER {
+            	env->vmb_hiwat = $2;
+            }
+            | VMBRECLAIM NUMBER {
+            	env->vmb_reclaim = $2;
+            }
+            ;
+
 
 include		: INCLUDE string		{
 			struct file	*nfile;
@@ -216,6 +230,11 @@ main		: LOCAL INET6 {
 		| SOCKET OWNER owner_id {
 			env->vmd_ps.ps_csock.cs_uid = $3.uid;
 			env->vmd_ps.ps_csock.cs_gid = $3.gid == -1 ? 0 : $3.gid;
+		}
+		| STAGGERED START PARALLEL NUMBER DELAY NUMBER {
+			env->vmd_cfg.cfg_flags |= VMD_CFG_STAGGERED_START;
+			env->vmd_cfg.delay.tv_sec = $6;
+			env->vmd_cfg.parallelism = $4;
 		}
 		;
 
@@ -320,7 +339,7 @@ vm		: VM string vm_instance		{
 					free($3);
 					YYERROR;
 				}
-				
+
 				free($2);
 				name = $3;
 				vmc.vmc_flags |= VMOP_CREATE_INSTANCE;
@@ -368,6 +387,8 @@ vm		: VM string vm_instance		{
 				} else {
 					if (vcp_disable)
 						vm->vm_state |= VM_STATE_DISABLED;
+					else
+						vm->vm_state |= VM_STATE_WAITING;
 					log_debug("%s:%d: vm \"%s\" "
 					    "registered (%s)",
 					    file->name, yylval.lineno,
@@ -545,11 +566,7 @@ instance_flags	: BOOT		{ vmc.vmc_insflags |= VMOP_CREATE_KERNEL; }
 		}
 		;
 
-owner_id	: /* none */		{
-			$$.uid = 0;
-			$$.gid = -1;
-		}
-		| NUMBER		{
+owner_id	: NUMBER		{
 			$$.uid = $1;
 			$$.gid = -1;
 		}
@@ -766,6 +783,7 @@ lookup(char *s)
 		{ "allow",		ALLOW },
 		{ "boot",		BOOT },
 		{ "cdrom",		CDROM },
+		{ "delay",		DELAY },
 		{ "device",		DEVICE },
 		{ "disable",		DISABLE },
 		{ "disk",		DISK },
@@ -785,13 +803,19 @@ lookup(char *s)
 		{ "memory",		MEMORY },
 		{ "net",		NET },
 		{ "owner",		OWNER },
+		{ "parallel",		PARALLEL },
 		{ "prefix",		PREFIX },
 		{ "rdomain",		RDOMAIN },
 		{ "size",		SIZE },
 		{ "socket",		SOCKET },
+		{ "staggered",		STAGGERED },
+		{ "start",		START  },
 		{ "switch",		SWITCH },
 		{ "up",			UP },
-		{ "vm",			VM }
+		{ "vm",			VM },
+		{ "vmbhiwat",           VMBHIWAT },
+		{ "vmblowat",           VMBLOWAT },
+		{ "vmbreclaim",         VMBRECLAIM }
 	};
 	const struct keywords	*p;
 

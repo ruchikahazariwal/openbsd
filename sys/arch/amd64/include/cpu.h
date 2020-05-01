@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.132 2019/08/09 15:20:05 pirofti Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.134 2020/04/15 16:38:24 kettenis Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -375,7 +375,6 @@ int	cpu_amd64speed(int *);
 void	dumpconf(void);
 void	cpu_reset(void);
 void	x86_64_proc0_tss_ldt_init(void);
-void	x86_64_bufinit(void);
 void	cpu_proc_fork(struct proc *, struct proc *);
 int	amd64_pa_used(paddr_t);
 extern void (*cpu_idle_cycle_fcn)(void);
@@ -402,9 +401,8 @@ void	i8254_inittimecounter_simple(void);
 /* i8259.c */
 void	i8259_default_setup(void);
 
-
 void cpu_init_msrs(struct cpu_info *);
-
+void cpu_tsx_disable(struct cpu_info *);
 
 /* dkcsum.c */
 void	dkcsumattach(void);

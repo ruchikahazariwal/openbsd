@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.402 2019/09/27 10:26:32 claudio Exp $ */
+/*	$OpenBSD: parse.y,v 1.406 2020/04/23 16:13:11 claudio Exp $ */
 
 /*
  * Copyright (c) 2002, 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -1260,8 +1260,27 @@ peeropts	: REMOTEAS as4number	{
 			free($2);
 		}
 		| LOCALADDR address	{
-			memcpy(&curpeer->conf.local_addr, &$2,
-			    sizeof(curpeer->conf.local_addr));
+			if ($2.aid == AID_INET)
+				memcpy(&curpeer->conf.local_addr_v4, &$2,
+				    sizeof(curpeer->conf.local_addr_v4));
+			else if ($2.aid == AID_INET6)
+				memcpy(&curpeer->conf.local_addr_v6, &$2,
+				    sizeof(curpeer->conf.local_addr_v6));
+			else {
+				yyerror("Unsupported address family %s for "
+				    "local-addr", aid2str($2.aid));
+				YYERROR;
+			}
+		}
+		| yesno LOCALADDR	{
+			if ($1) {
+				yyerror("bad local-address definition");
+				YYERROR;
+			}
+			memset(&curpeer->conf.local_addr_v4, 0,
+			    sizeof(curpeer->conf.local_addr_v4));
+			memset(&curpeer->conf.local_addr_v6, 0,
+			    sizeof(curpeer->conf.local_addr_v6));
 		}
 		| MULTIHOP NUMBER	{
 			if ($2 < 2 || $2 > 255) {
@@ -1390,6 +1409,14 @@ peeropts	: REMOTEAS as4number	{
 			}
 			curpeer->conf.max_prefix = $2;
 			curpeer->conf.max_prefix_restart = $3;
+		}
+		| MAXPREFIX NUMBER OUT restart {
+			if ($2 < 0 || $2 > UINT_MAX) {
+				yyerror("bad maximum number of prefixes");
+				YYERROR;
+			}
+			curpeer->conf.max_out_prefix = $2;
+			curpeer->conf.max_out_prefix_restart = $4;
 		}
 		| TCP MD5SIG PASSWORD string {
 			if (curpeer->conf.auth.method) {
@@ -4068,8 +4095,7 @@ expand_rule(struct filter_rule *rule, struct filter_rib_l *rib,
 					memcpy(r, rule, sizeof(struct filter_rule));
 					memcpy(&r->match, match,
 					    sizeof(struct filter_match));
-					TAILQ_INIT(&r->set);
-					copy_filterset(set, &r->set);
+					filterset_copy(set, &r->set);
 
 					if (rb != NULL)
 						strlcpy(r->rib, rb->name,
@@ -4169,11 +4195,17 @@ str2key(char *s, char *dest, size_t max_len)
 int
 neighbor_consistent(struct peer *p)
 {
-	/* local-address and peer's address: same address family */
-	if (p->conf.local_addr.aid &&
-	    p->conf.local_addr.aid != p->conf.remote_addr.aid) {
-		yyerror("local-address and neighbor address "
-		    "must be of the same address family");
+	struct bgpd_addr *local_addr;
+
+	switch (p->conf.remote_addr.aid) {
+	case AID_INET:
+		local_addr = &p->conf.local_addr_v4;
+		break;
+	case AID_INET6:
+		local_addr = &p->conf.local_addr_v6;
+		break;
+	default:
+		yyerror("Bad address family for remote-addr");
 		return (-1);
 	}
 
@@ -4182,7 +4214,7 @@ neighbor_consistent(struct peer *p)
 	    p->conf.auth.method == AUTH_IPSEC_IKE_AH ||
 	    p->conf.auth.method == AUTH_IPSEC_MANUAL_ESP ||
 	    p->conf.auth.method == AUTH_IPSEC_MANUAL_AH) &&
-	    !p->conf.local_addr.aid) {
+	    local_addr->aid == AID_UNSPEC) {
 		yyerror("neighbors with any form of IPsec configured "
 		    "need local-address to be specified");
 		return (-1);
@@ -4473,7 +4505,7 @@ static void
 add_roa_set(struct prefixset_item *npsi, u_int32_t as, u_int8_t max)
 {
 	struct prefixset_item	*psi;
-	struct roa_set rs;
+	struct roa_set rs, *rsp;
 
 	/* no prefixlen option in this tree */
 	npsi->p.op = OP_NONE;
@@ -4485,8 +4517,17 @@ add_roa_set(struct prefixset_item *npsi, u_int32_t as, u_int8_t max)
 	if (psi->set == NULL)
 		if ((psi->set = set_new(1, sizeof(rs))) == NULL)
 			fatal("set_new");
-	rs.as = as;
-	rs.maxlen = max;
-	if (set_add(psi->set, &rs, 1) != 0)
-		fatal("as_set_new");
+
+	/* merge sets with same key, longer maxlen wins */
+	if ((rsp = set_match(psi->set, as)) != NULL) {
+		if (rsp->maxlen < max)
+			rsp->maxlen = max;
+	} else  {
+		rs.as = as;
+		rs.maxlen = max;
+		if (set_add(psi->set, &rs, 1) != 0)
+			fatal("as_set_new");
+		/* prep data so that set_match works */
+		set_prep(psi->set);
+	}
 }

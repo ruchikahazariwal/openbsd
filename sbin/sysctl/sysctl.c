@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.c,v 1.247 2019/09/22 01:16:39 krw Exp $	*/
+/*	$OpenBSD: sysctl.c,v 1.250 2019/12/25 00:15:36 cheloha Exp $	*/
 /*	$NetBSD: sysctl.c,v 1.9 1995/09/30 07:12:50 thorpej Exp $	*/
 
 /*
@@ -884,11 +884,11 @@ parse(char *string, int flags)
 		if (!nflag)
 			(void)printf("%s%s", string, equ);
 		(void)printf("(inuse = %ld, calls = %ld, memuse = %ldK, "
-		    "limblocks = %d, mapblocks = %d, maxused = %ldK, "
+		    "limblocks = %d, maxused = %ldK, "
 		    "limit = %ldK, spare = %ld, sizes = (",
 		    km->ks_inuse, km->ks_calls,
 		    (km->ks_memuse + 1023) / 1024, km->ks_limblocks,
-		    km->ks_mapblocks, (km->ks_maxused + 1023) / 1024,
+		    (km->ks_maxused + 1023) / 1024,
 		    (km->ks_limit + 1023) / 1024, km->ks_spare);
 		for (j = 1 << MINBUCKET; j < 1 << (MINBUCKET + 16); j <<= 1) {
 			if ((km->ks_size & j ) == 0)
@@ -1038,14 +1038,14 @@ parse(char *string, int flags)
 			printf("%s%s", string, equ);
 		printf("added = %llu, cancelled = %llu, deleted = %llu, "
 		    "late = %llu, pending = %llu, readded = %llu, "
-		    "rescheduled = %llu, run_softclock = %llu, "
-		    "run_thread = %llu, softclocks = %llu, "
-		    "thread_wakeups = %llu\n",
+		    "scheduled = %llu, rescheduled = %llu, "
+		    "run_softclock = %llu, run_thread = %llu, "
+		    "softclocks = %llu, thread_wakeups = %llu\n",
 		    tstat->tos_added, tstat->tos_cancelled, tstat->tos_deleted,
 		    tstat->tos_late, tstat->tos_pending, tstat->tos_readded,
-		    tstat->tos_rescheduled, tstat->tos_run_softclock,
-		    tstat->tos_run_thread, tstat->tos_softclocks,
-		    tstat->tos_thread_wakeups);
+		    tstat->tos_scheduled, tstat->tos_rescheduled,
+		    tstat->tos_run_softclock, tstat->tos_run_thread,
+		    tstat->tos_softclocks, tstat->tos_thread_wakeups);
 		return;
 	}
 	switch (type) {
@@ -1485,7 +1485,6 @@ struct ctlname espname[] = ESPCTL_NAMES;
 struct ctlname ahname[] = AHCTL_NAMES;
 struct ctlname etheripname[] = ETHERIPCTL_NAMES;
 struct ctlname grename[] = GRECTL_NAMES;
-struct ctlname mobileipname[] = MOBILEIPCTL_NAMES;
 struct ctlname ipcompname[] = IPCOMPCTL_NAMES;
 struct ctlname carpname[] = CARPCTL_NAMES;
 struct ctlname pfsyncname[] = PFSYNCCTL_NAMES;
@@ -1550,7 +1549,7 @@ struct list inetvars[] = {
 	{ 0, 0 },
 	{ 0, 0 },
 	{ 0, 0 },
-	{ mobileipname, MOBILEIPCTL_MAXID }, /* mobileip */
+	{ 0, 0 },
 	{ 0, 0 },
 	{ 0, 0 },
 	{ 0, 0 },

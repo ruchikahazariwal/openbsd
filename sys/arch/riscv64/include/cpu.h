@@ -74,15 +74,26 @@ struct cpu_info {
 	struct schedstate_percpu ci_schedstate; /* scheduler state */
 
 	u_int32_t		ci_cpuid;
+#if 0
+	uint64_t		ci_mpidr;
+	u_int			ci_acpi_proc_id;
+#endif
+	int			ci_node;
 	struct cpu_info		*ci_self;
 
 	struct proc		*ci_curproc;
 	struct pmap		*ci_curpm;
+#if 0
+	struct proc		*ci_fpuproc;
+#endif
 	u_int32_t		ci_randseed;
 
 	struct pcb		*ci_curpcb;
 	struct pcb		*ci_idle_pcb;
 
+	u_int32_t		ci_ctrl; /* The CPU control register */
+
+	uint32_t		ci_cpl;
 	uint32_t		ci_ipending;
 	uint32_t		ci_idepth;
 #ifdef DIAGNOSTIC
@@ -90,9 +101,22 @@ struct cpu_info {
 #endif
 	int			ci_want_resched;
 
+#if 0
+	void			(*ci_flush_bp)(void);
+
+	struct opp_table	*ci_opp_table;
+	volatile int		ci_opp_idx;
+	volatile int		ci_opp_max;
+	uint32_t		ci_cpu_supply;
+#endif
+
 #ifdef MULTIPROCESSOR
 	struct srp_hazard	ci_srp_hazards[SRP_HAZARD_NUM];
 	volatile int		ci_flags;
+#if 0
+	uint64_t		ci_ttbr1;
+	vaddr_t			ci_el1_stkend;
+#endif
 
 	volatile int		ci_ddb_paused;
 #define CI_DDB_RUNNING		0
@@ -124,10 +148,12 @@ curcpu(void)
 	return (__ci);
 }
 
+extern uint32_t boot_hart;	/* The hart we booted on. */
 extern struct cpu_info cpu_info_primary;
 extern struct cpu_info *cpu_info_list;
 
 #ifndef MULTIPROCESSOR
+
 #define cpu_number()	0
 #define CPU_IS_PRIMARY(ci)	1
 #define CPU_INFO_ITERATOR	int
@@ -136,7 +162,9 @@ extern struct cpu_info *cpu_info_list;
 #define CPU_INFO_UNIT(ci)	0
 #define MAXCPUS	1
 #define cpu_unidle(ci)
+
 #else
+
 #define cpu_number()		(curcpu()->ci_cpuid)
 #define CPU_IS_PRIMARY(ci)	((ci) == &cpu_info_primary)
 #define CPU_INFO_ITERATOR		int
@@ -188,6 +216,10 @@ void need_resched(struct cpu_info *);
  * through trap(), marking the proc as needing a profiling tick.
  */
 #define	need_proftick(p)	aston(p)
+
+// asm code to start new kernel contexts.
+void	proc_trampoline(void);
+void	child_trampoline(void);
 
 /*
  * Random cruft

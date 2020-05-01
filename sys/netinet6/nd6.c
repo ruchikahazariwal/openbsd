@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6.c,v 1.227 2019/06/13 08:15:26 claudio Exp $	*/
+/*	$OpenBSD: nd6.c,v 1.231 2020/04/22 07:51:38 mpi Exp $	*/
 /*	$KAME: nd6.c,v 1.280 2002/06/08 19:52:07 itojun Exp $	*/
 
 /*
@@ -177,7 +177,7 @@ nd6_option(union nd_opts *ndopts)
 	int olen;
 
 	if (!ndopts)
-		panic("ndopts == NULL in nd6_option");
+		panic("%s: ndopts == NULL", __func__);
 	if (!ndopts->nd_opts_last)
 		panic("%s: uninitialized ndopts", __func__);
 	if (!ndopts->nd_opts_search)
@@ -228,7 +228,7 @@ nd6_options(union nd_opts *ndopts)
 	int i = 0;
 
 	if (!ndopts)
-		panic("ndopts == NULL in nd6_options");
+		panic("%s: ndopts == NULL", __func__);
 	if (!ndopts->nd_opts_last)
 		panic("%s: uninitialized ndopts", __func__);
 	if (!ndopts->nd_opts_search)
@@ -306,6 +306,7 @@ nd6_llinfo_settimer(struct llinfo_nd6 *ln, unsigned int secs)
 	time_t expire = time_uptime + secs;
 
 	NET_ASSERT_LOCKED();
+	KASSERT(!ISSET(ln->ln_rt->rt_flags, RTF_LOCAL));
 
 	ln->ln_rt->rt_expire = expire;
 	if (!timeout_pending(&nd6_timer_to) || expire < nd6_timer_next) {
@@ -1004,6 +1005,8 @@ nd6_rtrequest(struct ifnet *ifp, int req, struct rtentry *rt)
 		break;
 
 	case RTM_INVALIDATE:
+		if (ln == NULL)
+			break;
 		if (!ISSET(rt->rt_flags, RTF_LOCAL))
 			nd6_invalidate(rt);
 		break;
@@ -1089,9 +1092,9 @@ nd6_cache_lladdr(struct ifnet *ifp, struct in6_addr *from, char *lladdr,
 	int newstate = 0;
 
 	if (!ifp)
-		panic("ifp == NULL in nd6_cache_lladdr");
+		panic("%s: ifp == NULL", __func__);
 	if (!from)
-		panic("from == NULL in nd6_cache_lladdr");
+		panic("%s: from == NULL", __func__);
 
 	/* nothing must be updated for unspecified address */
 	if (IN6_IS_ADDR_UNSPECIFIED(from))
@@ -1109,17 +1112,11 @@ nd6_cache_lladdr(struct ifnet *ifp, struct in6_addr *from, char *lladdr,
 
 	rt = nd6_lookup(from, 0, ifp, ifp->if_rdomain);
 	if (rt == NULL) {
-#if 0
-		/* nothing must be done if there's no lladdr */
-		if (!lladdr || !lladdrlen)
-			return NULL;
-#endif
-
 		rt = nd6_lookup(from, 1, ifp, ifp->if_rdomain);
 		is_newentry = 1;
 	} else {
-		/* do nothing if static ndp is set */
-		if (rt->rt_flags & RTF_STATIC) {
+		/* do not overwrite local or static entry */
+		if (ISSET(rt->rt_flags, RTF_STATIC|RTF_LOCAL)) {
 			rtfree(rt);
 			return;
 		}

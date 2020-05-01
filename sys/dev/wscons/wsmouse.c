@@ -1,4 +1,4 @@
-/* $OpenBSD: wsmouse.c,v 1.57 2019/08/19 21:19:38 bru Exp $ */
+/* $OpenBSD: wsmouse.c,v 1.64 2020/03/24 12:34:14 anton Exp $ */
 /* $NetBSD: wsmouse.c,v 1.35 2005/02/27 00:27:52 perry Exp $ */
 
 /*
@@ -143,7 +143,7 @@ void	wsmouse_attach(struct device *, struct device *, void *);
 int	wsmouse_detach(struct device *, int);
 int	wsmouse_activate(struct device *, int);
 
-int	wsmouse_do_ioctl(struct wsmouse_softc *, u_long, caddr_t, 
+int	wsmouse_do_ioctl(struct wsmouse_softc *, u_long, caddr_t,
 			      int, struct proc *);
 
 #if NWSMUX > 0
@@ -151,7 +151,7 @@ int	wsmouse_mux_open(struct wsevsrc *, struct wseventvar *);
 int	wsmouse_mux_close(struct wsevsrc *);
 #endif
 
-int	wsmousedoioctl(struct device *, u_long, caddr_t, int, 
+int	wsmousedoioctl(struct device *, u_long, caddr_t, int,
 			    struct proc *);
 int	wsmousedoopen(struct wsmouse_softc *, struct wseventvar *);
 
@@ -332,12 +332,8 @@ wsmouseopen(dev_t dev, int flags, int mode, struct proc *p)
 		return (EBUSY);
 
 	error = wsmousedoopen(sc, evar);
-	if (error) {
-		DPRINTF(("%s: %s open failed\n", __func__,
-			 sc->sc_base.me_dv.dv_xname));
-		sc->sc_base.me_evp = NULL;
+	if (error)
 		wsevent_fini(evar);
-	}
 	return (error);
 }
 
@@ -377,12 +373,20 @@ wsmouseclose(dev_t dev, int flags, int mode, struct proc *p)
 int
 wsmousedoopen(struct wsmouse_softc *sc, struct wseventvar *evp)
 {
+	int error;
+
+	/* The device could already be attached to a mux. */
+	if (sc->sc_base.me_evp != NULL)
+		return (EBUSY);
 	sc->sc_base.me_evp = evp;
 
 	wsmouse_input_reset(&sc->sc_input);
 
 	/* enable the device, and punt if that's not possible */
-	return (*sc->sc_accessops->enable)(sc->sc_accesscookie);
+	error = (*sc->sc_accessops->enable)(sc->sc_accesscookie);
+	if (error)
+		sc->sc_base.me_evp = NULL;
+	return (error);
 }
 
 int
@@ -483,6 +487,7 @@ wsmouse_do_ioctl(struct wsmouse_softc *sc, u_long cmd, caddr_t data, int flag,
 
 	switch (cmd) {
 	case FIOASYNC:
+	case FIOSETOWN:
 	case TIOCSPGRP:
 		if ((flag & FWRITE) == 0)
 			return (EACCES);
@@ -498,20 +503,20 @@ wsmouse_do_ioctl(struct wsmouse_softc *sc, u_long cmd, caddr_t data, int flag,
 		sc->sc_base.me_evp->async = *(int *)data != 0;
 		return (0);
 
+	case FIOGETOWN:
 	case TIOCGPGRP:
 		evar = sc->sc_base.me_evp;
 		if (evar == NULL)
 			return (EINVAL);
-		*(int *)data = -sigio_getown(&evar->sigio);
+		sigio_getown(&evar->sigio, cmd, data);
 		return (0);
 
+	case FIOSETOWN:
 	case TIOCSPGRP:
-		if (*(int *)data < 0)
-			return (EINVAL);
 		evar = sc->sc_base.me_evp;
 		if (evar == NULL)
 			return (EINVAL);
-		return (sigio_setown(&evar->sigio, -*(int *)data));
+		return (sigio_setown(&evar->sigio, cmd, data));
 
 	case WSMOUSEIO_GETPARAMS:
 	case WSMOUSEIO_SETPARAMS:
@@ -555,10 +560,7 @@ wsmouse_mux_open(struct wsevsrc *me, struct wseventvar *evp)
 {
 	struct wsmouse_softc *sc = (struct wsmouse_softc *)me;
 
-	if (sc->sc_base.me_evp != NULL)
-		return (EBUSY);
-
-	return wsmousedoopen(sc, evp);
+	return (wsmousedoopen(sc, evp));
 }
 
 int
@@ -769,7 +771,7 @@ wsmouse_set(struct device *sc, enum wsmouseval type, int value, int aux)
 		wsmouse_position(sc, value, input->motion.pos.y);
 		return;
 	case WSMOUSE_REL_Y:
-		value += input->motion.pos.y;
+		value += input->motion.pos.y; /* fall through */
 	case WSMOUSE_ABS_Y:
 		wsmouse_position(sc, input->motion.pos.x, value);
 		return;
@@ -795,7 +797,7 @@ wsmouse_set(struct device *sc, enum wsmouseval type, int value, int aux)
 		wsmouse_mtstate(sc, aux, value, mts->pos.y, mts->pressure);
 		return;
 	case WSMOUSE_MT_REL_Y:
-		value += mts->pos.y;
+		value += mts->pos.y; /* fall through */
 	case WSMOUSE_MT_ABS_Y:
 		wsmouse_mtstate(sc, aux, mts->pos.x, value, mts->pressure);
 		return;

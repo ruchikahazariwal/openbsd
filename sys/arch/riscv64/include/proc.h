@@ -35,7 +35,7 @@
 #define _MACHINE_PROC_H_
 
 /*
- * Machine-dependent part of the proc structure for arm64.
+ * Machine-dependent part of the proc structure for riscv64.
  */
 struct mdproc {
 	volatile int md_astpending;

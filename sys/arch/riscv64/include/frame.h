@@ -50,18 +50,18 @@
 #define clockframe trapframe
 typedef struct trapframe {
 	/* Standard Registers */
-	int64_t tf_ra;
-	int64_t tf_sp;
-	int64_t tf_gp;
-	int64_t tf_tp;
-	int64_t tf_t[7];
-	int64_t tf_s[12];
-	int64_t tf_a[8];
+	register_t tf_ra;
+	register_t tf_sp;
+	register_t tf_gp;
+	register_t tf_tp;
+	register_t tf_t[7];
+	register_t tf_s[12];
+	register_t tf_a[8];
 	/* Supervisor Trap CSRs */
-	int64_t tf_sepc;
-	int64_t tf_sstatus;
-	int64_t tf_stval;
-	int64_t tf_scause;
+	register_t tf_sepc;
+	register_t tf_sstatus;
+	register_t tf_stval;
+	register_t tf_scause;
 } trapframe_t;
 
 /*
@@ -81,12 +81,13 @@ struct sigframe {
  * Stack frame inside cpu_switch()
  */
 struct switchframe {
-	int64_t sf_s[12];
+	register_t sf_s[12];
+	register_t sf_ra;
 };
 
 struct callframe {
 	struct callframe *f_frame;
-	int64_t f_ra;
+	register_t f_ra;
 };
 
 #endif /* !_LOCORE */

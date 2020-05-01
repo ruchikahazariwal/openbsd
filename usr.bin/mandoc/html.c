@@ -1,7 +1,7 @@
-/*	$OpenBSD: html.c,v 1.132 2019/09/05 13:34:55 schwarze Exp $ */
+/* $OpenBSD: html.c,v 1.141 2020/04/20 12:59:24 schwarze Exp $ */
 /*
+ * Copyright (c) 2011-2015, 2017-2020 Ingo Schwarze <schwarze@openbsd.org>
  * Copyright (c) 2008-2011, 2014 Kristaps Dzonsons <kristaps@bsd.lv>
- * Copyright (c) 2011-2015, 2017-2019 Ingo Schwarze <schwarze@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -14,6 +14,9 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * Common functions for mandoc(1) HTML formatters.
+ * For use by individual formatters and by the main program.
  */
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -86,6 +89,7 @@ static	const struct htmldata htmltags[TAG_MAX] = {
 	{"span",	HTML_INPHRASE | HTML_TOPHRASE},
 	{"var",		HTML_INPHRASE | HTML_TOPHRASE},
 	{"br",		HTML_INPHRASE | HTML_NOSTACK | HTML_NLALL},
+	{"mark",	HTML_INPHRASE },
 	{"math",	HTML_INPHRASE | HTML_NLALL | HTML_INDENT},
 	{"mrow",	0},
 	{"mi",		0},
@@ -106,6 +110,11 @@ static	const struct htmldata htmltags[TAG_MAX] = {
 };
 
 /* Avoid duplicate HTML id= attributes. */
+
+struct	id_entry {
+	int	 ord;	/* Ordinal number of the latest occurrence. */
+	char	 id[];	/* The id= attribute without any ordinal suffix. */
+};
 static	struct ohash	 id_unique;
 
 static	void	 html_reset_internal(struct html *);
@@ -140,7 +149,7 @@ html_alloc(const struct manoutput *outopts)
 	if (outopts->toc)
 		h->oflags |= HTML_TOC;
 
-	mandoc_ohash_init(&id_unique, 4, 0);
+	mandoc_ohash_init(&id_unique, 4, offsetof(struct id_entry, id));
 
 	return h;
 }
@@ -149,17 +158,17 @@ static void
 html_reset_internal(struct html *h)
 {
 	struct tag	*tag;
-	char		*cp;
+	struct id_entry	*entry;
 	unsigned int	 slot;
 
 	while ((tag = h->tag) != NULL) {
 		h->tag = tag->next;
 		free(tag);
 	}
-	cp = ohash_first(&id_unique, &slot);
-	while (cp != NULL) {
-		free(cp);
-		cp = ohash_next(&id_unique, &slot);
+	entry = ohash_first(&id_unique, &slot);
+	while (entry != NULL) {
+		free(entry);
+		entry = ohash_next(&id_unique, &slot);
 	}
 	ohash_delete(&id_unique);
 }
@@ -168,7 +177,7 @@ void
 html_reset(void *p)
 {
 	html_reset_internal(p);
-	mandoc_ohash_init(&id_unique, 4, 0);
+	mandoc_ohash_init(&id_unique, 4, offsetof(struct id_entry, id));
 }
 
 void
@@ -318,33 +327,66 @@ html_fillmode(struct html *h, enum roff_tok want)
 	return had;
 }
 
+/*
+ * Allocate a string to be used for the "id=" attribute of an HTML
+ * element and/or as a segment identifier for a URI in an <a> element.
+ * The function may fail and return NULL if the node lacks text data
+ * to create the attribute from.
+ * The caller is responsible for free(3)ing the returned string.
+ *
+ * If the "unique" argument is non-zero, the "id_unique" ohash table
+ * is used for de-duplication.  If the "unique" argument is 1,
+ * it is the first time the function is called for this tag and
+ * location, so if an ordinal suffix is needed, it is incremented.
+ * If the "unique" argument is 2, it is the second time the function
+ * is called for this tag and location, so the ordinal suffix
+ * remains unchanged.
+ */
 char *
 html_make_id(const struct roff_node *n, int unique)
 {
 	const struct roff_node	*nch;
-	char			*buf, *bufs, *cp;
+	struct id_entry		*entry;
+	char			*buf, *cp;
+	size_t			 len;
 	unsigned int		 slot;
-	int			 suffix;
 
-	for (nch = n->child; nch != NULL; nch = nch->next)
-		if (nch->type != ROFFT_TEXT)
-			return NULL;
-
-	buf = NULL;
-	deroff(&buf, n);
-	if (buf == NULL)
-		return NULL;
+	if (n->tag != NULL)
+		buf = mandoc_strdup(n->tag);
+	else {
+		switch (n->tok) {
+		case MDOC_Sh:
+		case MDOC_Ss:
+		case MDOC_Sx:
+		case MAN_SH:
+		case MAN_SS:
+			for (nch = n->child; nch != NULL; nch = nch->next)
+				if (nch->type != ROFFT_TEXT)
+					return NULL;
+			buf = NULL;
+			deroff(&buf, n);
+			if (buf == NULL)
+				return NULL;
+			break;
+		default:
+			if (n->child == NULL || n->child->type != ROFFT_TEXT)
+				return NULL;
+			buf = mandoc_strdup(n->child->string);
+			break;
+		}
+	}
 
 	/*
 	 * In ID attributes, only use ASCII characters that are
 	 * permitted in URL-fragment strings according to the
 	 * explicit list at:
 	 * https://url.spec.whatwg.org/#url-fragment-string
+	 * In addition, reserve '~' for ordinal suffixes.
 	 */
 
 	for (cp = buf; *cp != '\0'; cp++)
 		if (isalnum((unsigned char)*cp) == 0 &&
-		    strchr("!$&'()*+,-./:;=?@_~", *cp) == NULL)
+		    strchr("!$&'()*+,-./:;=?@_", *cp) == NULL)
 			*cp = '_';
 
 	if (unique == 0)
@@ -352,25 +394,21 @@ html_make_id(const struct roff_node *n, int unique)
 
 	/* Avoid duplicate HTML id= attributes. */
 
-	bufs = NULL;
-	suffix = 1;
 	slot = ohash_qlookup(&id_unique, buf);
-	cp = ohash_find(&id_unique, slot);
-	if (cp != NULL) {
-		while (cp != NULL) {
-			free(bufs);
-			if (++suffix > 127) {
-				free(buf);
-				return NULL;
-			}
-			mandoc_asprintf(&bufs, "%s_%d", buf, suffix);
-			slot = ohash_qlookup(&id_unique, bufs);
-			cp = ohash_find(&id_unique, slot);
-		}
-		free(buf);
-		buf = bufs;
+	if ((entry = ohash_find(&id_unique, slot)) == NULL) {
+		len = strlen(buf) + 1;
+		entry = mandoc_malloc(sizeof(*entry) + len);
+		entry->ord = 1;
+		memcpy(entry->id, buf, len);
+		ohash_insert(&id_unique, slot, entry);
+	} else if (unique == 1)
+		entry->ord++;
+
+	if (entry->ord > 1) {
+		cp = buf;
+		mandoc_asprintf(&buf, "%s~%d", cp, entry->ord);
+		free(cp);
 	}
-	ohash_insert(&id_unique, slot, buf);
 	return buf;
 }
 
@@ -733,6 +771,49 @@ print_otag(struct html *h, enum htmltag tag, const char *fmt, ...)
 	return t;
 }
 
+/*
+ * Print an element with an optional "id=" attribute.
+ * If the element has phrasing content and an "id=" attribute,
+ * also add a permalink: outside if it can be in phrasing context,
+ * inside otherwise.
+ */
+struct tag *
+print_otag_id(struct html *h, enum htmltag elemtype, const char *cattr,
+    struct roff_node *n)
+{
+	struct roff_node *nch;
+	struct tag	*ret, *t;
+	char		*id, *href;
+
+	ret = NULL;
+	id = href = NULL;
+	if (n->flags & NODE_ID)
+		id = html_make_id(n, 1);
+	if (n->flags & NODE_HREF)
+		href = id == NULL ? html_make_id(n, 2) : id;
+	if (href != NULL && htmltags[elemtype].flags & HTML_INPHRASE)
+		ret = print_otag(h, TAG_A, "chR", "permalink", href);
+	t = print_otag(h, elemtype, "ci", cattr, id);
+	if (ret == NULL) {
+		ret = t;
+		if (href != NULL && (nch = n->child) != NULL) {
+			/* man(7) is safe, it tags phrasing content only. */
+			if (n->tok > MDOC_MAX ||
+			    htmltags[elemtype].flags & HTML_TOPHRASE)
+				nch = NULL;
+			else  /* For mdoc(7), beware of nested blocks. */
+				while (nch != NULL && nch->type == ROFFT_TEXT)
+					nch = nch->next;
+			if (nch == NULL)
+				print_otag(h, TAG_A, "chR", "permalink", href);
+		}
+	}
+	free(id);
+	if (id == NULL)
+		free(href);
+	return ret;
+}
+
 static void
 print_ctag(struct html *h, struct tag *tag)
 {
@@ -802,6 +883,15 @@ print_gen_comment(struct html *h, struct roff_node *n)
 void
 print_text(struct html *h, const char *word)
 {
+	print_tagged_text(h, word, NULL);
+}
+
+void
+print_tagged_text(struct html *h, const char *word, struct roff_node *n)
+{
+	struct tag	*t;
+	char		*href;
+
 	/*
 	 * Always wrap text in a paragraph unless already contained in
 	 * some flow container; never put it directly into a section.
@@ -822,13 +912,20 @@ print_text(struct html *h, const char *word)
 	}
 
 	/*
-	 * Print the text, optionally surrounded by HTML whitespace,
-	 * optionally manually switching fonts before and after.
+	 * Optionally switch fonts, optionally write a permalink, then
+	 * print the text, optionally surrounded by HTML whitespace.
 	 */
 
 	assert(h->metaf == NULL);
 	print_metaf(h);
 	print_indent(h);
+
+	if (n != NULL && (href = html_make_id(n, 2)) != NULL) {
+		t = print_otag(h, TAG_A, "chR", "permalink", href);
+		free(href);
+	} else
+		t = NULL;
+
 	if ( ! print_encode(h, word, NULL, 0)) {
 		if ( ! (h->flags & HTML_NONOSPACE))
 			h->flags &= ~HTML_NOSPACE;
@@ -839,7 +936,8 @@ print_text(struct html *h, const char *word)
 	if (h->metaf != NULL) {
 		print_tagq(h, h->metaf);
 		h->metaf = NULL;
-	}
+	} else if (t != NULL)
+		print_tagq(h, t);
 
 	h->flags &= ~HTML_IGNDELIM;
 }

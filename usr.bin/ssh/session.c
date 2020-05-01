@@ -1,4 +1,4 @@
-/* $OpenBSD: session.c,v 1.316 2019/06/28 13:35:04 deraadt Exp $ */
+/* $OpenBSD: session.c,v 1.319 2020/03/13 03:17:07 djm Exp $ */
 /*
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
  *                    All rights reserved
@@ -52,6 +52,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include <unistd.h>
 #include <limits.h>
 
@@ -849,7 +850,7 @@ do_setup_env(struct ssh *ssh, Session *s, const char *shell)
 
 #ifdef GSSAPI
 	/* Allow any GSSAPI methods that we've used to alter
-	 * the childs environment as they see fit
+	 * the child's environment as they see fit
 	 */
 	ssh_gssapi_do_child(&env, &envsize);
 #endif
@@ -1322,7 +1323,7 @@ do_child(struct ssh *ssh, Session *s, const char *command)
 	do_rc_files(ssh, s, shell);
 
 	/* restore SIGPIPE for child */
-	signal(SIGPIPE, SIG_DFL);
+	ssh_signal(SIGPIPE, SIG_DFL);
 
 	if (s->is_subsystem == SUBSYSTEM_INT_SFTP_ERROR) {
 		error("Connection from %s: refusing non-sftp session",
@@ -2084,7 +2085,7 @@ session_exit_message(struct ssh *ssh, Session *s, int status)
 	/*
 	 * Adjust cleanup callback attachment to send close messages when
 	 * the channel gets EOF. The session will be then be closed
-	 * by session_close_by_channel when the childs close their fds.
+	 * by session_close_by_channel when the child sessions close their fds.
 	 */
 	channel_register_cleanup(ssh, c->self, session_close_by_channel, 1);
 

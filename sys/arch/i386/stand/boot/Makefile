@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.69 2019/08/03 15:22:20 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.72 2020/03/21 14:54:06 otto Exp $
 
 COPTS?=
 MAN?=	boot.8
@@ -36,13 +36,18 @@ SRCS+=	softraid_i386.c
 .endif
 
 .PATH:	${S}/lib/libsa
-SRCS+=	alloc.c ctime.c exit.c getchar.c memcmp.c memcpy.c memmove.c memset.c printf.c \
+SRCS+=	alloc.c ctime.c exit.c getchar.c hexdump.c \
+	memcmp.c memcpy.c memmove.c memset.c printf.c \
 	putchar.c snprintf.c strcmp.c strerror.c strlen.c strncmp.c strncpy.c \
 	strtol.c strtoll.c
 SRCS+=	close.c closeall.c cons.c cread.c dev.c disklabel.c dkcksum.c fchmod.c \
 	fstat.c lseek.c open.c read.c readdir.c stat.c
-SRCS+=	elf32.c elf64.c loadfile.c
+SRCS+=	elf32.c elf64.c loadfile.c arc4.c
 SRCS+=	ufs.c
+.if empty(COPTS:M-DFDBOOT)
+SRCS+=	ufs2.c
+.endif
+
 .if ${SOFTRAID:L} == "yes"
 SRCS+=	aes_xts.c bcrypt_pbkdf.c blowfish.c explicit_bzero.c hmac_sha1.c \
 	pkcs5_pbkdf2.c rijndael.c sha1.c sha2.c softraid.c

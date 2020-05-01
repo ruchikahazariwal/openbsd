@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_vfsops.c,v 1.181 2019/07/25 01:43:21 cheloha Exp $	*/
+/*	$OpenBSD: ffs_vfsops.c,v 1.183 2020/02/21 11:11:15 otto Exp $	*/
 /*	$NetBSD: ffs_vfsops.c,v 1.19 1996/02/09 22:22:26 christos Exp $	*/
 
 /*
@@ -73,19 +73,19 @@ void ffs1_compat_read(struct fs *, struct ufsmount *, daddr_t);
 void ffs1_compat_write(struct fs *, struct ufsmount *);
 
 const struct vfsops ffs_vfsops = {
-	ffs_mount,
-	ufs_start,
-	ffs_unmount,
-	ufs_root,
-	ufs_quotactl,
-	ffs_statfs,
-	ffs_sync,
-	ffs_vget,
-	ffs_fhtovp,
-	ffs_vptofh,
-	ffs_init,
-	ffs_sysctl,
-	ufs_check_export
+	.vfs_mount	= ffs_mount,
+	.vfs_start	= ufs_start,
+	.vfs_unmount	= ffs_unmount,
+	.vfs_root	= ufs_root,
+	.vfs_quotactl	= ufs_quotactl,
+	.vfs_statfs	= ffs_statfs,
+	.vfs_sync	= ffs_sync,
+	.vfs_vget	= ffs_vget,
+	.vfs_fhtovp	= ffs_fhtovp,
+	.vfs_vptofh	= ffs_vptofh,
+	.vfs_init	= ffs_init,
+	.vfs_sysctl	= ffs_sysctl,
+	.vfs_checkexp	= ufs_check_export,
 };
 
 struct inode_vtbl ffs_vtbl = {
@@ -533,8 +533,14 @@ ffs_reload_vnode(struct vnode *vp, void *args)
 		return (error);
 	}
 
-	*ip->i_din1 = *((struct ufs1_dinode *)bp->b_data +
-	    ino_to_fsbo(fra->fs, ip->i_number));
+	if (fra->fs->fs_magic == FS_UFS1_MAGIC)
+		*ip->i_din1 = *((struct ufs1_dinode *)bp->b_data +
+		    ino_to_fsbo(fra->fs, ip->i_number));
+#ifdef FFS2
+	else
+		*ip->i_din2 = *((struct ufs2_dinode *)bp->b_data +
+		    ino_to_fsbo(fra->fs, ip->i_number));
+#endif /* FFS2 */
 	ip->i_effnlink = DIP(ip, nlink);
 	brelse(bp);
 	vput(vp);

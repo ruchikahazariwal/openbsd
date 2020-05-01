@@ -1,4 +1,4 @@
-/* $OpenBSD: tty.c,v 1.332 2019/09/19 08:56:37 nicm Exp $ */
+/* $OpenBSD: tty.c,v 1.363 2020/04/21 06:32:40 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -74,7 +74,7 @@ static void	tty_default_attributes(struct tty *, struct window_pane *,
 		    u_int);
 
 #define tty_use_margin(tty) \
-	((tty)->term_type == TTY_VT420)
+	(tty->term->flags & TERM_DECSLRM)
 
 #define tty_pane_full_width(tty, ctx) \
 	((ctx)->xoff == 0 && screen_size_x((ctx)->wp->screen) >= (tty)->sx)
@@ -96,28 +96,18 @@ tty_create_log(void)
 }
 
 int
-tty_init(struct tty *tty, struct client *c, int fd, char *term)
+tty_init(struct tty *tty, struct client *c, int fd)
 {
 	if (!isatty(fd))
 		return (-1);
 
 	memset(tty, 0, sizeof *tty);
 
-	if (term == NULL || *term == '\0')
-		tty->term_name = xstrdup("unknown");
-	else
-		tty->term_name = xstrdup(term);
-
 	tty->fd = fd;
 	tty->client = c;
 
 	tty->cstyle = 0;
 	tty->ccolour = xstrdup("");
-
-	tty->flags = 0;
-
-	tty->term_flags = 0;
-	tty->term_type = TTY_UNKNOWN;
 
 	return (0);
 }
@@ -127,29 +117,40 @@ tty_resize(struct tty *tty)
 {
 	struct client	*c = tty->client;
 	struct winsize	 ws;
-	u_int		 sx, sy;
+	u_int		 sx, sy, xpixel, ypixel;
 
 	if (ioctl(tty->fd, TIOCGWINSZ, &ws) != -1) {
 		sx = ws.ws_col;
-		if (sx == 0)
+		if (sx == 0) {
 			sx = 80;
+			xpixel = 0;
+		} else
+			xpixel = ws.ws_xpixel / sx;
 		sy = ws.ws_row;
-		if (sy == 0)
+		if (sy == 0) {
 			sy = 24;
+			ypixel = 0;
+		} else
+			ypixel = ws.ws_ypixel / sy;
 	} else {
 		sx = 80;
 		sy = 24;
+		xpixel = 0;
+		ypixel = 0;
 	}
-	log_debug("%s: %s now %ux%u", __func__, c->name, sx, sy);
-	tty_set_size(tty, sx, sy);
+	log_debug("%s: %s now %ux%u (%ux%u)", __func__, c->name, sx, sy,
+	    xpixel, ypixel);
+	tty_set_size(tty, sx, sy, xpixel, ypixel);
 	tty_invalidate(tty);
 }
 
 void
-tty_set_size(struct tty *tty, u_int sx, u_int sy)
+tty_set_size(struct tty *tty, u_int sx, u_int sy, u_int xpixel, u_int ypixel)
 {
 	tty->sx = sx;
 	tty->sy = sy;
+	tty->xpixel = xpixel;
+	tty->ypixel = ypixel;
 }
 
 static void
@@ -247,7 +248,10 @@ tty_write_callback(__unused int fd, __unused short events, void *data)
 int
 tty_open(struct tty *tty, char **cause)
 {
-	tty->term = tty_term_find(tty->term_name, tty->fd, cause);
+	struct client	*c = tty->client;
+
+	tty->term = tty_term_create(tty, c->term_name, &c->term_features,
+	    tty->fd, cause);
 	if (tty->term == NULL) {
 		tty_close(tty);
 		return (-1);
@@ -276,11 +280,22 @@ tty_open(struct tty *tty, char **cause)
 	return (0);
 }
 
+static void
+tty_start_timer_callback(__unused int fd, __unused short events, void *data)
+{
+	struct tty	*tty = data;
+	struct client	*c = tty->client;
+
+	log_debug("%s: start timer fired", c->name);
+	tty->flags |= (TTY_HAVEDA|TTY_HAVEDSR);
+}
+
 void
 tty_start_tty(struct tty *tty)
 {
 	struct client	*c = tty->client;
 	struct termios	 tio;
+	struct timeval	 tv = { .tv_sec = 1 };
 
 	if (tty->fd != -1 && tcgetattr(tty->fd, &tty->tio) == 0) {
 		setblocking(tty->fd, 0);
@@ -310,25 +325,46 @@ tty_start_tty(struct tty *tty)
 		log_debug("%s: using UTF-8 for ACS", c->name);
 
 	tty_putcode(tty, TTYC_CNORM);
-	if (tty_term_has(tty->term, TTYC_KMOUS))
-		tty_puts(tty, "\033[?1000l\033[?1002l\033[?1006l\033[?1005l");
+	if (tty_term_has(tty->term, TTYC_KMOUS)) {
+		tty_puts(tty, "\033[?1000l\033[?1002l\033[?1003l");
+		tty_puts(tty, "\033[?1006l\033[?1005l");
+	}
 
 	if (tty_term_flag(tty->term, TTYC_XT)) {
 		if (options_get_number(global_options, "focus-events")) {
 			tty->flags |= TTY_FOCUS;
 			tty_puts(tty, "\033[?1004h");
 		}
-		tty_puts(tty, "\033[c");
+		tty_puts(tty, "\033[?7727h");
 	}
+
+	evtimer_set(&tty->start_timer, tty_start_timer_callback, tty);
+	evtimer_add(&tty->start_timer, &tv);
 
 	tty->flags |= TTY_STARTED;
 	tty_invalidate(tty);
 
-	tty_force_cursor_colour(tty, "");
+	if (*tty->ccolour != '\0')
+		tty_force_cursor_colour(tty, "");
 
 	tty->mouse_drag_flag = 0;
 	tty->mouse_drag_update = NULL;
 	tty->mouse_drag_release = NULL;
+}
+
+void
+tty_send_requests(struct tty *tty)
+{
+	if (~tty->flags & TTY_STARTED)
+		return;
+
+	if (tty_term_flag(tty->term, TTYC_XT)) {
+		if (~tty->flags & TTY_HAVEDA)
+			tty_puts(tty, "\033[>c");
+		if (~tty->flags & TTY_HAVEDSR)
+			tty_puts(tty, "\033[1337n");
+	} else
+		tty->flags |= (TTY_HAVEDA|TTY_HAVEDSR);
 }
 
 void
@@ -339,6 +375,8 @@ tty_stop_tty(struct tty *tty)
 	if (!(tty->flags & TTY_STARTED))
 		return;
 	tty->flags &= ~TTY_STARTED;
+
+	evtimer_del(&tty->start_timer);
 
 	event_del(&tty->timer);
 	tty->flags &= ~TTY_BLOCK;
@@ -370,17 +408,21 @@ tty_stop_tty(struct tty *tty)
 	}
 	if (tty->mode & MODE_BRACKETPASTE)
 		tty_raw(tty, "\033[?2004l");
-	tty_raw(tty, tty_term_string(tty->term, TTYC_CR));
+	if (*tty->ccolour != '\0')
+		tty_raw(tty, tty_term_string(tty->term, TTYC_CR));
 
 	tty_raw(tty, tty_term_string(tty->term, TTYC_CNORM));
-	if (tty_term_has(tty->term, TTYC_KMOUS))
-		tty_raw(tty, "\033[?1000l\033[?1002l\033[?1006l\033[?1005l");
+	if (tty_term_has(tty->term, TTYC_KMOUS)) {
+		tty_raw(tty, "\033[?1000l\033[?1002l\033[?1003l");
+		tty_raw(tty, "\033[?1006l\033[?1005l");
+	}
 
 	if (tty_term_flag(tty->term, TTYC_XT)) {
 		if (tty->flags & TTY_FOCUS) {
 			tty->flags &= ~TTY_FOCUS;
 			tty_raw(tty, "\033[?1004l");
 		}
+		tty_raw(tty, "\033[?7727l");
 	}
 
 	if (tty_use_margin(tty))
@@ -419,15 +461,16 @@ void
 tty_free(struct tty *tty)
 {
 	tty_close(tty);
-
 	free(tty->ccolour);
-	free(tty->term_name);
 }
 
 void
-tty_set_type(struct tty *tty, int type)
+tty_update_features(struct tty *tty)
 {
-	tty->term_type = type;
+	struct client	*c = tty->client;
+
+	if (tty_apply_features(tty->term, c->term_features))
+		tty_term_apply_overrides(tty->term);
 
 	if (tty_use_margin(tty))
 		tty_puts(tty, "\033[?69h"); /* DECLRMM */
@@ -530,7 +573,7 @@ tty_putc(struct tty *tty, u_char ch)
 {
 	const char	*acs;
 
-	if ((tty->term->flags & TERM_EARLYWRAP) &&
+	if ((tty->term->flags & TERM_NOXENL) &&
 	    ch >= 0x20 && ch != 0x7f &&
 	    tty->cy == tty->sy - 1 &&
 	    tty->cx + 1 >= tty->sx)
@@ -556,7 +599,7 @@ tty_putc(struct tty *tty, u_char ch)
 			 * where we think it should be after a line wrap - this
 			 * means it works on sensible terminals as well.
 			 */
-			if (tty->term->flags & TERM_EARLYWRAP)
+			if (tty->term->flags & TERM_NOXENL)
 				tty_putcode2(tty, TTYC_CUP, tty->cy, tty->cx);
 		} else
 			tty->cx++;
@@ -566,7 +609,7 @@ tty_putc(struct tty *tty, u_char ch)
 void
 tty_putn(struct tty *tty, const void *buf, size_t len, u_int width)
 {
-	if ((tty->term->flags & TERM_EARLYWRAP) &&
+	if ((tty->term->flags & TERM_NOXENL) &&
 	    tty->cy == tty->sy - 1 &&
 	    tty->cx + len >= tty->sx)
 		len = tty->sx - tty->cx - 1;
@@ -623,7 +666,8 @@ tty_force_cursor_colour(struct tty *tty, const char *ccolour)
 void
 tty_update_mode(struct tty *tty, int mode, struct screen *s)
 {
-	int	changed;
+	struct client	*c = tty->client;
+	int		 changed;
 
 	if (s != NULL && strcmp(s->ccolour, tty->ccolour) != 0)
 		tty_force_cursor_colour(tty, s->ccolour);
@@ -632,6 +676,8 @@ tty_update_mode(struct tty *tty, int mode, struct screen *s)
 		mode &= ~MODE_CURSOR;
 
 	changed = mode ^ tty->mode;
+	log_debug("%s: update mode %x to %x", c->name, tty->mode, mode);
+
 	if (changed & MODE_BLINKING) {
 		if (tty_term_has(tty->term, TTYC_CVVIS))
 			tty_putcode(tty, TTYC_CVVIS);
@@ -655,28 +701,31 @@ tty_update_mode(struct tty *tty, int mode, struct screen *s)
 		}
 		tty->cstyle = s->cstyle;
 	}
-	if (changed & ALL_MOUSE_MODES) {
-		if (mode & ALL_MOUSE_MODES) {
-			/*
-			 * Enable the SGR (1006) extension unconditionally, as
-			 * it is safe from misinterpretation.
-			 */
-			tty_puts(tty, "\033[?1006h");
-			if (mode & MODE_MOUSE_ALL)
-				tty_puts(tty, "\033[?1003h");
-			else if (mode & MODE_MOUSE_BUTTON)
-				tty_puts(tty, "\033[?1002h");
-			else if (mode & MODE_MOUSE_STANDARD)
-				tty_puts(tty, "\033[?1000h");
-		} else {
-			if (tty->mode & MODE_MOUSE_ALL)
-				tty_puts(tty, "\033[?1003l");
-			else if (tty->mode & MODE_MOUSE_BUTTON)
-				tty_puts(tty, "\033[?1002l");
-			else if (tty->mode & MODE_MOUSE_STANDARD)
-				tty_puts(tty, "\033[?1000l");
+	if ((changed & ALL_MOUSE_MODES) &&
+	    tty_term_has(tty->term, TTYC_KMOUS)) {
+		if ((mode & ALL_MOUSE_MODES) == 0)
 			tty_puts(tty, "\033[?1006l");
-		}
+		if ((changed & MODE_MOUSE_STANDARD) &&
+		    (~mode & MODE_MOUSE_STANDARD))
+			tty_puts(tty, "\033[?1000l");
+		if ((changed & MODE_MOUSE_BUTTON) &&
+		    (~mode & MODE_MOUSE_BUTTON))
+			tty_puts(tty, "\033[?1002l");
+		if ((changed & MODE_MOUSE_ALL) &&
+		    (~mode & MODE_MOUSE_ALL))
+			tty_puts(tty, "\033[?1003l");
+
+		if (mode & ALL_MOUSE_MODES)
+			tty_puts(tty, "\033[?1006h");
+		if ((changed & MODE_MOUSE_STANDARD) &&
+		    (mode & MODE_MOUSE_STANDARD))
+			tty_puts(tty, "\033[?1000h");
+		if ((changed & MODE_MOUSE_BUTTON) &&
+		    (mode & MODE_MOUSE_BUTTON))
+			tty_puts(tty, "\033[?1002h");
+		if ((changed & MODE_MOUSE_ALL) &&
+		    (mode & MODE_MOUSE_ALL))
+			tty_puts(tty, "\033[?1003h");
 	}
 	if (changed & MODE_BRACKETPASTE) {
 		if (mode & MODE_BRACKETPASTE)
@@ -883,6 +932,7 @@ tty_fake_bce(const struct tty *tty, struct window_pane *wp, u_int bg)
 static void
 tty_redraw_region(struct tty *tty, const struct tty_ctx *ctx)
 {
+	struct client		*c = tty->client;
 	struct window_pane	*wp = ctx->wp;
 	struct screen		*s = wp->screen;
 	u_int			 i;
@@ -892,6 +942,7 @@ tty_redraw_region(struct tty *tty, const struct tty_ctx *ctx)
 	 * likely to be followed by some more scrolling.
 	 */
 	if (tty_large_region(tty, ctx)) {
+		log_debug("%s: %s, large redraw of %%%u", __func__, c->name, wp->id);
 		wp->flags |= PANE_REDRAW;
 		return;
 	}
@@ -1116,7 +1167,7 @@ tty_clear_area(struct tty *tty, struct window_pane *wp, u_int py, u_int ny,
 		 * background colour isn't default (because it doesn't work
 		 * after SGR 0).
 		 */
-		if (tty->term_type == TTY_VT420 && !COLOUR_DEFAULT(bg)) {
+		if ((tty->term->flags & TERM_DECFRA) && !COLOUR_DEFAULT(bg)) {
 			xsnprintf(tmp, sizeof tmp, "\033[32;%u;%u;%u;%u$x",
 			    py + 1, px + 1, py + ny, px + nx);
 			tty_puts(tty, tmp);
@@ -1195,7 +1246,7 @@ tty_check_codeset(struct tty *tty, const struct grid_cell *gc)
 		return (gc);
 
 	/* UTF-8 terminal and a UTF-8 character - fine. */
-	if (tty->flags & TTY_UTF8)
+	if (tty->client->flags & CLIENT_UTF8)
 		return (gc);
 
 	/* Replace by the right number of underscores. */
@@ -1206,6 +1257,16 @@ tty_check_codeset(struct tty *tty, const struct grid_cell *gc)
 	new.data.size = n;
 	memset(new.data.data, '_', n);
 	return (&new);
+}
+
+static int
+tty_check_overlay(struct tty *tty, u_int px, u_int py)
+{
+	struct client	*c = tty->client;
+
+	if (c->overlay_check == NULL)
+		return (1);
+	return (c->overlay_check(c, px, py));
 }
 
 void
@@ -1287,7 +1348,8 @@ tty_draw_line(struct tty *tty, struct window_pane *wp, struct screen *s,
 		grid_view_get_cell(gd, px + i, py, &gc);
 		gcp = tty_check_codeset(tty, &gc);
 		if (len != 0 &&
-		    ((gcp->attr & GRID_ATTR_CHARSET) ||
+		    (!tty_check_overlay(tty, atx + ux + width, aty) ||
+		    (gcp->attr & GRID_ATTR_CHARSET) ||
 		    gcp->flags != last.flags ||
 		    gcp->attr != last.attr ||
 		    gcp->fg != last.fg ||
@@ -1316,7 +1378,9 @@ tty_draw_line(struct tty *tty, struct window_pane *wp, struct screen *s,
 			screen_select_cell(s, &last, gcp);
 		else
 			memcpy(&last, gcp, sizeof last);
-		if (ux + gcp->data.width > nx) {
+		if (!tty_check_overlay(tty, atx + ux, aty))
+			ux += gcp->data.width;
+		else if (ux + gcp->data.width > nx) {
 			tty_attributes(tty, &last, wp);
 			tty_cursor(tty, atx + ux, aty);
 			for (j = 0; j < gcp->data.width; j++) {
@@ -1330,7 +1394,7 @@ tty_draw_line(struct tty *tty, struct window_pane *wp, struct screen *s,
 			tty_cursor(tty, atx + ux, aty);
 			for (j = 0; j < gcp->data.size; j++)
 				tty_putc(tty, gcp->data.data[j]);
-			ux += gc.data.width;
+			ux += gcp->data.width;
 		} else {
 			memcpy(buf + len, gcp->data.data, gcp->data.size);
 			len += gcp->data.size;
@@ -1359,6 +1423,36 @@ tty_draw_line(struct tty *tty, struct window_pane *wp, struct screen *s,
 
 	tty->flags = (tty->flags & ~TTY_NOCURSOR) | flags;
 	tty_update_mode(tty, tty->mode, s);
+}
+
+void
+tty_sync_start(struct tty *tty)
+{
+	if (tty->flags & TTY_BLOCK)
+		return;
+	if (tty->flags & TTY_SYNCING)
+		return;
+	tty->flags |= TTY_SYNCING;
+
+	if (tty_term_has(tty->term, TTYC_SYNC)) {
+		log_debug("%s sync start", tty->client->name);
+		tty_putcode1(tty, TTYC_SYNC, 1);
+	}
+}
+
+void
+tty_sync_end(struct tty *tty)
+{
+	if (tty->flags & TTY_BLOCK)
+		return;
+	if (~tty->flags & TTY_SYNCING)
+		return;
+	tty->flags &= ~TTY_SYNCING;
+
+	if (tty_term_has(tty->term, TTYC_SYNC)) {
+ 		log_debug("%s sync end", tty->client->name);
+		tty_putcode1(tty, TTYC_SYNC, 2);
+	}
 }
 
 static int
@@ -1392,6 +1486,15 @@ tty_write(void (*cmdfn)(struct tty *, const struct tty_ctx *),
 	TAILQ_FOREACH(c, &clients, entry) {
 		if (!tty_client_ready(c, wp))
 			continue;
+		if (c->flags & CLIENT_REDRAWPANES) {
+			/*
+			 * Redraw is already deferred to redraw another pane -
+			 * redraw this one also when that happens.
+			 */
+			log_debug("adding %%%u to deferred redraw", wp->id);
+			wp->flags |= PANE_REDRAW;
+			break;
+		}
 
 		ctx->bigger = tty_window_offset(&c->tty, &ctx->ox, &ctx->oy,
 		    &ctx->sx, &ctx->sy);
@@ -1651,7 +1754,10 @@ tty_cmd_scrollup(struct tty *tty, const struct tty_ctx *ctx)
 		for (i = 0; i < ctx->num; i++)
 			tty_putc(tty, '\n');
 	} else {
-		tty_cursor(tty, 0, tty->cy);
+		if (tty->cy == UINT_MAX)
+			tty_cursor(tty, 0, 0);
+		else
+			tty_cursor(tty, 0, tty->cy);
 		tty_putcode1(tty, TTYC_INDN, ctx->num);
 	}
 }
@@ -1811,7 +1917,7 @@ tty_cmd_cells(struct tty *tty, const struct tty_ctx *ctx)
 	    ctx->xoff + ctx->ocx + ctx->num > ctx->ox + ctx->sx)) {
 		if (!ctx->wrapped ||
 		    !tty_pane_full_width(tty, ctx) ||
-		    (tty->term->flags & TERM_EARLYWRAP) ||
+		    (tty->term->flags & TERM_NOXENL) ||
 		    ctx->xoff + ctx->ocx != 0 ||
 		    ctx->yoff + ctx->ocy != tty->cy + 1 ||
 		    tty->cx < tty->sx ||
@@ -1854,13 +1960,19 @@ tty_cmd_rawstring(struct tty *tty, const struct tty_ctx *ctx)
 	tty_invalidate(tty);
 }
 
+void
+tty_cmd_syncstart(struct tty *tty, __unused const struct tty_ctx *ctx)
+{
+	tty_sync_start(tty);
+}
+
 static void
 tty_cell(struct tty *tty, const struct grid_cell *gc, struct window_pane *wp)
 {
 	const struct grid_cell	*gcp;
 
 	/* Skip last character if terminal is stupid. */
-	if ((tty->term->flags & TERM_EARLYWRAP) &&
+	if ((tty->term->flags & TERM_NOXENL) &&
 	    tty->cy == tty->sy - 1 &&
 	    tty->cx == tty->sx - 1)
 		return;
@@ -1963,8 +2075,12 @@ tty_region(struct tty *tty, u_int rupper, u_int rlower)
 	 * flag so further output causes a line feed). As a workaround, do an
 	 * explicit move to 0 first.
 	 */
-	if (tty->cx >= tty->sx)
-		tty_cursor(tty, 0, tty->cy);
+	if (tty->cx >= tty->sx) {
+		if (tty->cy == UINT_MAX)
+			tty_cursor(tty, 0, 0);
+		else
+			tty_cursor(tty, 0, tty->cy);
+	}
 
 	tty_putcode2(tty, TTYC_CSR, tty->rupper, tty->rlower);
 	tty->cx = tty->cy = UINT_MAX;
@@ -2019,7 +2135,7 @@ tty_cursor_pane_unless_wrap(struct tty *tty, const struct tty_ctx *ctx,
 {
 	if (!ctx->wrapped ||
 	    !tty_pane_full_width(tty, ctx) ||
-	    (tty->term->flags & TERM_EARLYWRAP) ||
+	    (tty->term->flags & TERM_NOXENL) ||
 	    ctx->xoff + cx != 0 ||
 	    ctx->yoff + cy != tty->cy + 1 ||
 	    tty->cx < tty->sx ||
@@ -2043,6 +2159,9 @@ tty_cursor(struct tty *tty, u_int cx, u_int cy)
 	struct tty_term	*term = tty->term;
 	u_int		 thisx, thisy;
 	int		 change;
+
+	if (tty->flags & TTY_BLOCK)
+		return;
 
 	if (cx > tty->sx - 1)
 		cx = tty->sx - 1;
@@ -2106,7 +2225,9 @@ tty_cursor(struct tty *tty, u_int cx, u_int cy)
 		if ((u_int) abs(change) > cx && tty_term_has(term, TTYC_HPA)) {
 			tty_putcode1(tty, TTYC_HPA, cx);
 			goto out;
-		} else if (change > 0 && tty_term_has(term, TTYC_CUB)) {
+		} else if (change > 0 &&
+		    tty_term_has(term, TTYC_CUB) &&
+		    !tty_use_margin(tty)) {
 			if (change == 2 && tty_term_has(term, TTYC_CUB1)) {
 				tty_putcode(tty, TTYC_CUB1);
 				tty_putcode(tty, TTYC_CUB1);
@@ -2114,7 +2235,9 @@ tty_cursor(struct tty *tty, u_int cx, u_int cy)
 			}
 			tty_putcode1(tty, TTYC_CUB, change);
 			goto out;
-		} else if (change < 0 && tty_term_has(term, TTYC_CUF)) {
+		} else if (change < 0 &&
+		    tty_term_has(term, TTYC_CUF) &&
+		    !tty_use_margin(tty)) {
 			tty_putcode1(tty, TTYC_CUF, -change);
 			goto out;
 		}
@@ -2352,15 +2475,14 @@ tty_check_fg(struct tty *tty, struct window_pane *wp, struct grid_cell *gc)
 	/* Is this a 24-bit colour? */
 	if (gc->fg & COLOUR_FLAG_RGB) {
 		/* Not a 24-bit terminal? Translate to 256-colour palette. */
-		if (!tty_term_has(tty->term, TTYC_SETRGBF)) {
-			colour_split_rgb(gc->fg, &r, &g, &b);
-			gc->fg = colour_find_rgb(r, g, b);
-		} else
+		if (tty->term->flags & TERM_RGBCOLOURS)
 			return;
+		colour_split_rgb(gc->fg, &r, &g, &b);
+		gc->fg = colour_find_rgb(r, g, b);
 	}
 
 	/* How many colours does this terminal have? */
-	if ((tty->term->flags|tty->term_flags) & TERM_256COLOURS)
+	if (tty->term->flags & TERM_256COLOURS)
 		colours = 256;
 	else
 		colours = tty_term_number(tty->term, TTYC_COLORS);
@@ -2402,15 +2524,14 @@ tty_check_bg(struct tty *tty, struct window_pane *wp, struct grid_cell *gc)
 	/* Is this a 24-bit colour? */
 	if (gc->bg & COLOUR_FLAG_RGB) {
 		/* Not a 24-bit terminal? Translate to 256-colour palette. */
-		if (!tty_term_has(tty->term, TTYC_SETRGBB)) {
-			colour_split_rgb(gc->bg, &r, &g, &b);
-			gc->bg = colour_find_rgb(r, g, b);
-		} else
+		if (tty->term->flags & TERM_RGBCOLOURS)
 			return;
+		colour_split_rgb(gc->bg, &r, &g, &b);
+		gc->bg = colour_find_rgb(r, g, b);
 	}
 
 	/* How many colours does this terminal have? */
-	if ((tty->term->flags|tty->term_flags) & TERM_256COLOURS)
+	if (tty->term->flags & TERM_256COLOURS)
 		colours = 256;
 	else
 		colours = tty_term_number(tty->term, TTYC_COLORS);
@@ -2439,7 +2560,8 @@ tty_check_bg(struct tty *tty, struct window_pane *wp, struct grid_cell *gc)
 }
 
 static void
-tty_check_us(__unused struct tty *tty, struct window_pane *wp, struct grid_cell *gc)
+tty_check_us(__unused struct tty *tty, struct window_pane *wp,
+    struct grid_cell *gc)
 {
 	int	c;
 
@@ -2470,7 +2592,7 @@ tty_colours_fg(struct tty *tty, const struct grid_cell *gc)
 
 	/* Is this an aixterm bright colour? */
 	if (gc->fg >= 90 && gc->fg <= 97) {
-		if (tty->term_flags & TERM_256COLOURS) {
+		if (tty->term->flags & TERM_256COLOURS) {
 			xsnprintf(s, sizeof s, "\033[%dm", gc->fg);
 			tty_puts(tty, s);
 		} else
@@ -2502,7 +2624,7 @@ tty_colours_bg(struct tty *tty, const struct grid_cell *gc)
 
 	/* Is this an aixterm bright colour? */
 	if (gc->bg >= 90 && gc->bg <= 97) {
-		if (tty->term_flags & TERM_256COLOURS) {
+		if (tty->term->flags & TERM_256COLOURS) {
 			xsnprintf(s, sizeof s, "\033[%dm", gc->bg + 10);
 			tty_puts(tty, s);
 		} else
@@ -2547,62 +2669,25 @@ static int
 tty_try_colour(struct tty *tty, int colour, const char *type)
 {
 	u_char	r, g, b;
-	char	s[32];
 
 	if (colour & COLOUR_FLAG_256) {
-		/*
-		 * If the user has specified -2 to the client (meaning
-		 * TERM_256COLOURS is set), setaf and setab may not work (or
-		 * they may not want to use them), so send the usual sequence.
-		 *
-		 * Also if RGB is set, setaf and setab do not support the 256
-		 * colour palette so use the sequences directly there too.
-		 */
-		if ((tty->term_flags & TERM_256COLOURS) ||
-		    tty_term_has(tty->term, TTYC_RGB))
-			goto fallback_256;
-
-		/*
-		 * If the terminfo entry has 256 colours and setaf and setab
-		 * exist, assume that they work correctly.
-		 */
-		if (tty->term->flags & TERM_256COLOURS) {
-			if (*type == '3') {
-				if (!tty_term_has(tty->term, TTYC_SETAF))
-					goto fallback_256;
-				tty_putcode1(tty, TTYC_SETAF, colour & 0xff);
-			} else {
-				if (!tty_term_has(tty->term, TTYC_SETAB))
-					goto fallback_256;
-				tty_putcode1(tty, TTYC_SETAB, colour & 0xff);
-			}
-			return (0);
-		}
-		goto fallback_256;
+		if (*type == '3' && tty_term_has(tty->term, TTYC_SETAF))
+			tty_putcode1(tty, TTYC_SETAF, colour & 0xff);
+		else if (tty_term_has(tty->term, TTYC_SETAB))
+			tty_putcode1(tty, TTYC_SETAB, colour & 0xff);
+		return (0);
 	}
 
 	if (colour & COLOUR_FLAG_RGB) {
-		if (*type == '3') {
-			if (!tty_term_has(tty->term, TTYC_SETRGBF))
-				return (-1);
-			colour_split_rgb(colour & 0xffffff, &r, &g, &b);
+		colour_split_rgb(colour & 0xffffff, &r, &g, &b);
+		if (*type == '3' && tty_term_has(tty->term, TTYC_SETRGBF))
 			tty_putcode3(tty, TTYC_SETRGBF, r, g, b);
-		} else {
-			if (!tty_term_has(tty->term, TTYC_SETRGBB))
-				return (-1);
-			colour_split_rgb(colour & 0xffffff, &r, &g, &b);
+		else if (tty_term_has(tty->term, TTYC_SETRGBB))
 			tty_putcode3(tty, TTYC_SETRGBB, r, g, b);
-		}
 		return (0);
 	}
 
 	return (-1);
-
-fallback_256:
-	xsnprintf(s, sizeof s, "\033[%s;5;%dm", type, colour & 0xff);
-	log_debug("%s: 256 colour fallback: %s", tty->client->name, s);
-	tty_puts(tty, s);
-	return (0);
 }
 
 static void

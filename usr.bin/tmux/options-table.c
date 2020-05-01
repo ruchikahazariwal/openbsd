@@ -1,4 +1,4 @@
-/* $OpenBSD: options-table.c,v 1.111 2019/09/19 09:02:30 nicm Exp $ */
+/* $OpenBSD: options-table.c,v 1.120 2020/04/22 06:57:13 nicm Exp $ */
 
 /*
  * Copyright (c) 2011 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -70,7 +70,10 @@ static const char *options_table_window_size_list[] = {
 /* Status line format. */
 #define OPTIONS_TABLE_STATUS_FORMAT1 \
 	"#[align=left range=left #{status-left-style}]" \
-	"#{T;=/#{status-left-length}:status-left}#[norange default]" \
+	"#[push-default]" \
+	"#{T;=/#{status-left-length}:status-left}" \
+	"#[pop-default]" \
+	"#[norange default]" \
 	"#[list=on align=#{status-justify}]" \
 	"#[list=left-marker]<#[list=right-marker]>#[list=on]" \
 	"#{W:" \
@@ -126,7 +129,10 @@ static const char *options_table_window_size_list[] = {
 		"#{?window_end_flag,,#{window-status-separator}}" \
 	"}" \
 	"#[nolist align=right range=right #{status-right-style}]" \
-	"#{T;=/#{status-right-length}:status-right}#[norange default]"
+	"#[push-default]" \
+	"#{T;=/#{status-right-length}:status-right}" \
+	"#[pop-default]" \
+	"#[norange default]"
 #define OPTIONS_TABLE_STATUS_FORMAT2 \
 	"#[align=centre]#{P:#{?pane_active,#[reverse],}" \
 	"#{pane_index}[#{pane_width}x#{pane_height}]#[default] }"
@@ -134,7 +140,7 @@ static const char *options_table_status_format_default[] = {
 	OPTIONS_TABLE_STATUS_FORMAT1, OPTIONS_TABLE_STATUS_FORMAT2, NULL
 };
 
-/* Helper for hook options. */
+/* Helpers for hook options. */
 #define OPTIONS_TABLE_HOOK(hook_name, default_value) \
 	{ .name = hook_name, \
 	  .type = OPTIONS_TABLE_COMMAND, \
@@ -144,9 +150,33 @@ static const char *options_table_status_format_default[] = {
 	  .separator = "" \
 	}
 
+#define OPTIONS_TABLE_PANE_HOOK(hook_name, default_value) \
+	{ .name = hook_name, \
+	  .type = OPTIONS_TABLE_COMMAND, \
+	  .scope = OPTIONS_TABLE_WINDOW|OPTIONS_TABLE_PANE, \
+	  .flags = OPTIONS_TABLE_IS_ARRAY|OPTIONS_TABLE_IS_HOOK, \
+	  .default_str = default_value,	\
+	  .separator = "" \
+	}
+
+#define OPTIONS_TABLE_WINDOW_HOOK(hook_name, default_value) \
+	{ .name = hook_name, \
+	  .type = OPTIONS_TABLE_COMMAND, \
+	  .scope = OPTIONS_TABLE_WINDOW, \
+	  .flags = OPTIONS_TABLE_IS_ARRAY|OPTIONS_TABLE_IS_HOOK, \
+	  .default_str = default_value,	\
+	  .separator = "" \
+	}
+
 /* Top-level options. */
 const struct options_table_entry options_table[] = {
 	/* Server options. */
+	{ .name = "backspace",
+	  .type = OPTIONS_TABLE_KEY,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_num = '\177',
+	},
+
 	{ .name = "buffer-limit",
 	  .type = OPTIONS_TABLE_NUMBER,
 	  .scope = OPTIONS_TABLE_SERVER,
@@ -166,6 +196,12 @@ const struct options_table_entry options_table[] = {
 			 "choose-window=choose-tree -w,"
 			 "choose-session=choose-tree -s",
 	  .separator = ","
+	},
+
+	{ .name = "copy-command",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_str = ""
 	},
 
 	{ .name = "default-terminal",
@@ -225,9 +261,16 @@ const struct options_table_entry options_table[] = {
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .flags = OPTIONS_TABLE_IS_ARRAY,
-	  .default_str = "xterm*:XT:Ms=\\E]52;%p1%s;%p2%s\\007"
-			 ":Cs=\\E]12;%p1%s\\007:Cr=\\E]112\\007"
-			 ":Ss=\\E[%p1%d q:Se=\\E[2 q,screen*:XT",
+	  .default_str = "tmux*:XT,screen*:XT,xterm*:XT",
+	  .separator = ","
+	},
+
+	{ .name = "terminal-features",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_ARRAY,
+	  .default_str = "xterm*:clipboard:ccolour:cstyle:title,"
+	                 "screen*:title",
 	  .separator = ","
 	},
 
@@ -604,19 +647,15 @@ const struct options_table_entry options_table[] = {
 	},
 
 	{ .name = "main-pane-height",
-	  .type = OPTIONS_TABLE_NUMBER,
+	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW,
-	  .minimum = 1,
-	  .maximum = INT_MAX,
-	  .default_num = 24
+	  .default_str = "24"
 	},
 
 	{ .name = "main-pane-width",
-	  .type = OPTIONS_TABLE_NUMBER,
+	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW,
-	  .minimum = 1,
-	  .maximum = INT_MAX,
-	  .default_num = 80
+	  .default_str = "80"
 	},
 
 	{ .name = "mode-keys",
@@ -653,19 +692,15 @@ const struct options_table_entry options_table[] = {
 	},
 
 	{ .name = "other-pane-height",
-	  .type = OPTIONS_TABLE_NUMBER,
+	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW,
-	  .minimum = 0,
-	  .maximum = INT_MAX,
-	  .default_num = 0
+	  .default_str = "0"
 	},
 
 	{ .name = "other-pane-width",
-	  .type = OPTIONS_TABLE_NUMBER,
+	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW,
-	  .minimum = 0,
-	  .maximum = INT_MAX,
-	  .default_num = 0
+	  .default_str = "0"
 	},
 
 	{ .name = "pane-active-border-style",
@@ -724,7 +759,7 @@ const struct options_table_entry options_table[] = {
 	  .type = OPTIONS_TABLE_CHOICE,
 	  .scope = OPTIONS_TABLE_WINDOW,
 	  .choices = options_table_window_size_list,
-	  .default_num = WINDOW_SIZE_SMALLEST
+	  .default_num = WINDOW_SIZE_LATEST
 	},
 
 	{ .name = "window-style",
@@ -799,6 +834,7 @@ const struct options_table_entry options_table[] = {
 	OPTIONS_TABLE_HOOK("after-copy-mode", ""),
 	OPTIONS_TABLE_HOOK("after-display-message", ""),
 	OPTIONS_TABLE_HOOK("after-display-panes", ""),
+	OPTIONS_TABLE_HOOK("after-kill-pane", ""),
 	OPTIONS_TABLE_HOOK("after-list-buffers", ""),
 	OPTIONS_TABLE_HOOK("after-list-clients", ""),
 	OPTIONS_TABLE_HOOK("after-list-keys", ""),
@@ -838,21 +874,21 @@ const struct options_table_entry options_table[] = {
 	OPTIONS_TABLE_HOOK("client-detached", ""),
 	OPTIONS_TABLE_HOOK("client-resized", ""),
 	OPTIONS_TABLE_HOOK("client-session-changed", ""),
-	OPTIONS_TABLE_HOOK("pane-died", ""),
-	OPTIONS_TABLE_HOOK("pane-exited", ""),
-	OPTIONS_TABLE_HOOK("pane-focus-in", ""),
-	OPTIONS_TABLE_HOOK("pane-focus-out", ""),
-	OPTIONS_TABLE_HOOK("pane-mode-changed", ""),
-	OPTIONS_TABLE_HOOK("pane-set-clipboard", ""),
+	OPTIONS_TABLE_PANE_HOOK("pane-died", ""),
+	OPTIONS_TABLE_PANE_HOOK("pane-exited", ""),
+	OPTIONS_TABLE_PANE_HOOK("pane-focus-in", ""),
+	OPTIONS_TABLE_PANE_HOOK("pane-focus-out", ""),
+	OPTIONS_TABLE_PANE_HOOK("pane-mode-changed", ""),
+	OPTIONS_TABLE_PANE_HOOK("pane-set-clipboard", ""),
 	OPTIONS_TABLE_HOOK("session-closed", ""),
 	OPTIONS_TABLE_HOOK("session-created", ""),
 	OPTIONS_TABLE_HOOK("session-renamed", ""),
 	OPTIONS_TABLE_HOOK("session-window-changed", ""),
-	OPTIONS_TABLE_HOOK("window-layout-changed", ""),
-	OPTIONS_TABLE_HOOK("window-linked", ""),
-	OPTIONS_TABLE_HOOK("window-pane-changed", ""),
-	OPTIONS_TABLE_HOOK("window-renamed", ""),
-	OPTIONS_TABLE_HOOK("window-unlinked", ""),
+	OPTIONS_TABLE_WINDOW_HOOK("window-layout-changed", ""),
+	OPTIONS_TABLE_WINDOW_HOOK("window-linked", ""),
+	OPTIONS_TABLE_WINDOW_HOOK("window-pane-changed", ""),
+	OPTIONS_TABLE_WINDOW_HOOK("window-renamed", ""),
+	OPTIONS_TABLE_WINDOW_HOOK("window-unlinked", ""),
 
 	{ .name = NULL }
 };

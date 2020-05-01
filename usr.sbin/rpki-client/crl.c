@@ -1,4 +1,4 @@
-/*	$OpenBSD: crl.c,v 1.5 2019/08/13 13:27:26 claudio Exp $ */
+/*	$OpenBSD: crl.c,v 1.8 2020/04/02 09:16:43 claudio Exp $ */
 /*
  * Copyright (c) 2019 Kristaps Dzonsons <kristaps@bsd.lv>
  *
@@ -36,10 +36,16 @@ crl_parse(const char *fn, const unsigned char *dgst)
 	int		 rc = 0, sz;
 	X509_CRL	*x = NULL;
 	BIO		*bio = NULL, *shamd;
+	FILE		*f;
 	EVP_MD		*md;
 	char		 mdbuf[EVP_MAX_MD_SIZE];
 
-	if ((bio = BIO_new_file(fn, "rb")) == NULL) {
+	if ((f = fopen(fn, "rb")) == NULL) {
+		warn("%s", fn);
+		return NULL;
+	}
+
+	if ((bio = BIO_new_fp(f, BIO_CLOSE)) == NULL) {
 		if (verbose > 0)
 			cryptowarnx("%s: BIO_new_file", fn);
 		return NULL;
@@ -98,3 +104,18 @@ out:
 	return x;
 }
 
+static inline int
+crlcmp(struct crl *a, struct crl *b)
+{
+	return strcmp(a->aki, b->aki);
+}
+
+RB_GENERATE(crl_tree, crl, entry, crlcmp);
+
+void
+free_crl(struct crl *crl)
+{
+	free(crl->aki);
+	X509_CRL_free(crl->x509_crl);
+	free(crl);
+}

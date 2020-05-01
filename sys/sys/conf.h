@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.h,v 1.145 2018/08/31 04:20:37 visa Exp $	*/
+/*	$OpenBSD: conf.h,v 1.150 2020/04/21 08:29:27 mpi Exp $	*/
 /*	$NetBSD: conf.h,v 1.33 1996/05/03 20:03:32 christos Exp $	*/
 
 /*-
@@ -196,13 +196,6 @@ extern struct cdevsw cdevsw[];
 	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
 	(dev_type_mmap((*))) enodev , 0, 0, dev_init(c,n,kqfilter) }
 
-/* open, close, read, write, ioctl, poll, nokqfilter */
-#define	cdev_mousewr_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
-	(dev_type_mmap((*))) enodev }
-
 #define	cdev_notdef() { \
 	(dev_type_open((*))) enodev, (dev_type_close((*))) enodev, \
 	(dev_type_read((*))) enodev, (dev_type_write((*))) enodev, \
@@ -376,6 +369,13 @@ extern struct cdevsw cdevsw[];
 	0, dev_init(c,n,poll), (dev_type_mmap((*))) enodev, 0, 0, \
 	dev_init(c,n,kqfilter) }
 
+/* open, close, read, write, ioctl, poll, kqfilter */
+#define	cdev_fido_init(c,n) { \
+	dev_init(c,n,open), dev_init(c,uhid,close), dev_init(c,uhid,read), \
+	dev_init(c,uhid,write), dev_init(c,fido,ioctl), \
+	(dev_type_stop((*))) enodev, 0, dev_init(c,uhid,poll), \
+	(dev_type_mmap((*))) enodev, 0, 0, dev_init(c,uhid,kqfilter) }
+
 /* open, close, init */
 #define cdev_pci_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
@@ -460,6 +460,7 @@ extern struct cdevsw cdevsw[];
 	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
 	(dev_type_mmap((*))) enodev, 0, D_CLONE, dev_init(c,n,kqfilter) }
 
+/* open, close, ioctl */
 #define cdev_pvbus_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), \
 	(dev_type_read((*))) enodev, \
@@ -468,11 +469,11 @@ extern struct cdevsw cdevsw[];
 	(dev_type_stop((*))) enodev, 0, selfalse, \
 	(dev_type_mmap((*))) enodev }
 
-/* open, close, read, write, poll, ioctl, nokqfilter */
+/* open, close, ioctl */
 #define cdev_ipmi_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
 	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
+	(dev_type_stop((*))) enodev, 0, selfalse, \
 	(dev_type_mmap((*))) enodev, 0 }
 
 /* open, close, ioctl, mmap */
@@ -481,6 +482,13 @@ extern struct cdevsw cdevsw[];
 	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
 	(dev_type_stop((*))) enodev, 0, selfalse, \
 	(dev_init(c,n,mmap)), 0, D_CLONE }
+
+/* open, close, read, ioctl */
+#define cdev_dt_init(c,n) { \
+	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
+	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
+	(dev_type_stop((*))) enodev, 0, selfalse, \
+	(dev_type_mmap((*))) enodev, 0, D_CLONE }
 
 #endif
 
@@ -575,6 +583,8 @@ cdev_decl(rd);
 bdev_decl(uk);
 cdev_decl(uk);
 
+cdev_decl(dt);
+
 cdev_decl(diskmap);
 
 cdev_decl(bpf);
@@ -585,6 +595,7 @@ cdev_decl(tun);
 cdev_decl(tap);
 cdev_decl(switch);
 cdev_decl(pppx);
+cdev_decl(pppac);
 
 cdev_decl(random);
 
@@ -604,6 +615,7 @@ cdev_decl(bktr);
 cdev_decl(usb);
 cdev_decl(ugen);
 cdev_decl(uhid);
+cdev_decl(fido);
 cdev_decl(ucom);
 cdev_decl(ulpt);
 cdev_decl(urio);
