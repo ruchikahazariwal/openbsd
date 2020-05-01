@@ -161,7 +161,6 @@ vm_stats_complete(struct imsg *imsg, int *ret)
 {
 	struct vmop_result *vmr;
 	int res;
-	printf("%s: is being called",__func__);
 
 	if (imsg->hdr.type == IMSG_VMDOP_STATS_VM_RESPONSE) {
 		vmr = (struct vmop_result *)imsg->data;
@@ -177,7 +176,6 @@ vm_stats_complete(struct imsg *imsg, int *ret)
 		}
 	} else {
 		warnx("unexpected response received from vmd");
-		printf("%s: unexpected response received from vmd",__func__);
 		*ret = EINVAL;
 	}
 

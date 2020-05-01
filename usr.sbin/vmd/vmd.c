@@ -101,8 +101,6 @@ vmd_dispatch_control(int fd, struct privsep_proc *p, struct imsg *imsg)
 	uint32_t			 id = 0;
 	struct control_sock		*rcs;
 
-	printf("%s: is being called",__func__);
-
 	switch (imsg->hdr.type) {
 	case IMSG_VMDOP_BALLOON_VM_REQUEST:
 		IMSG_SIZE_CHECK(imsg, &vbp);
