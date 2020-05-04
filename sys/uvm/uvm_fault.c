@@ -534,6 +534,7 @@ ReFault:
 	/* check protection */
 	if ((ufi.entry->protection & access_type) != access_type) {
 		uvmfault_unlockmaps(&ufi, FALSE);
+		printf("%s: ufi.entry->protection & access_type)\n", __func__);
 		return (EACCES);
 	}
 
@@ -724,7 +725,10 @@ ReFault:
 		else if (result == VM_PAGER_REFAULT)
 			goto ReFault;		/* try again! */
 		else
+		{
+			printf("%s: uobj && shadowed == FALSE && uobj->pgops->pgo_fault != NULL\n", __func__);
 			return (EACCES);
+		}
 	}
 
 	/*
@@ -853,11 +857,13 @@ ReFault:
 		 * page -- this is the only error we return right
 		 * now.
 		 */
+		printf("%s: uvmfault_anonget\n", __func__);
 		return (EACCES);	/* XXX */
 	default:
 #ifdef DIAGNOSTIC
 		panic("uvm_fault: uvmfault_anonget -> %d", result);
 #else
+		printf("%s: default case\n", __func__);
 		return (EACCES);
 #endif
 	}
