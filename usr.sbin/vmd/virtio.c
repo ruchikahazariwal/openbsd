@@ -2872,10 +2872,10 @@ balloon_vm(struct vmd_vm *vm, uint32_t size)
 	log_debug("%s: received request to balloon %d pages", __func__,
 	    size);
 
-	if (viombh.num_pages > viombh.actual) {
-		viombh.cfg.isr_status |= VIRTIO_CONFIG_ISR_CONFIG_CHANGE;
-		vcpu_assert_pic_irq(viombh.vm_id, 0, viombh.irq);
-	}
+	//if (viombh.num_pages > viombh.actual) {
+	viombh.cfg.isr_status |= VIRTIO_CONFIG_ISR_CONFIG_CHANGE;
+	vcpu_assert_pic_irq(viombh.vm_id, 0, viombh.irq);
+	//}
 }
 
 void
