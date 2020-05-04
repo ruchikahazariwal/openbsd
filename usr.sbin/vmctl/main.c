@@ -90,7 +90,7 @@ struct ctl_command ctl_commands[] = {
 	{ "stop",	CMD_STOP,	ctl_stop,	"[-fw] [id | -a]" },
 	{ "unpause",	CMD_UNPAUSE,	ctl_unpause,	"id" },
 	{ "wait",	CMD_WAITFOR,	ctl_waitfor,	"id" },
-	{ "balloon",	CMD_BALLOON,	ctl_balloon,	"[-m size] id" },
+	{ "balloon",	CMD_BALLOON,	ctl_balloon,	"[-m size] [-d] id" },
 	{ "stats",	CMD_STATS,	ctl_stats,	"id" },
 	{ NULL }
 };
@@ -1110,6 +1110,9 @@ ctl_balloon(struct parse_result *res, int argc, char *argv[])
 			if (parse_size_balloon(res, optarg) != 0)
 				errx(1, "invalid memory size: %s", optarg);
 			break;
+		case 'd':
+			res->size = 0;
+			break;
 		default:
 			ctl_usage(res->ctl);
 			/* NOTREACHED */
@@ -1121,6 +1124,8 @@ ctl_balloon(struct parse_result *res, int argc, char *argv[])
 	if (argc != 1)
 		ctl_usage(res->ctl);
 
+	printf("%s: argv[0]:%c \n", argv[0]);
+	printf("%s: argv[1]:%c \n", argv[1]);
 	if (parse_vmid(res, argv[0], 0) == -1)
 		errx(1, "invalid id: %s", argv[1]);
 
