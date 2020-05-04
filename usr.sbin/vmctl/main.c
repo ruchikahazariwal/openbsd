@@ -1124,8 +1124,8 @@ ctl_balloon(struct parse_result *res, int argc, char *argv[])
 	if (argc != 1)
 		ctl_usage(res->ctl);
 
-	printf("%s: argv[0]:%c \n", __func__, argv[0]);
-	printf("%s: argv[1]:%c \n", __func__, argv[1]);
+	printf("%s: argv[0]:%s \n", __func__, argv[0]);
+	printf("%s: argv[1]:%s \n", __func__, argv[1]);
 	if (parse_vmid(res, argv[0], 0) == -1)
 		errx(1, "invalid id: %s", argv[1]);
 
