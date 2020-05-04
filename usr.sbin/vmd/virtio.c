@@ -2867,7 +2867,7 @@ virtio_start(struct vm_create_params *vcp)
 void
 balloon_vm(struct vmd_vm *vm, uint32_t size)
 {
-	viombh.num_pages = viombh.num_pages + size;
+	viombh.num_pages = size;
 
 	log_debug("%s: received request to balloon %d pages", __func__,
 	    size);
