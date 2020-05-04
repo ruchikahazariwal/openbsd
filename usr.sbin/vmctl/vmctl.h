@@ -81,6 +81,7 @@ int	 vmmaction(struct parse_result *);
 int	 parse_ifs(struct parse_result *, char *, int);
 int	 parse_network(struct parse_result *, char *);
 int	 parse_size(struct parse_result *, char *);
+int	 parse_size_balloon(struct parse_result *, char *);
 int	 parse_disktype(const char *, const char **);
 int	 parse_disk(struct parse_result *, char *, int);
 int	 parse_vmid(struct parse_result *, char *, int);
