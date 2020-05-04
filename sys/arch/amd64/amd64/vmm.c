@@ -565,11 +565,11 @@ vm_inflate_balloon(struct vm_inflate_balloon_params *vibp)
 
 		p = PHYS_TO_VM_PAGE(hpa);
 
-		printf("%s: removing EPT entry for GPA 0x%llx\n",
-		    __func__,
-		    (uint64_t)(vibp->vibp_buf_bl_pages[i] * PAGE_SIZE));
-		pmap_remove(pmap, (vibp->vibp_buf_bl_pages[i] * PAGE_SIZE),
-		    ((vibp->vibp_buf_bl_pages[i] + 1) * PAGE_SIZE));
+		// printf("%s: removing EPT entry for GPA 0x%llx\n",
+		//     __func__,
+		//     (uint64_t)(vibp->vibp_buf_bl_pages[i] * PAGE_SIZE));
+		// pmap_remove(pmap, (vibp->vibp_buf_bl_pages[i] * PAGE_SIZE),
+		//     ((vibp->vibp_buf_bl_pages[i] + 1) * PAGE_SIZE));
 
 		printf("%s: freeing vm_page 0x%llx\n", __func__,
 		    (uint64_t)p);
