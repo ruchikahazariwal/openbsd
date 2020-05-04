@@ -376,6 +376,26 @@ vmmaction(struct parse_result *res)
 		return (0);
 }
 
+int
+parse_size_balloon(struct parse_result *res, char *word)
+{
+	long long val = 0;
+
+	if (word != NULL) {
+		if (scan_scaled(word, &val) != 0) {
+			warn("invalid size: %s", word);
+			return (-1);
+		}
+	}
+
+	res->size = val / 1024 / 1024;
+
+	if ((res->size * 1024 * 1024) != val)
+		warnx("size rounded to %lld megabytes", res->size);
+
+	return (0);
+}
+
 void
 parse_free(struct parse_result *res)
 {
@@ -1087,7 +1107,7 @@ ctl_balloon(struct parse_result *res, int argc, char *argv[])
 		case 'm':
 			if (res->size)
 				errx(1, "memory specified multiple times");
-			if (parse_size(res, optarg) != 0)
+			if (parse_size_balloon(res, optarg) != 0)
 				errx(1, "invalid memory size: %s", optarg);
 			break;
 		default:
