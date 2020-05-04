@@ -376,26 +376,6 @@ vmmaction(struct parse_result *res)
 		return (0);
 }
 
-int
-parse_size_balloon(struct parse_result *res, char *word)
-{
-	long long val = 0;
-
-	if (word != NULL) {
-		if (scan_scaled(word, &val) != 0) {
-			warn("invalid size: %s", word);
-			return (-1);
-		}
-	}
-
-	res->size = val / 1024 / 1024;
-
-	if ((res->size * 1024 * 1024) != val)
-		warnx("size rounded to %lld megabytes", res->size);
-
-	return (0);
-}
-
 void
 parse_free(struct parse_result *res)
 {
@@ -1124,8 +1104,6 @@ ctl_balloon(struct parse_result *res, int argc, char *argv[])
 	if (argc != 1)
 		ctl_usage(res->ctl);
 
-	printf("%s: argv[0]:%s \n", __func__, argv[0]);
-	printf("%s: argv[1]:%s \n", __func__, argv[1]);
 	if (parse_vmid(res, argv[0], 0) == -1)
 		errx(1, "invalid id: %s", argv[1]);
 
