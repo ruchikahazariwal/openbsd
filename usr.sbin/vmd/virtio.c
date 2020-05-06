@@ -288,6 +288,8 @@ viombh_notifyq(void)
 			log_warnx("viombh: error writing vio ring");
 		}
 
+		printf("%s:memory balloon is deflated successfully\n",__func__);
+
 	}
 	/* Stats queue */
 	else if (viombh.cfg.queue_notify == 2)
@@ -304,9 +306,30 @@ viombh_notifyq(void)
 		sz = sz/(sizeof(struct virtio_balloon_stat));
 
 		for (i = 0; i < sz; i++) {
-			printf("%s: stats[%d]: tag=0x%x val=0x%llx\n", __func__, i,
-				buf_bl_stats[i].tag,
-				buf_bl_stats[i].val);
+			switch (i) {
+				case 0: printf("%s: stats[%d] for Swap pages in use: tag=0x%x val=0x%llx\n", __func__, i,
+							buf_bl_stats[i].tag, buf_bl_stats[i].val);
+					break;
+				case 1: printf("%s: stats[%d]for Pages swapped out: tag=0x%x val=0x%llx\n", __func__, i,
+							buf_bl_stats[i].tag, buf_bl_stats[i].val);
+					break;
+				case 2: printf("%s: stats[%d] for Faults: tag=0x%x val=0x%llx\n", __func__, i,
+							buf_bl_stats[i].tag, buf_bl_stats[i].val);
+					break;
+				case 3: printf("%s: stats[%d] for Free pages: tag=0x%x val=0x%llx\n", __func__, i,
+							buf_bl_stats[i].tag, buf_bl_stats[i].val);
+					break;
+				case 4: printf("%s: stats[%d] for Num pages: tag=0x%x val=0x%llx\n", __func__, i,
+							buf_bl_stats[i].tag, buf_bl_stats[i].val);
+					break;
+				case 5: printf("%s: stats[%d] for Number of Buffered Pages: tag=0x%x val=0x%llx\n", __func__, i,
+							buf_bl_stats[i].tag, buf_bl_stats[i].val);
+					break;
+				default: printf("%s: stats[%d]: tag=0x%x val=0x%llx\n", __func__, i,
+							buf_bl_stats[i].tag, buf_bl_stats[i].val);
+					break;
+
+			}
 		}
 		printf("%s: leaving\n", __func__);
 		free(buf_bl_stats);
