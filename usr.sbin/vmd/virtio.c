@@ -310,7 +310,7 @@ viombh_notifyq(void)
 				case 0: printf("%s: stats[%d] for Swap pages in use: tag=0x%x val=0x%llx\n", __func__, i,
 							buf_bl_stats[i].tag, buf_bl_stats[i].val);
 					break;
-				case 1: printf("%s: stats[%d]for Pages swapped out: tag=0x%x val=0x%llx\n", __func__, i,
+				case 1: printf("%s: stats[%d] for Pages swapped out: tag=0x%x val=0x%llx\n", __func__, i,
 							buf_bl_stats[i].tag, buf_bl_stats[i].val);
 					break;
 				case 2: printf("%s: stats[%d] for Faults: tag=0x%x val=0x%llx\n", __func__, i,
